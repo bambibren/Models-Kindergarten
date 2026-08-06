@@ -1,0 +1,172 @@
+import {
+  lstat,
+  mkdir,
+  readFile,
+  realpath,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+
+const MAX_FILE_BYTES = 256 * 1024;
+const MAX_PATH_LENGTH = 240;
+
+export interface SandboxWriteResult {
+  path: string;
+  oldText: string | null;
+  newText: string;
+}
+
+/**
+ * Agent 只看到相对路径。每次访问都会重新校验真实路径，拒绝绝对路径、
+ * 父目录穿越和符号链接，避免模型输入逃逸到宿主机其他位置。
+ */
+export class FileSandbox {
+  private rootReal?: string;
+
+  constructor(readonly root: string) {
+    if (!isAbsolute(root)) throw new Error("沙箱根目录必须是绝对路径");
+  }
+
+  async initialize(): Promise<void> {
+    await mkdir(this.root, { recursive: true });
+    this.rootReal = await realpath(this.root);
+  }
+
+  preview(input: string): string {
+    const parts = cleanParts(input);
+    const target = resolve(this.root, ...parts);
+    this.assertInside(target);
+    return target;
+  }
+
+  async readText(input: string): Promise<{ path: string; content: string }> {
+    await this.ensureReady();
+    const target = this.preview(input);
+    await this.assertSafeComponents(target, false);
+    const info = await stat(target);
+    if (!info.isFile()) throw new Error("目标不是普通文件");
+    if (info.size > MAX_FILE_BYTES) {
+      throw new Error(`文件超过 ${MAX_FILE_BYTES} 字节限制`);
+    }
+    return { path: target, content: await readFile(target, "utf8") };
+  }
+
+  async writeText(input: string, content: string): Promise<SandboxWriteResult> {
+    await this.ensureReady();
+    if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) {
+      throw new Error(`写入内容超过 ${MAX_FILE_BYTES} 字节限制`);
+    }
+
+    const target = this.preview(input);
+    const parent = resolve(target, "..");
+    await this.ensureSafeDirectory(parent);
+    await this.assertSafeTarget(target);
+
+    let oldText: string | null = null;
+    try {
+      const info = await stat(target);
+      if (!info.isFile()) throw new Error("目标不是普通文件");
+      if (info.size > MAX_FILE_BYTES) {
+        throw new Error(`原文件超过 ${MAX_FILE_BYTES} 字节限制`);
+      }
+      oldText = await readFile(target, "utf8");
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+
+    await writeFile(target, content, { encoding: "utf8", flag: "w" });
+    return { path: target, oldText, newText: content };
+  }
+
+  private async ensureReady(): Promise<void> {
+    if (!this.rootReal) await this.initialize();
+  }
+
+  private assertInside(target: string): void {
+    const rel = relative(this.root, target);
+    if (rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel))) {
+      return;
+    }
+    throw new Error("路径超出沙箱范围");
+  }
+
+  private async assertSafeComponents(target: string, allowMissing: boolean): Promise<void> {
+    const rel = relative(this.root, target);
+    let current = this.root;
+    for (const part of rel.split(sep).filter(Boolean)) {
+      current = resolve(current, part);
+      try {
+        const info = await lstat(current);
+        if (info.isSymbolicLink()) throw new Error("沙箱路径不允许符号链接");
+      } catch (error) {
+        if (allowMissing && isMissing(error)) return;
+        throw error;
+      }
+      const actual = await realpath(current);
+      this.assertRealInside(actual);
+    }
+  }
+
+  private async ensureSafeDirectory(target: string): Promise<void> {
+    this.assertInside(target);
+    const rel = relative(this.root, target);
+    let current = this.root;
+    for (const part of rel.split(sep).filter(Boolean)) {
+      current = resolve(current, part);
+      try {
+        const info = await lstat(current);
+        if (info.isSymbolicLink() || !info.isDirectory()) {
+          throw new Error("沙箱目录路径无效");
+        }
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+        await mkdir(current);
+      }
+      this.assertRealInside(await realpath(current));
+    }
+  }
+
+  private async assertSafeTarget(target: string): Promise<void> {
+    try {
+      const info = await lstat(target);
+      if (info.isSymbolicLink()) throw new Error("沙箱文件不允许符号链接");
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+  }
+
+  private assertRealInside(target: string): void {
+    const root = this.rootReal;
+    if (!root) throw new Error("沙箱尚未初始化");
+    const rel = relative(root, target);
+    if (rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel))) {
+      return;
+    }
+    throw new Error("真实路径超出沙箱范围");
+  }
+}
+
+function cleanParts(input: string): string[] {
+  if (typeof input !== "string" || input.length === 0) {
+    throw new Error("path 必须是非空字符串");
+  }
+  if (input.length > MAX_PATH_LENGTH) throw new Error("path 过长");
+  if (isAbsolute(input) || input.includes("\\")) {
+    throw new Error("path 必须使用沙箱内的相对 POSIX 路径");
+  }
+  const parts = input.split("/");
+  if (parts.some((part) => !part || part === "." || part === "..")) {
+    throw new Error("path 不允许空段、. 或 ..");
+  }
+  return parts;
+}
+
+function isMissing(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
