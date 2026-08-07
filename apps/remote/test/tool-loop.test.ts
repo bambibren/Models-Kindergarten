@@ -31,7 +31,7 @@ describe("Tool Loop", () => {
     await sandbox.initialize();
     const agent = new KindergartenAgent(
       new SessionRepository(join(dir, "data")),
-      new AgentRuntime(new ScriptedToolProvider(), new ToolRegistry(sandbox)),
+      AgentRuntime.fromRegistry(new ScriptedToolProvider(), new ToolRegistry(sandbox)),
     ).createApp();
 
     const updates: acp.SessionNotification[] = [];

@@ -1,20 +1,30 @@
-import type { ToolKind, ToolCallContent, ToolCallLocation } from "@agentclientprotocol/sdk";
-import type {
-  ModelToolDefinition,
-  ModelToolCall,
-} from "../model/model-provider.js";
+import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
+import type { ModelToolCall, ModelToolDefinition } from "../model/model-provider.js";
+import { ProcessSandbox } from "./process-sandbox.js";
 import { FileSandbox } from "./sandbox.js";
+import { WebAccess, type WebToolClient } from "./web-access.js";
+import { ToolExecutionError } from "./tool-error.js";
 
-export type ToolPermission = "none" | "write";
+export type PermissionMode = "allow" | "ask" | "always_ask" | "deny";
+export type ToolOutcomeStatus = "success" | "error" | "denied" | "duplicate_blocked";
+export type ToolErrorCategory =
+  | "validation"
+  | "permission"
+  | "timeout"
+  | "network"
+  | "execution"
+  | "dependency_unavailable";
 
 export interface PreparedToolCall {
   id: string;
-  name: string;
+  name: ToolName | string;
   title: string;
   kind: ToolKind;
   arguments: Record<string, unknown>;
-  permission: ToolPermission;
+  permission: PermissionMode;
   locations: ToolCallLocation[];
+  dedupeKey: string;
+  retry: "none" | "transient";
   validationError?: string;
 }
 
@@ -30,162 +40,292 @@ export interface ToolResult {
   locations: ToolCallLocation[];
 }
 
-type ToolName = "read_file" | "write_file" | "ask_user";
+export interface ToolOutcome extends ToolResult {
+  status: ToolOutcomeStatus;
+  retryable: boolean;
+  error?: {
+    code: string;
+    category: ToolErrorCategory;
+    message: string;
+  };
+}
 
-/** Tool Schema、参数校验和实际执行只有这一个入口。 */
+export type ToolName =
+  | "list_files"
+  | "read_file"
+  | "write_file"
+  | "run_command"
+  | "web_search"
+  | "web_fetch"
+  | "ask_user";
+
+/** Registry 只拥有 Tool Schema、参数规范化和具体 Handler。 */
 export class ToolRegistry {
   readonly definitions: ModelToolDefinition[] = definitions;
+  readonly process: ProcessSandbox;
+  readonly web: WebToolClient;
 
-  constructor(readonly sandbox: FileSandbox) {}
+  constructor(
+    readonly sandbox: FileSandbox,
+    process?: ProcessSandbox,
+    web?: WebToolClient,
+  ) {
+    this.process = process ?? new ProcessSandbox(sandbox);
+    this.web = web ?? new WebAccess();
+  }
 
   prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     const name = toolName(call.name);
-    // Ollama 的 call id 只属于一次模型响应；ACP toolCallId 由 Agent 生成并保证会话内唯一。
-    const id = fallbackId;
+    const id = call.id ?? fallbackId;
+    if (name === "list_files") {
+      const path = optionalStringArg(call.arguments, "path") ?? ".";
+      return prepared(id, name, `列出 ${path}`, "read", { path }, "allow", [], "none");
+    }
     if (name === "read_file") {
       const path = stringArg(call.arguments, "path");
-      return {
-        id,
-        name,
-        title: `读取 ${path}`,
-        kind: "read",
-        arguments: { path },
-        permission: "none",
-        locations: [{ path: this.sandbox.preview(path) }],
-      };
+      return prepared(id, name, `读取 ${path}`, "read", { path }, "allow", [
+        { path: this.sandbox.preview(path) },
+      ], "none");
     }
     if (name === "write_file") {
       const path = stringArg(call.arguments, "path");
       const content = stringArg(call.arguments, "content", true);
-      return {
+      return prepared(id, name, `写入 ${path}`, "edit", { path, content }, "ask", [
+        { path: this.sandbox.preview(path) },
+      ], "none");
+    }
+    if (name === "run_command") {
+      const command = stringArg(call.arguments, "command");
+      const cwd = optionalStringArg(call.arguments, "cwd") ?? ".";
+      const timeoutMs = optionalNumberArg(call.arguments, "timeout_ms");
+      return prepared(
         id,
         name,
-        title: `写入 ${path}`,
-        kind: "edit",
-        arguments: { path, content },
-        permission: "write",
-        locations: [{ path: this.sandbox.preview(path) }],
-      };
+        `运行 ${short(command, 60)}`,
+        "execute",
+        { command, cwd, ...(timeoutMs === undefined ? {} : { timeout_ms: timeoutMs }) },
+        "always_ask",
+        [],
+        "none",
+      );
+    }
+    if (name === "web_search") {
+      const query = stringArg(call.arguments, "query");
+      const maxResults = optionalNumberArg(call.arguments, "max_results") ?? 5;
+      return prepared(id, name, `搜索 ${short(query, 60)}`, "search", {
+        query,
+        max_results: maxResults,
+      }, "allow", [], "transient");
+    }
+    if (name === "web_fetch") {
+      const url = stringArg(call.arguments, "url");
+      return prepared(id, name, `读取 ${short(url, 72)}`, "fetch", { url }, "allow", [], "transient");
     }
     const question = stringArg(call.arguments, "question");
-    return {
-      id,
-      name,
-      title: "询问用户",
-      kind: "other",
-      arguments: { question },
-      permission: "none",
-      locations: [],
-    };
+    return prepared(id, name, "询问用户", "other", { question }, "allow", [], "none");
   }
 
   async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
     if (context.signal.aborted) throw new DOMException("已取消", "AbortError");
-
+    if (call.name === "list_files") {
+      const items = await this.sandbox.list(String(call.arguments.path));
+      return result(call, { items }, JSON.stringify(items, null, 2));
+    }
     if (call.name === "read_file") {
-      const result = await this.sandbox.readText(String(call.arguments.path));
-      return {
-        modelContent: result.content,
-        rawOutput: { path: result.path, content: result.content },
-        content: [{ type: "content", content: { type: "text", text: result.content } }],
-        locations: [{ path: result.path }],
-      };
+      const value = await this.sandbox.readText(String(call.arguments.path));
+      return result(call, { path: value.path, content: value.content }, value.content, [{ path: value.path }]);
     }
     if (call.name === "write_file") {
-      const result = await this.sandbox.writeText(
+      const value = await this.sandbox.writeText(
         String(call.arguments.path),
         String(call.arguments.content),
       );
+      const rawOutput = { path: value.path, bytes: Buffer.byteLength(value.newText, "utf8") };
       return {
-        modelContent: `已写入 ${call.arguments.path}`,
-        rawOutput: { path: result.path, bytes: Buffer.byteLength(result.newText, "utf8") },
-        content: [{
-          type: "diff",
-          path: result.path,
-          oldText: result.oldText,
-          newText: result.newText,
-        }],
-        locations: [{ path: result.path }],
+        modelContent: modelEnvelope(call, true, rawOutput),
+        rawOutput,
+        content: [{ type: "diff", path: value.path, oldText: value.oldText, newText: value.newText }],
+        locations: [{ path: value.path }],
       };
     }
-
+    if (call.name === "run_command") {
+      const value = await this.process.run(
+        String(call.arguments.command),
+        optionalStringArg(call.arguments, "cwd"),
+        optionalNumberArg(call.arguments, "timeout_ms"),
+        context.signal,
+      );
+      if (value.exitCode !== 0) {
+        throw new ToolExecutionError(
+          "command_failed",
+          "execution",
+          `命令执行失败（exit ${value.exitCode ?? "signal"}）`,
+          false,
+          value,
+        );
+      }
+      return result(call, value, modelEnvelope(call, true, value));
+    }
+    if (call.name === "web_search") {
+      const items = await this.web.search(
+        String(call.arguments.query),
+        Number(call.arguments.max_results),
+        context.signal,
+      );
+      return result(call, { results: items }, modelEnvelope(call, true, { results: items }));
+    }
+    if (call.name === "web_fetch") {
+      const value = await this.web.fetch(String(call.arguments.url), context.signal);
+      return result(call, value, modelEnvelope(call, true, value));
+    }
     if (call.name === "ask_user") {
       const answer = await context.askUser(String(call.arguments.question), call.id);
-      return {
-        modelContent: answer,
-        rawOutput: { answer },
-        content: [{ type: "content", content: { type: "text", text: answer } }],
-        locations: [],
-      };
+      return result(call, { answer }, modelEnvelope(call, true, { answer }));
     }
     throw new Error(`未知工具: ${call.name}`);
   }
 }
 
+function prepared(
+  id: string,
+  name: ToolName,
+  title: string,
+  kind: ToolKind,
+  args: Record<string, unknown>,
+  permission: PermissionMode,
+  locations: ToolCallLocation[],
+  retry: PreparedToolCall["retry"],
+): PreparedToolCall {
+  return {
+    id,
+    name,
+    title,
+    kind,
+    arguments: args,
+    permission,
+    locations,
+    dedupeKey: `${name}:${canonicalJson(args)}`,
+    retry,
+  };
+}
+
+function result(
+  call: PreparedToolCall,
+  rawOutput: unknown,
+  text: string,
+  locations: ToolCallLocation[] = call.locations,
+): ToolResult {
+  return {
+    modelContent: text.startsWith("{") ? text : modelEnvelope(call, true, rawOutput, text),
+    rawOutput,
+    content: [{ type: "content", content: { type: "text", text } }],
+    locations,
+  };
+}
+
+export function modelEnvelope(
+  call: Pick<PreparedToolCall, "id" | "name">,
+  ok: boolean,
+  value: unknown,
+  text?: string,
+): string {
+  return JSON.stringify({
+    ok,
+    tool: call.name,
+    toolCallId: call.id,
+    ...(ok ? { result: value } : { error: value }),
+    ...(text ? { text } : {}),
+    instruction: ok
+      ? "The tool operation completed. Do not repeat it unless the input must change."
+      : "The tool operation did not complete. Do not repeat identical arguments.",
+  });
+}
+
 const definitions: ModelToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: "read_file",
-      description: "读取 Models Kindergarten 沙箱中的 UTF-8 文本文件。path 必须是相对路径。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "沙箱内相对 POSIX 路径，例如 notes/today.md" },
-        },
-        required: ["path"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "write_file",
-      description: "在 Models Kindergarten 沙箱中创建或完整覆盖 UTF-8 文本文件。执行前需要用户授权。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "沙箱内相对 POSIX 路径" },
-          content: { type: "string", description: "要写入的完整文件内容" },
-        },
-        required: ["path", "content"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "ask_user",
-      description: "当完成任务确实缺少用户信息时，通过 ACP 表单询问一个明确问题并等待回答。",
-      parameters: {
-        type: "object",
-        properties: {
-          question: { type: "string", description: "需要用户回答的单个明确问题" },
-        },
-        required: ["question"],
-        additionalProperties: false,
-      },
-    },
-  },
+  definition("list_files", "列出沙箱目录中的文件和子目录。", {
+    path: { type: "string", description: "相对目录，默认 ." },
+  }),
+  definition("read_file", "读取沙箱中的 UTF-8 文本文件。", {
+    path: { type: "string", description: "沙箱内相对 POSIX 路径" },
+  }, ["path"]),
+  definition("write_file", "创建或完整覆盖沙箱中的 UTF-8 文本文件，执行前需要用户授权。", {
+    path: { type: "string", description: "沙箱内相对 POSIX 路径" },
+    content: { type: "string", description: "完整文件内容" },
+  }, ["path", "content"]),
+  definition("run_command", "在受限 macOS 沙箱中运行终端命令。每次执行都需要用户授权，不要重复相同命令。", {
+    command: { type: "string", description: "要运行的单条 shell 命令" },
+    cwd: { type: "string", description: "沙箱内相对工作目录，默认 ." },
+    timeout_ms: { type: "integer", description: "超时毫秒，最大 30000" },
+  }, ["command"]),
+  definition("web_search", "搜索公开网页并返回标题和 URL。", {
+    query: { type: "string", description: "搜索关键词" },
+    max_results: { type: "integer", description: "返回结果数，1 到 10" },
+  }, ["query"]),
+  definition("web_fetch", "读取一个公开 http/https 网页的正文，拒绝本机和私有网络地址。", {
+    url: { type: "string", description: "公开网页 URL" },
+  }, ["url"]),
+  definition("ask_user", "确实缺少必要信息时，通过 ACP 表单询问一个明确问题。", {
+    question: { type: "string", description: "需要用户回答的单个问题" },
+  }, ["question"]),
 ];
 
+function definition(
+  name: ToolName,
+  description: string,
+  properties: ModelToolDefinition["function"]["parameters"]["properties"],
+  required?: string[],
+): ModelToolDefinition {
+  return {
+    type: "function",
+    function: {
+      name,
+      description,
+      parameters: { type: "object", properties, ...(required ? { required } : {}), additionalProperties: false },
+    },
+  };
+}
+
 function toolName(value: string): ToolName {
-  if (value === "read_file" || value === "write_file" || value === "ask_user") {
-    return value;
-  }
+  const names: ToolName[] = [
+    "list_files", "read_file", "write_file", "run_command",
+    "web_search", "web_fetch", "ask_user",
+  ];
+  if (names.includes(value as ToolName)) return value as ToolName;
   throw new Error(`未知工具: ${value}`);
 }
 
-function stringArg(
-  input: Record<string, unknown>,
-  name: string,
-  allowEmpty = false,
-): string {
+function stringArg(input: Record<string, unknown>, name: string, allowEmpty = false): string {
   const value = input[name];
   if (typeof value !== "string" || (!allowEmpty && value.trim().length === 0)) {
     throw new Error(`${name} 必须是${allowEmpty ? "" : "非空"}字符串`);
   }
   return value;
+}
+
+function optionalStringArg(input: Record<string, unknown>, name: string): string | undefined {
+  const value = input[name];
+  if (value === undefined) return undefined;
+  return stringArg(input, name);
+}
+
+function optionalNumberArg(input: Record<string, unknown>, name: string): number | undefined {
+  const value = input[name];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${name} 必须是数字`);
+  return value;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .toSorted(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function short(value: string, length: number): string {
+  return value.length <= length ? value : `${value.slice(0, length)}…`;
 }

@@ -1,22 +1,22 @@
 import { randomUUID } from "node:crypto";
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
-import type {
-  ModelMessage,
-  ModelProvider,
-  ModelToolCall,
-} from "../model/model-provider.js";
-import type { StoredEntry } from "../repository/session-types.js";
+import { ContextBuilder } from "../conversation/context-builder.js";
+import type { ModelProvider, ModelToolCall } from "../model/model-provider.js";
+import type { SessionEntry } from "../repository/session-types.js";
+import { toRunFailure } from "./run-failure.js";
 import {
+  ToolCallLedger,
+  ToolRuntime,
+} from "../tools/tool-runtime.js";
+import type {
+  PreparedToolCall,
+  ToolOutcome,
   ToolRegistry,
-  type PreparedToolCall,
-  type ToolResult,
 } from "../tools/tool-registry.js";
-
-const MAX_MODEL_ROUNDS = 8;
 
 export interface RunInput {
   text: string;
-  history: StoredEntry[];
+  sessionEntries: SessionEntry[];
 }
 
 export interface RunObserver {
@@ -24,52 +24,58 @@ export interface RunObserver {
   thought(round: number, value: string): Promise<void>;
   roundComplete(round: number): Promise<void>;
   toolStart(call: PreparedToolCall): Promise<void>;
-  toolFinish(
-    call: PreparedToolCall,
-    status: ToolCallStatus,
-    result: ToolResult | { modelContent: string; rawOutput: unknown },
-  ): Promise<void>;
-  requestWritePermission(call: PreparedToolCall): Promise<boolean>;
+  toolFinish(call: PreparedToolCall, status: ToolCallStatus, result: ToolOutcome): Promise<void>;
+  requestPermission(call: PreparedToolCall): Promise<boolean>;
   askUser(question: string, toolCallId: string): Promise<string>;
 }
 
 export interface RunResult {
+  runId: string;
   reason: "stop" | "length" | "cancelled";
 }
 
-/**
- * 一轮 ACP Prompt 内可以包含多次模型调用。每批 Tool 先全部占位，再并行执行；
- * 交互请求由 Client 排队展示，因此 Tool 完成顺序不会破坏聊天投影顺序。
- */
+/** AgentRuntime 聚合完整能力；AgentRunner 只执行一次 session/prompt。 */
 export class AgentRuntime {
+  readonly runner: AgentRunner;
+
   constructor(
     readonly model: ModelProvider,
-    readonly tools: ToolRegistry,
+    readonly tools: ToolRuntime,
+    context = new ContextBuilder(),
+  ) {
+    this.runner = new AgentRunner(model, tools, context);
+  }
+
+  static fromRegistry(model: ModelProvider, registry: ToolRegistry): AgentRuntime {
+    return new AgentRuntime(model, new ToolRuntime(registry));
+  }
+
+  run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<RunResult> {
+    return this.runner.run(input, observer, signal);
+  }
+}
+
+export class AgentRunner {
+  constructor(
+    private readonly model: ModelProvider,
+    private readonly tools: ToolRuntime,
+    private readonly context: ContextBuilder,
   ) {}
 
-  async run(
-    input: RunInput,
-    observer: RunObserver,
-    signal: AbortSignal,
-  ): Promise<RunResult> {
-    const messages: ModelMessage[] = [
-      ...input.history.flatMap((entry) =>
-        entry.type === "message"
-          ? [{ role: entry.role, content: entry.text } satisfies ModelMessage]
-          : [],
-      ),
-      { role: "user", content: input.text },
-    ];
+  async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<RunResult> {
+    const runId = randomUUID();
+    const messages = this.context.build(input.sessionEntries, input.text);
+    const ledger = new ToolCallLedger();
 
-    for (let round = 0; round < MAX_MODEL_ROUNDS; round += 1) {
+    for (let round = 0; ; round += 1) {
       let content = "";
       let thinking = "";
-      let reason: RunResult["reason"] = "stop";
+      let reason: "stop" | "length" | "cancelled" = "stop";
       const calls = new Map<string, ModelToolCall>();
 
       try {
         for await (const event of this.model.stream(
-          { messages, tools: this.tools.definitions },
+          { messages, tools: this.tools.registry.definitions },
           signal,
         )) {
           if (event.type === "text_delta") {
@@ -79,24 +85,23 @@ export class AgentRuntime {
             thinking += event.text;
             await observer.thought(round, event.text);
           } else if (event.type === "tool_calls") {
-            for (const call of event.calls) {
-              calls.set(toolCallKey(call), call);
-            }
+            for (const call of event.calls) calls.set(toolCallKey(call), call);
           } else if (event.type === "finish") {
             reason = event.reason;
           }
         }
       } catch (error) {
-        if (isAbort(error) || signal.aborted) return { reason: "cancelled" };
-        throw error;
+        if (isAbort(error) || signal.aborted) return { runId, reason: "cancelled" };
+        // 模型流无法继续时才提升为 Turn 级失败；具体错误文本保持不变。
+        throw toRunFailure(error);
       }
 
       await observer.roundComplete(round);
       const modelCalls = [...calls.values()];
-      if (modelCalls.length === 0) return { reason };
+      if (modelCalls.length === 0) return { runId, reason };
 
       const prepared = modelCalls.map((call, index) =>
-        prepareCall(this.tools, call, `${randomUUID()}:${index}`),
+        prepareCall(this.tools.registry, call, `${randomUUID()}:${index}`),
       );
       messages.push({
         role: "assistant",
@@ -109,48 +114,30 @@ export class AgentRuntime {
         })),
       });
 
-      for (const item of prepared) await observer.toolStart(item.call);
-      const results = await Promise.all(
-        prepared.map((item) => this.execute(item.call, observer, signal)),
-      );
+      let batch;
+      try {
+        batch = await this.tools.executeBatch(
+          prepared.map((item) => item.call),
+          observer,
+          ledger,
+          signal,
+        );
+      } catch (error) {
+        if (isAbort(error) || signal.aborted) return { runId, reason: "cancelled" };
+        // ToolRuntime 正常会把工具失败收敛为 ToolOutcome；到达这里说明执行链本身已中断。
+        throw toRunFailure(error);
+      }
       for (let index = 0; index < prepared.length; index += 1) {
         const item = prepared[index];
-        const result = results[index];
-        if (!item || !result) continue;
+        const outcome = batch.outcomes[index];
+        if (!item || !outcome) continue;
         messages.push({
           role: "tool",
           toolName: item.call.name,
-          content: result.modelContent,
+          toolCallId: item.call.id,
+          content: outcome.modelContent,
         });
       }
-    }
-
-    throw new Error(`Tool Loop 超过 ${MAX_MODEL_ROUNDS} 轮限制`);
-  }
-
-  private async execute(
-    call: PreparedToolCall,
-    observer: RunObserver,
-    signal: AbortSignal,
-  ): Promise<ToolResult | { modelContent: string; rawOutput: unknown }> {
-    try {
-      if (call.validationError) throw new Error(call.validationError);
-      if (call.permission === "write") {
-        const allowed = await observer.requestWritePermission(call);
-        if (!allowed) throw new Error("用户拒绝了写入操作");
-      }
-      const result = await this.tools.execute(call, {
-        askUser: (question, toolCallId) => observer.askUser(question, toolCallId),
-        signal,
-      });
-      await observer.toolFinish(call, "completed", result);
-      return result;
-    } catch (error) {
-      if (isAbort(error) || signal.aborted) throw error;
-      const message = errorText(error);
-      const result = { modelContent: `工具执行失败: ${message}`, rawOutput: { error: message } };
-      await observer.toolFinish(call, "failed", result);
-      return result;
     }
   }
 }
@@ -172,8 +159,10 @@ function prepareCall(
         title: `无效工具调用：${modelCall.name}`,
         kind: "other",
         arguments: modelCall.arguments,
-        permission: "none",
+        permission: "allow",
         locations: [],
+        dedupeKey: `${modelCall.name}:${JSON.stringify(modelCall.arguments)}`,
+        retry: "none",
         validationError: message,
       },
     };

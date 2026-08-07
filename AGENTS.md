@@ -2,7 +2,7 @@
 
 ## 当前目标
 
-只维护“React 类 GPT Web + Remote ACP Agent”的最小闭环。旧版 `model-kindergarten-v1-codex` 仅是背景，不是当前实现规范。
+维护“React 类 GPT Web + Remote ACP Agent + 常规单 Agent Runtime”的 V1.5 完整链路。旧版 `model-kindergarten-v1-codex` 仅是背景，不是当前实现规范。
 
 ## 必须保持
 
@@ -17,13 +17,15 @@
 - 文件 Tool 必须经过 `FileSandbox`；禁止绕过路径、大小和符号链接校验；
 - 写入必须使用 ACP permission，AskUser 必须使用 ACP elicitation，二者不得混用。
 
-## V1 禁止提前加入
+## V1.5 实施边界
 
 - Java/RCS、Channel Group、EventBus、SSE；
 - `RunEvt` 或另一套 Command/Event envelope；
-- 自动重连、重试、熔断和旧格式归一化；
 - Student、Course、Skill、Memory 等未进入主链的领域对象；
-- Shell、任意代码执行、网络访问 Tool 和 Artifact；
+- Plan、`update_plan`、Planner/Executor、Workflow/DAG；
+- Runtime Timeline/Event Store、长期记忆、RAG、多 Agent 和 Artifact；
+
+V1.5 允许受控终端、网络搜索/读取、有限重试和外部依赖熔断；这些能力必须经过 ToolRuntime、权限策略和对应沙箱，不能从 ACP Adapter 或 Model Provider 绕过。
 
 ## 代码风格
 

@@ -1,105 +1,103 @@
-# Models Kindergarten V1.1 架构
+# Models Kindergarten V1.5 架构
 
 ## 主链
 
 ```text
-User → React Chat → ACP Client ⇄ Remote ACP Agent → AgentRuntime Tool Loop
-                                                      ├→ Ollama qwen3:8b
-                                                      └→ ToolRegistry → FileSandbox
+Browser React
+  ⇅ ACP over WebSocket
+ACP Agent Adapter
+  → AgentRuntime
+      → AgentRunner
+          ⇄ ContextBuilder → modelMessages
+          ⇄ ModelProvider → Ollama HTTP → qwen3:8b
+          ⇄ ToolRuntime
+              ├─ ToolRegistry
+              ├─ ToolCallLedger
+              ├─ PermissionGate（执行策略）
+              ├─ RetryExecutor
+              └─ ToolExecutor → Sandboxes
 ```
 
-没有 Java/RCS 中转层、第二套事件协议或 Runtime 可视化。
+ACP Adapter 不实现模型循环或工具安全；Model Provider 不依赖 ACP；ToolRuntime 不依赖 Ollama；Web 不保存 Runtime 状态。
 
-## Web 聊天投影
-
-```ts
-interface ChatState {
-  sessionId: string | null;
-  entries: EntryCollection;
-  streamingEntries: EntryCollection;
-  streaming: StreamingContext | null;
-}
-
-interface EntryCollection {
-  order: EntryId[];
-  byId: Record<EntryId, ChatEntry>;
-}
-```
-
-`order` 固定 `messageId/toolCallId` 第一次出现的位置，`byId` 允许并行 Tool 独立更新；完成顺序只改变状态，不移动卡片。`PromptResponse` 是整轮提交边界，此时一次性合并两个 Collection 并清空 `streamingEntries`。
-
-`selectEntryBlocks(collection)` 只在渲染时把连续 Thought/Tool 派生为 `ActivityGroup`，不存储第三份聊天数据，也不是 Runtime timeline。
-
-## Web UI
+## 单一事实源与投影
 
 ```text
-AppShell
-├── SessionSidebar
-└── ChatScreen
-    ├── ChatHeader
-    ├── ChatViewport
-    │   ├── ChatBlockList(entries)
-    │   └── ChatBlockList(streamingEntries)
-    │       ├── MessageEntryView
-    │       └── ActivityGroup
-    │           ├── ReasoningItem
-    │           └── ToolItem
-    └── ComposerDock
-        ├── InteractionPendingPanel
-        └── Composer
+事实数据层
+├── sessionEntries
+└── streamingSessionEntries
+
+UI 投影层
+├── historyChatEntries
+├── streamingChatEntries
+└── chatEntries
+
+模型上下文层
+└── modelMessages
 ```
 
-Zustand Store 聚合 connection、sessions、chat、prompt 和 interaction 状态；组件用窄 selector 独立订阅。Reasoning/Tool 的 disclosure 是各组件实例的局部状态：执行时展开，完成后延迟收起，用户手动选择优先。多个 streaming Tool 因此可以同时展开。
+`SessionEntry` 保存 Message、Thought、Tool Call 及其结构化结果。Prompt 完成时，`streamingSessionEntries` 批量写入 V3 Repository；临时文件写完后通过 rename 原子替换。Repository 写操作串行化并递增 Session revision。
 
-`InteractionPendingPanel` 仅展示等待处理的 ACP `session/request_permission` 或 `elicitation/create`，固定在 Composer 上方；它不进入聊天历史，ToolItem 只展示同一请求对应的执行状态。
-
-## Tool Loop
-
-```mermaid
-sequenceDiagram
-    participant Model as qwen3:8b
-    participant Loop as AgentRuntime
-    participant Client as ACP Web Client
-    participant Tool as Sandbox Tool
-
-    Loop->>Model: messages + tool schemas
-    Model-->>Loop: text/thinking/tool_calls
-    Loop-->>Client: tool_call(pending)
-    alt write_file
-      Loop->>Client: session/request_permission
-      Client-->>Loop: allow/reject
-    else ask_user
-      Loop->>Client: elicitation/create(form)
-      Client-->>Loop: accept(answer)/cancel
-    end
-    Loop->>Tool: execute validated input
-    Tool-->>Loop: result/diff/error
-    Loop-->>Client: tool_call_update
-    Loop->>Model: assistant tool_calls + tool results
+```text
+SessionEntry[] ──ChatProjector/ACP replay──► ChatEntry[]
+       └────────ContextBuilder────────────► ModelMessage[]
 ```
 
-同一模型响应里的 Tool 先按返回顺序全部创建，再使用 `Promise.all` 并行执行。Web 可同时拥有多个未完成 Tool；权限和 AskUser 在 Client 侧排队展示。模型不再请求 Tool 时结束循环，硬上限为 8 轮。
+Thought 只用于聊天回放；Tool Call/Result 通过 `toolCallId` 恢复到历史模型上下文。裁剪不会从一组 Tool Result 中间开始。
 
-## 安全边界
+## AgentRuntime 与 AgentRunner
 
-- `FileSandbox` 是唯一文件入口；
-- 相对路径解析后必须仍位于固定 root；
-- 每个已存在路径组件都拒绝符号链接并校验 `realpath`；
-- `write_file` 必须获得 ACP permission；
-- AskUser 使用 Elicitation，不与安全授权混用；
-- 没有 Shell、网络或任意代码执行能力；
-- Prompt Cancel 传播到模型、等待中的交互和 Tool。
+- `AgentRuntime`：聚合 Context、Runner、Tool 和可靠性能力；
+- `AgentRunner`：执行一次 `session/prompt` 的模型—工具循环；
+- `toRunFailure`：把无法继续执行的 Provider/Runtime 异常转换成 Prompt Turn 失败；
+- 用户取消通过 AbortSignal 立即传播；模型不再调用 Tool 时，Prompt Turn 正常结束。
 
-## 稳定历史
+## ToolRuntime
 
-Repository V2 保存有序 `StoredEntry[]`：
+```text
+模型 Tool Call
+  → Schema 校验
+  → canonical args / dedupeKey
+  → ToolCallLedger
+  → Permission
+  → Retry Policy
+  → Tool Handler / Sandbox
+  → ToolOutcome
+  → modelMessages + ACP Tool Update
+```
 
-- Message：role、messageId、turnId、完整文本；
-- Thought：messageId、turnId、完整文本；
-- ToolCall：toolCallId、kind、状态、输入、输出、content、locations。
+内置工具：
 
-运行时使用稳定 user/assistant Message 重建模型上下文；Tool/Thought 用于 UI 完整回放。旧版 `messages[]` 会在读取时迁移。
+```text
+list_files · read_file · write_file · run_command
+web_search · web_fetch · ask_user
+```
 
-## ModelStudent
+没有 `update_plan` 或任何 Plan 能力。
 
-ModelStudent 继续合并模型身份、Provider 绑定和当前 Agent 配置。默认 Provider 为 Ollama、模型为 `qwen3:8b`。只有出现配置编辑后的会话复现和版本对比需求时，才提取不可变 AgentVersion。
+完全相同的 Tool 与规范化参数只执行一次。重复提议返回带 `previousStatus`、`previousOutput` 的 `duplicate_blocked` 结构，继续交给模型理解；Runtime 不使用一组任意阈值强制结束对话。权限拒绝和失败也遵循相同规则。
+
+## 错误与交互
+
+错误在 Model、Tool、Transport 等事实边界识别。Tool 局部错误保留在对应 ToolItem；无法继续的后端错误通过 `session/prompt` JSON-RPC 错误保留具体文案，Web 统一归约为 `PromptTurnState.failed`。完整边界和状态设计见 [错误与 Prompt Turn 状态设计](ERROR_HANDLING.md)。
+
+## 权限与沙箱
+
+- Remote 决定 Tool 权限策略；Web `InteractionPendingPanel` 渲染 ACP Permission；
+- `write_file` 使用 `ask`，`run_command` 使用 `always_ask`；
+- Elicitation 只用于 `ask_user`，不能代替权限；
+- FileSandbox 限制 root、真实路径、符号链接与 256 KiB 文件；
+- ProcessSandbox 只在 macOS `sandbox-exec` 下运行，cwd 在 root 内，限制写入 root、禁止网络、限制环境变量、超时和输出；其他平台明确拒绝而不静默降级；
+- `web_fetch` 只允许公开 http/https，逐次验证重定向和 DNS，拒绝本机/私网地址并限制正文大小。
+
+## Retry 与熔断
+
+- Ollama 在尚未开始读取 Stream 前对瞬时连接、429、5xx 最多尝试三次；
+- `web_search/web_fetch` 在 ToolRuntime 层对网络/超时使用指数退避与 jitter；
+- 写文件、终端、校验错误和权限拒绝不重试；
+- Ollama 与各 HTTP Origin 使用进程内 closed/open/half-open 熔断；
+- 同一依赖只有一个重试层，不跨 Tool Loop 重放副作用。
+
+## Web 投影
+
+`historyChatEntries` 与 `streamingChatEntries` 都使用 `order + byId`。Tool 完成顺序只更新对应 ID，不移动首次出现位置。PromptResponse 到达后合并为历史，Reasoning/Tool disclosure 继续由局部组件状态管理。

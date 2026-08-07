@@ -4,10 +4,16 @@ import type * as acp from "@agentclientprotocol/sdk";
 import { AcpWebClient } from "./acp/acp-client.js";
 import { ChatViewport } from "./components/chat/ChatViewport.js";
 import { Composer } from "./components/composer/Composer.js";
+import { ComposerAvailabilityNotice } from "./components/errors/ComposerAvailabilityNotice.js";
 import { InteractionPendingPanel } from "./components/interactions/InteractionPendingPanel.js";
 import { ChatHeader } from "./components/layout/ChatHeader.js";
 import { SessionSidebar } from "./components/layout/SessionSidebar.js";
-import { useAppStore, type PendingInteraction } from "./store/app-store.js";
+import {
+  isPromptTurnActive,
+  type PendingInteractionState,
+  type TurnAction,
+} from "./prompt-turn/prompt-turn-types.js";
+import { useAppStore } from "./store/app-store.js";
 
 const ACP_URL = import.meta.env.VITE_ACP_URL ?? "ws://127.0.0.1:7331/acp";
 const REMOTE_CWD = "/workspace";
@@ -16,104 +22,271 @@ export default function App() {
   const connection = useAppStore((state) => state.connection);
   const sessions = useAppStore((state) => state.sessions);
   const chat = useAppStore((state) => state.chat);
-  const running = useAppStore((state) => state.running);
-  const error = useAppStore((state) => state.error);
-  const interactionOrder = useAppStore((state) => state.interactionOrder);
-  const interactionsById = useAppStore((state) => state.interactionsById);
+  const promptTurn = useAppStore((state) => state.promptTurn);
   const clientRef = useRef<AcpWebClient | null>(null);
 
   useEffect(() => {
     let disposed = false;
     let current: AcpWebClient | null = null;
     const store = useAppStore.getState;
+
     void (async () => {
       try {
         const client = await AcpWebClient.open(ACP_URL, {
           onUpdate: (value) => store().dispatchChat({ type: "acp/update", value }),
-          onPermission: (request) => enqueuePermission(request),
-          onElicitation: (request) => enqueueElicitation(request),
-          onClose: () => { if (!disposed) { cancelInteractions(); store().setConnection("disconnected"); } },
+          onInteraction: (interaction) => {
+            store().dispatchPromptTurn({ type: "interaction/enqueue", interaction });
+          },
+          onInteractionResolved: (id) => {
+            store().dispatchPromptTurn({ type: "interaction/remove", id });
+          },
+          onClose: () => {
+            if (disposed) return;
+            const state = store();
+            state.setConnection({
+              phase: "disconnected",
+              message: "ACP Remote 连接已断开",
+            });
+
+            // 断线后不会再收到 Chunk；立即提交已接收内容，并将活动 Turn 收敛为失败。
+            const operationId = state.chat.streaming?.operationId;
+            if (operationId) {
+              state.dispatchChat({ type: "stream/commit", operationId });
+            }
+            const turn = state.promptTurn;
+            if (isPromptTurnActive(turn)) {
+              state.dispatchPromptTurn({
+                type: "turn/fail",
+                operationId: turn.request.operationId,
+                failure: {
+                  kind: "connection_error",
+                  message: "ACP Remote 连接已断开",
+                },
+              });
+            }
+          },
         });
-        if (disposed) { client.close(); return; }
+
+        if (disposed) {
+          client.close();
+          return;
+        }
         current = client;
         clientRef.current = client;
-        store().setConnection("connected");
+        store().setConnection({ phase: "connected" });
+
         const result = await client.list(REMOTE_CWD);
         store().setSessions(result.sessions);
         const first = result.sessions[0];
-        if (first) await loadSession(client, first);
-        else { const created = await client.create(REMOTE_CWD); store().dispatchChat({ type: "session/open", sessionId: created.sessionId }); await refreshSessions(client); }
+        if (first) {
+          await loadSession(client, first);
+        } else {
+          const created = await client.create(REMOTE_CWD);
+          openEmptySession(created.sessionId);
+          await refreshSessions(client);
+        }
       } catch (cause) {
-        if (!disposed) { store().setConnection("disconnected"); store().setError(errorText(cause)); }
+        if (!disposed) {
+          store().setConnection({
+            phase: "disconnected",
+            message: errorMessage(cause),
+          });
+        }
       }
     })();
-    return () => { disposed = true; current?.close(); clientRef.current = null; };
+
+    return () => {
+      disposed = true;
+      current?.close();
+      clientRef.current = null;
+    };
   }, []);
 
-  function enqueuePermission(request: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
-    return new Promise((resolve) => useAppStore.getState().enqueueInteraction({ id: crypto.randomUUID(), kind: "permission", request, resolve }));
+  function openEmptySession(sessionId: string): void {
+    const store = useAppStore.getState();
+    store.dispatchPromptTurn({ type: "turn/reset" });
+    store.dispatchChat({ type: "session/open", sessionId });
   }
-  function enqueueElicitation(request: acp.CreateElicitationRequest): Promise<acp.CreateElicitationResponse> {
-    return new Promise((resolve) => useAppStore.getState().enqueueInteraction({ id: crypto.randomUUID(), kind: "elicitation", request, resolve }));
+
+  async function refreshSessions(client = clientRef.current): Promise<void> {
+    if (!client) return;
+    const result = await client.list(REMOTE_CWD);
+    useAppStore.getState().setSessions(result.sessions);
   }
-  function resolveInteraction(interaction: PendingInteraction, value: acp.RequestPermissionResponse | acp.CreateElicitationResponse) {
-    if (interaction.kind === "permission") interaction.resolve(value as acp.RequestPermissionResponse);
-    else interaction.resolve(value as acp.CreateElicitationResponse);
-    useAppStore.getState().removeInteraction(interaction.id);
-  }
-  function cancelInteractions() {
-    const state = useAppStore.getState();
-    for (const id of state.interactionOrder) {
-      const interaction = state.interactionsById[id];
-      if (!interaction) continue;
-      if (interaction.kind === "permission") interaction.resolve({ outcome: { outcome: "cancelled" } });
-      else interaction.resolve({ action: "cancel" });
-    }
-    state.clearInteractions();
-  }
-  async function refreshSessions(client = clientRef.current) { if (!client) return; useAppStore.getState().setSessions((await client.list(REMOTE_CWD)).sessions); }
-  async function loadSession(client: AcpWebClient, session: SessionInfo) {
+
+  async function loadSession(client: AcpWebClient, session: SessionInfo): Promise<void> {
     const operationId = crypto.randomUUID();
     const store = useAppStore.getState();
+    store.dispatchPromptTurn({ type: "turn/reset" });
     store.dispatchChat({ type: "session/open", sessionId: session.sessionId });
-    store.dispatchChat({ type: "stream/start", operationId, source: "load", turnId: `load:${operationId}` });
-    await client.load(session.sessionId, session.cwd);
-    store.dispatchChat({ type: "stream/commit", operationId });
+    store.dispatchChat({
+      type: "stream/start",
+      operationId,
+      source: "load",
+      turnId: `load:${operationId}`,
+    });
+    try {
+      await client.load(session.sessionId, session.cwd);
+    } finally {
+      // load 的通知也使用 streamingChatEntries，结束时必须统一提交或清理。
+      store.dispatchChat({ type: "stream/commit", operationId });
+    }
   }
-  async function createSession() {
-    const client = clientRef.current; if (!client) return;
-    try { useAppStore.getState().setError(""); const created = await client.create(REMOTE_CWD); useAppStore.getState().dispatchChat({ type: "session/open", sessionId: created.sessionId }); await refreshSessions(client); }
-    catch (cause) { useAppStore.getState().setError(errorText(cause)); }
-  }
-  async function selectSession(session: SessionInfo) {
-    const client = clientRef.current; if (!client || session.sessionId === useAppStore.getState().chat.sessionId) return;
-    try { useAppStore.getState().setError(""); await loadSession(client, session); } catch (cause) { useAppStore.getState().setError(errorText(cause)); }
-  }
-  async function send(text: string) {
-    const client = clientRef.current; const sessionId = useAppStore.getState().chat.sessionId; if (!client || !sessionId) return;
-    const operationId = crypto.randomUUID(); const turnId = crypto.randomUUID(); const store = useAppStore.getState();
-    store.dispatchChat({ type: "stream/start", operationId, source: "prompt", turnId, optimisticContent: [{ type: "text", text }] });
-    store.setRunning(true); store.setError("");
-    try { const response = await client.prompt(sessionId, text, { turnId }); store.dispatchChat({ type: "stream/commit", operationId, stopReason: response.stopReason }); await refreshSessions(client); }
-    catch (cause) { store.dispatchChat({ type: "stream/commit", operationId }); store.setError(errorText(cause)); }
-    finally { store.setRunning(false); }
-  }
-  function cancel() { cancelInteractions(); const client = clientRef.current; const id = useAppStore.getState().chat.sessionId; if (client && id) void client.cancel(id); }
 
-  const activeInteraction = interactionOrder[0] ? interactionsById[interactionOrder[0]] : undefined;
-  const ready = connection === "connected" && chat.sessionId !== null;
+  async function createSession(): Promise<void> {
+    const client = clientRef.current;
+    if (!client) return;
+    try {
+      const created = await client.create(REMOTE_CWD);
+      openEmptySession(created.sessionId);
+      await refreshSessions(client);
+    } catch (cause) {
+      // Session 管理失败不属于 Prompt Turn，不能写入 Turn 状态机。
+      console.error("创建 Session 失败", cause);
+    }
+  }
+
+  async function selectSession(session: SessionInfo): Promise<void> {
+    const client = clientRef.current;
+    if (!client || session.sessionId === useAppStore.getState().chat.sessionId) return;
+    try {
+      await loadSession(client, session);
+    } catch (cause) {
+      // V1.5 暂不引入另一套全局错误中心；保留诊断信息且不污染当前 Turn。
+      console.error("加载 Session 失败", cause);
+    }
+  }
+
+  async function send(text: string): Promise<void> {
+    const client = clientRef.current;
+    const state = useAppStore.getState();
+    const sessionId = state.chat.sessionId;
+    if (!client || !sessionId || isPromptTurnActive(state.promptTurn)) return;
+
+    const operationId = crypto.randomUUID();
+    const turnId = crypto.randomUUID();
+    const request = { operationId, sessionId, turnId, text };
+    state.dispatchChat({
+      type: "stream/start",
+      operationId,
+      source: "prompt",
+      turnId,
+      optimisticContent: [{ type: "text", text }],
+    });
+    state.dispatchPromptTurn({ type: "turn/start", request });
+
+    try {
+      const response = await client.prompt(sessionId, text, { turnId });
+      const store = useAppStore.getState();
+      store.dispatchChat({ type: "stream/commit", operationId });
+      if (response.stopReason === "cancelled") {
+        store.dispatchPromptTurn({ type: "turn/cancel", operationId });
+      } else {
+        store.dispatchPromptTurn({
+          type: "turn/complete",
+          operationId,
+          reason: response.stopReason,
+        });
+      }
+      void refreshSessions(client).catch((cause: unknown) => {
+        console.error("刷新 Session 列表失败", cause);
+      });
+    } catch (cause) {
+      const store = useAppStore.getState();
+      store.dispatchChat({ type: "stream/commit", operationId });
+      store.dispatchPromptTurn({
+        type: "turn/fail",
+        operationId,
+        failure: {
+          kind: store.connection.phase === "disconnected"
+            ? "connection_error"
+            : "backend_error",
+          message: errorMessage(cause),
+        },
+      });
+    }
+  }
+
+  function cancel(): void {
+    const client = clientRef.current;
+    const state = useAppStore.getState();
+    const turn = state.promptTurn;
+    if (!client || !state.chat.sessionId || !isPromptTurnActive(turn)) return;
+    const operationId = turn.request.operationId;
+
+    // UI 先进入确定的 cancelled 状态；ACP cancel 随后终止 Remote 的 AbortSignal。
+    client.cancelInteractions();
+    state.dispatchChat({ type: "stream/commit", operationId });
+    state.dispatchPromptTurn({ type: "turn/cancel", operationId });
+    void client.cancel(state.chat.sessionId);
+  }
+
+  function resolveInteraction(
+    interaction: PendingInteractionState,
+    value: acp.RequestPermissionResponse | acp.CreateElicitationResponse,
+  ): void {
+    clientRef.current?.resolveInteraction(interaction, value);
+  }
+
+  function handleTurnAction(action: TurnAction): void {
+    if (action.type === "reconnect") {
+      location.reload();
+      return;
+    }
+    const state = useAppStore.getState().promptTurn;
+    if (state.phase === "failed") void send(state.request.text);
+  }
+
+  const active = isPromptTurnActive(promptTurn);
+  const interactionState = promptTurn.phase === "waiting_for_user"
+    ? promptTurn.interactions
+    : undefined;
+  const activeInteractionId = interactionState?.order[0];
+  const activeInteraction = activeInteractionId
+    ? interactionState?.byId[activeInteractionId]
+    : undefined;
+  const ready = connection.phase === "connected" && chat.sessionId !== null;
+
   return <main className="app-shell">
-    <SessionSidebar sessions={sessions} activeId={chat.sessionId} disabled={!ready || running} onCreate={() => void createSession()} onSelect={(session) => void selectSession(session)} />
+    <SessionSidebar
+      sessions={sessions}
+      activeId={chat.sessionId}
+      disabled={!ready || active}
+      onCreate={() => void createSession()}
+      onSelect={(session) => void selectSession(session)}
+    />
     <section className="chat-screen">
       <ChatHeader connection={connection} />
-      <ChatViewport entries={chat.entries} streamingEntries={chat.streamingEntries} running={running} />
+      <ChatViewport
+        historyChatEntries={chat.historyChatEntries}
+        streamingChatEntries={chat.streamingChatEntries}
+        promptTurn={promptTurn}
+        onTurnAction={handleTurnAction}
+      />
       <div className="composer-dock">
-        {error && <div className="error-bar"><span>{error}</span>{connection === "disconnected" && <button type="button" onClick={() => location.reload()}>重新连接</button>}</div>}
-        {activeInteraction && <InteractionPendingPanel key={activeInteraction.id} interaction={activeInteraction} queued={interactionOrder.length} onResolve={resolveInteraction} />}
-        <Composer disabled={!ready} running={running} onSend={send} onCancel={cancel} />
+        {connection.phase === "disconnected" && <ComposerAvailabilityNotice
+          connection={connection}
+          onReconnect={() => location.reload()}
+        />}
+        {activeInteraction && interactionState && <InteractionPendingPanel
+          key={activeInteraction.id}
+          interaction={activeInteraction}
+          queued={interactionState.order.length}
+          onResolve={resolveInteraction}
+        />}
+        <Composer
+          disabled={!ready}
+          running={active}
+          onSend={send}
+          onCancel={cancel}
+        />
       </div>
     </section>
   </main>;
 }
 
-function errorText(value: unknown) { return value instanceof Error ? value.message : "发生未知错误"; }
+function errorMessage(value: unknown): string {
+  if (value instanceof Error && value.message.trim()) return value.message;
+  if (typeof value === "string" && value.trim()) return value;
+  return "发生未知错误";
+}

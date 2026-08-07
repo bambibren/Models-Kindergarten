@@ -1,51 +1,50 @@
 # Models Kindergarten｜模型幼儿园
 
-完整的当前边界、技术模块和后续路线见 [完整技术方案与演进路线](docs/TECHNICAL_PLAN.md)。
+V1.5 是一条可运行的常规单 Agent 最小完整链路：React Web 通过 ACP WebSocket 连接 Remote Agent，Remote 使用本地 `qwen3:8b` 进行流式推理、权限交互和受控工具循环。
 
-React Web 通过 ACP WebSocket 连接 Remote Agent，Remote 使用本地 `qwen3:8b` 完成流式回答、沙箱文件工具和 AskUser。
+完整设计见 [技术方案](docs/TECHNICAL_PLAN.md)，ACP 边界见 [ACP 兼容说明](docs/ACP_COMPAT.md)。
 
 ```mermaid
 flowchart LR
-    UI["React Chat<br/>Sessions + streamingEntries"]
-    ACP["ACP v1 Client"]
-    Agent["Remote ACP Agent"]
-    Loop["Tool Loop"]
-    Model["Ollama qwen3:8b"]
-    Tools["ToolRegistry<br/>read_file · write_file · ask_user"]
-    Sandbox["File Sandbox"]
+    UI[React Chat]
+    ACP[ACP Client]
+    Adapter[Remote ACP Adapter]
+    Runtime[AgentRuntime]
+    Runner[AgentRunner]
+    Model[Ollama qwen3:8b]
+    Tools[ToolRuntime]
+    Sandbox[File / Process / Network Sandbox]
 
-    UI <--> ACP <--> Agent --> Loop --> Model
-    Loop --> Tools --> Sandbox
-    Agent -. "permission / elicitation" .-> ACP
+    UI <--> ACP <-->|ACP over WebSocket| Adapter
+    Adapter --> Runtime --> Runner
+    Runner <--> Model
+    Runner <--> Tools --> Sandbox
+    Adapter -. permission / elicitation .-> ACP
 ```
 
 ## 当前能力
 
-- 左侧 Session，右侧连续消息流与底部输入框；
-- `entries` 保存稳定历史，`streamingEntries` 聚合当前 Prompt/Load；
-- Message、Thought、Tool 都按第一次出现的位置固定，按 ID 原位更新；
-- 本地 `qwen3:8b`，支持 thinking、流式文本和并行 `tool_calls`；
-- `read_file`：读取沙箱内 UTF-8 文本；
-- `write_file`：用户通过 ACP `session/request_permission` 授权后写入沙箱；
-- `ask_user`：通过 ACP `elicitation/create` 在当前 Turn 内等待用户回答；
-- Tool Loop 最多 8 次模型调用，同批 Tool 先全部显示，再并行执行；
-- 稳定历史持久化 Message、Thought、Tool，刷新后通过 `session/load` 原序回放；
-- V1 会话文件自动迁移到 V2，不丢失已有对话。
+- `sessionEntries + streamingSessionEntries` 是 Remote 唯一 Session 事实源；
+- `historyChatEntries + streamingChatEntries` 是 Web UI 投影；
+- `modelMessages` 由 ContextBuilder 从同一事实源生成；
+- 多轮 user/assistant/tool 上下文，Thought 不回填模型；
+- 原生 Structured Tool Calling 和并行 Tool 聚合；
+- `list_files`、`read_file`、`write_file`、`run_command`、`web_search`、`web_fetch`、`ask_user`；
+- 写文件需要 ACP Permission，终端每次都需要 Permission；
+- `ask_user` 使用 ACP Elicitation；
+- Tool 参数校验、结构化 ToolOutcome、精确重复调用拦截；
+- ToolCallLedger 精确去重，并向模型返回先前结构化结果；
+- 分布式错误识别、ACP 详细错误文案和 Web PromptTurnState 集中归约；
+- Ollama 与 Web 外部依赖有限重试、熔断；
+- 文件路径/大小/符号链接沙箱；macOS 终端写入与网络沙箱；网页 SSRF 和大小限制；
+- Session V1/V2 自动迁移到 V3，Prompt 事实批量原子提交；
+- `load` 完整回放、`resume` 零回放、单 Session 单 Prompt、Cancel 传播。
 
-## 沙箱边界
-
-默认沙箱为 `apps/remote/.data/sandbox`。Tool 只接受相对 POSIX 路径，并拒绝：
-
-- 绝对路径；
-- `.`、`..`、空路径段和反斜杠路径；
-- 符号链接及其真实路径逃逸；
-- 超过 256 KiB 的单文件读取或写入。
-
-写操作需要逐次授权；读操作不修改状态，可直接执行。
+V1.5 完全不实现 Plan、`update_plan`、Planner/Executor 或 Workflow/DAG。
 
 ## 本地启动
 
-要求 Node.js 22+、pnpm 11+、Ollama，并确保机器有足够内存运行 8B Q4 模型。
+要求 Node.js 22+、pnpm 11+、Ollama，以及可以运行 `qwen3:8b` 的内存。
 
 ```bash
 ollama serve
@@ -54,11 +53,12 @@ pnpm install
 pnpm dev
 ```
 
-Web 默认地址为 [http://127.0.0.1:5173](http://127.0.0.1:5173)，端口占用时 Vite 会选择下一个端口。Remote：
+默认地址：
 
-- ACP：`ws://127.0.0.1:7331/acp`
-- Health：`http://127.0.0.1:7331/health`
-- 配置：`.env.example`
+- Web：`http://127.0.0.1:5173`，端口占用时 Vite 自动选择下一端口；
+- ACP：`ws://127.0.0.1:7331/acp`；
+- Health：`http://127.0.0.1:7331/health`；
+- 配置模板：[.env.example](.env.example)。
 
 ## 验证
 
@@ -68,10 +68,8 @@ pnpm test
 pnpm build
 ```
 
-测试覆盖聊天归约、Tool 乱序、Session 隔离、Cancel、WebSocket、沙箱逃逸、写入授权、AskUser、读写 Tool Loop 和 Tool 历史回放。
+自动测试覆盖 ACP Session、真实 WebSocket、流式 UI 归约、Tool 乱序、权限、AskUser、Session 恢复、重复调用去重、历史 Tool Result 上下文、终端沙箱和私网 URL 拦截。
 
-## 仍不进入当前版本
+## 暂不进入 V1.5
 
-Java/RCS、EventBus、第二套 RuntimeEvent、Shell Tool、网络 Tool、Artifact、Memory、课程系统、多 Agent、自动重连以及 AgentVersion 管理。
-
-协议依据：[ACP Tool Calls](https://agentclientprotocol.com/protocol/v1/tool-calls)、[ACP Elicitation](https://agentclientprotocol.com/protocol/v1/elicitation)、[Ollama Tool Calling](https://docs.ollama.com/capabilities/tool-calling)。
+Plan、Runtime Timeline/Event Store、长期记忆、RAG、多 Agent、MCP 管理平台、云容器、多租户、语义相似判重、Evaluation 和 Benchmark。

@@ -15,6 +15,7 @@ import { SessionRepository } from "../src/repository/session-repository.js";
 import { AgentRuntime } from "../src/runtime/agent-runtime.js";
 import { FileSandbox } from "../src/tools/sandbox.js";
 import { ToolRegistry } from "../src/tools/tool-registry.js";
+import { ModelProviderError } from "../src/model/model-error.js";
 
 const tempDirs: string[] = [];
 
@@ -103,6 +104,24 @@ describe("ACP 会话语义", () => {
     await expect(running).resolves.toMatchObject({ stopReason: "cancelled" });
     await closeClient(client);
   });
+
+  it("Prompt 致命错误只通过 JSON-RPC error 保留具体原因", async () => {
+    const client = await openClient(await makeAgent(new FailedProvider()), []);
+    const created = await client.agent.request(acp.methods.agent.session.new, {
+      cwd: "/workspace",
+      mcpServers: [],
+    });
+    try {
+      await sendPrompt(client, created.sessionId, "触发依赖错误", "turn-failed");
+      throw new Error("预期 Prompt 失败");
+    } catch (error) {
+      expect(error).toBeInstanceOf(acp.RequestError);
+      expect((error as acp.RequestError).code).toBe(-32001);
+      expect((error as acp.RequestError).message).toContain("Ollama 不可用");
+      expect((error as acp.RequestError).data).toBeUndefined();
+    }
+    await closeClient(client);
+  });
 });
 
 class StaticProvider implements ModelProvider {
@@ -135,6 +154,13 @@ class WaitingProvider implements ModelProvider {
   }
 }
 
+class FailedProvider implements ModelProvider {
+  readonly student = testStudent;
+  async *stream(): AsyncIterable<ModelEvent> {
+    throw new ModelProviderError("dependency_unavailable", "Ollama 不可用", true);
+  }
+}
+
 async function makeAgent(provider: ModelProvider): Promise<acp.AgentApp> {
   const dir = await mkdtemp(join(tmpdir(), "kindergarten-"));
   tempDirs.push(dir);
@@ -143,7 +169,7 @@ async function makeAgent(provider: ModelProvider): Promise<acp.AgentApp> {
   await sandbox.initialize();
   return new KindergartenAgent(
     sessions,
-    new AgentRuntime(provider, new ToolRegistry(sandbox)),
+    AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox)),
   ).createApp();
 }
 

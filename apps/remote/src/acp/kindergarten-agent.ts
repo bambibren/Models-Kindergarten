@@ -8,13 +8,14 @@ import type {
 } from "../runtime/agent-runtime.js";
 import type { SessionRepository } from "../repository/session-repository.js";
 import type {
-  StoredEntry,
-  StoredMessage,
-  StoredSession,
-  StoredThought,
-  StoredToolCall,
+  SessionEntry,
+  SessionMessageEntry,
+  SessionRecord,
+  SessionThoughtEntry,
+  SessionToolCallEntry,
 } from "../repository/session-types.js";
-import type { PreparedToolCall, ToolResult } from "../tools/tool-registry.js";
+import type { PreparedToolCall, ToolOutcome } from "../tools/tool-registry.js";
+import { RunFailure } from "../runtime/run-failure.js";
 
 /** ACP Adapter 负责会话、双向用户交互和 ChatEntry 输出，不实现模型或文件逻辑。 */
 export class KindergartenAgent {
@@ -82,7 +83,7 @@ export class KindergartenAgent {
   ): Promise<acp.LoadSessionResponse> {
     const session = await this.requireSession(params.sessionId, params.cwd);
     const output = new AcpOutput(session.id, client);
-    for (const entry of session.entries) await replayEntry(output, entry);
+    for (const entry of session.sessionEntries) await replayEntry(output, entry);
     return {};
   }
 
@@ -115,7 +116,6 @@ export class KindergartenAgent {
     this.active.set(session.id, controller);
 
     const user = makeMessage("user", text, turnId, randomUUID());
-    await this.sessions.append(session.id, user);
     await output.message("user", user.messageId, text, {
       schemaVersion: 1,
       turnId,
@@ -129,12 +129,13 @@ export class KindergartenAgent {
       output,
       client,
     );
+    projection.streamingSessionEntries.push(user);
     let failure: unknown = null;
     let reason: acp.StopReason = "end_turn";
 
     try {
       const result = await this.runtime.run(
-        { text, history: session.entries },
+        { text, sessionEntries: session.sessionEntries },
         projection,
         controller.signal,
       );
@@ -144,11 +145,16 @@ export class KindergartenAgent {
       failure = error;
     } finally {
       await projection.finalizeOpenRounds();
-      await this.sessions.appendMany(session.id, projection.entries);
+      await this.sessions.appendMany(session.id, projection.streamingSessionEntries);
       unlink();
       this.active.delete(session.id);
     }
 
+    if (failure instanceof RunFailure) {
+      // 详细 cause 只写 Remote 日志；ACP 仅承载 Turn 失败的可读原因。
+      console.error("Prompt Turn 执行失败", failure.cause ?? failure);
+      throw new acp.RequestError(-32001, failure.message);
+    }
     if (failure) throw failure;
     return { stopReason: reason };
   }
@@ -157,7 +163,7 @@ export class KindergartenAgent {
     this.active.get(sessionId)?.abort();
   }
 
-  private async requireSession(id: string, cwd: string): Promise<StoredSession> {
+  private async requireSession(id: string, cwd: string): Promise<SessionRecord> {
     const session = await this.sessions.get(id);
     if (session.cwd !== cwd) throw new Error("会话 cwd 与请求不一致");
     return session;
@@ -165,9 +171,9 @@ export class KindergartenAgent {
 }
 
 class TurnProjection implements RunObserver {
-  readonly entries: StoredEntry[] = [];
-  private readonly messages = new Map<number, StoredMessage>();
-  private readonly thoughts = new Map<number, StoredThought>();
+  readonly streamingSessionEntries: SessionEntry[] = [];
+  private readonly messages = new Map<number, SessionMessageEntry>();
+  private readonly thoughts = new Map<number, SessionThoughtEntry>();
   private readonly messageChunks = new Map<number, number>();
   private readonly thoughtChunks = new Map<number, number>();
   private readonly closedRounds = new Set<number>();
@@ -232,7 +238,7 @@ class TurnProjection implements RunObserver {
   }
 
   async toolStart(call: PreparedToolCall): Promise<void> {
-    const entry: StoredToolCall = {
+    const entry: SessionToolCallEntry = {
       type: "tool_call",
       turnId: this.turnId,
       toolCallId: call.id,
@@ -245,7 +251,7 @@ class TurnProjection implements RunObserver {
       locations: call.locations,
       createdAt: new Date().toISOString(),
     };
-    this.entries.push(entry);
+    this.streamingSessionEntries.push(entry);
     await this.output.toolCall({
       toolCallId: call.id,
       title: call.title,
@@ -260,10 +266,10 @@ class TurnProjection implements RunObserver {
   async toolFinish(
     call: PreparedToolCall,
     status: acp.ToolCallStatus,
-    result: ToolResult | { modelContent: string; rawOutput: unknown },
+    result: ToolOutcome,
   ): Promise<void> {
-    const entry = this.entries.find(
-      (item): item is StoredToolCall =>
+    const entry = this.streamingSessionEntries.find(
+      (item): item is SessionToolCallEntry =>
         item.type === "tool_call" && item.toolCallId === call.id,
     );
     const content = "content" in result ? result.content : [];
@@ -271,6 +277,8 @@ class TurnProjection implements RunObserver {
     if (entry) {
       entry.status = status;
       entry.rawOutput = result.rawOutput;
+      entry.modelContent = result.modelContent;
+      entry.outcomeStatus = result.status;
       entry.content = content;
       entry.locations = locations;
     }
@@ -283,7 +291,7 @@ class TurnProjection implements RunObserver {
     });
   }
 
-  async requestWritePermission(call: PreparedToolCall): Promise<boolean> {
+  async requestPermission(call: PreparedToolCall): Promise<boolean> {
     const response = await this.client.request(
       acp.methods.client.session.requestPermission,
       {
@@ -298,8 +306,8 @@ class TurnProjection implements RunObserver {
           locations: call.locations,
         },
         options: [
-          { optionId: "allow-once", name: "允许本次写入", kind: "allow_once" },
-          { optionId: "reject-once", name: "拒绝本次写入", kind: "reject_once" },
+          { optionId: "allow-once", name: "允许本次执行", kind: "allow_once" },
+          { optionId: "reject-once", name: "拒绝本次执行", kind: "reject_once" },
         ],
       },
     );
@@ -331,7 +339,10 @@ class TurnProjection implements RunObserver {
         },
       },
     );
-    if (response.action !== "accept") throw new Error("用户取消了回答");
+    if (response.action !== "accept") {
+      // AskUser 的取消语义是停止当前 Turn，不应伪装成一次 Tool 执行失败。
+      throw new DOMException("用户取消了回答", "AbortError");
+    }
     const answer = isRecord(response.content) ? response.content.answer : undefined;
     if (typeof answer !== "string" || answer.trim().length === 0) {
       throw new Error("用户没有提供有效回答");
@@ -339,19 +350,19 @@ class TurnProjection implements RunObserver {
     return answer;
   }
 
-  private ensureMessage(round: number): StoredMessage {
+  private ensureMessage(round: number): SessionMessageEntry {
     const existing = this.messages.get(round);
     if (existing) return existing;
     const entry = makeMessage("assistant", "", this.turnId, randomUUID());
     this.messages.set(round, entry);
-    this.entries.push(entry);
+    this.streamingSessionEntries.push(entry);
     return entry;
   }
 
-  private ensureThought(round: number): StoredThought {
+  private ensureThought(round: number): SessionThoughtEntry {
     const existing = this.thoughts.get(round);
     if (existing) return existing;
-    const entry: StoredThought = {
+    const entry: SessionThoughtEntry = {
       type: "thought",
       text: "",
       turnId: this.turnId,
@@ -359,12 +370,12 @@ class TurnProjection implements RunObserver {
       createdAt: new Date().toISOString(),
     };
     this.thoughts.set(round, entry);
-    this.entries.push(entry);
+    this.streamingSessionEntries.push(entry);
     return entry;
   }
 }
 
-async function replayEntry(output: AcpOutput, entry: StoredEntry): Promise<void> {
+async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void> {
   if (entry.type === "message") {
     await output.message(entry.role, entry.messageId, entry.text, {
       schemaVersion: 1,
@@ -408,11 +419,11 @@ function promptText(content: acp.ContentBlock[]): string {
 }
 
 function makeMessage(
-  role: StoredMessage["role"],
+  role: SessionMessageEntry["role"],
   text: string,
   turnId: string,
   messageId: string,
-): StoredMessage {
+): SessionMessageEntry {
   return {
     type: "message",
     role,

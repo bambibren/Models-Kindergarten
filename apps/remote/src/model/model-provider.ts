@@ -20,6 +20,7 @@ export interface ModelMessage {
   thinking?: string;
   toolCalls?: ModelToolCall[];
   toolName?: string;
+  toolCallId?: string;
 }
 
 export interface ModelInput {

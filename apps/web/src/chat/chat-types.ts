@@ -1,6 +1,5 @@
 import type {
   ContentBlock,
-  StopReason,
   ToolCallContent,
   ToolCallLocation,
   ToolCallStatus,
@@ -60,15 +59,14 @@ export interface StreamingContext {
 }
 
 /**
- * entries 是已提交历史；streamingEntries 是当前 ACP 操作的唯一临时投影。
+ * historyChatEntries 是已提交历史投影；streamingChatEntries 是当前 ACP 操作的临时投影。
  * order 固定首次出现次序，byId 允许并行 Tool 按 ID 独立更新。
  */
 export interface ChatState {
   sessionId: string | null;
-  entries: EntryCollection;
-  streamingEntries: EntryCollection;
+  historyChatEntries: EntryCollection;
+  streamingChatEntries: EntryCollection;
   streaming: StreamingContext | null;
-  lastStopReason?: StopReason;
 }
 
 export const emptyEntries = (): EntryCollection => ({ order: [], byId: {} });

@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { createWebSocketStream } from "@agentclientprotocol/sdk/experimental/ws-client";
 import { makePromptMeta } from "@kindergarten/contracts";
+import type { PendingInteractionState } from "../prompt-turn/prompt-turn-types.js";
 
 export interface PromptIds {
   turnId: string;
@@ -8,12 +9,8 @@ export interface PromptIds {
 
 export interface ClientHandlers {
   onUpdate: (value: acp.SessionNotification) => void;
-  onPermission: (
-    value: acp.RequestPermissionRequest,
-  ) => Promise<acp.RequestPermissionResponse>;
-  onElicitation: (
-    value: acp.CreateElicitationRequest,
-  ) => Promise<acp.CreateElicitationResponse>;
+  onInteraction: (value: PendingInteractionState) => void;
+  onInteractionResolved: (id: string) => void;
   onClose: () => void;
 }
 
@@ -22,27 +19,31 @@ export interface ClientHandlers {
  * 这里不做自动重试，避免旧系统中“连接恢复”和“历史回放”互相触发。
  */
 export class AcpWebClient {
-  private constructor(private readonly connection: acp.ClientConnection) {}
+  private constructor(
+    private readonly connection: acp.ClientConnection,
+    private readonly interactions: PendingAcpInteractions,
+  ) {}
 
   static async open(
     url: string,
     handlers: ClientHandlers,
   ): Promise<AcpWebClient> {
+    const interactions = new PendingAcpInteractions(handlers);
     const app = acp
       .client({ name: "model-kindergarten-web" })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         handlers.onUpdate(params);
       })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) =>
-        handlers.onPermission(params),
+        interactions.requestPermission(params),
       )
       .onRequest(acp.methods.client.elicitation.create, ({ params }) =>
-        handlers.onElicitation(params),
+        interactions.requestElicitation(params),
       );
 
     const stream = createWebSocketStream(url);
     const connection = app.connect(stream);
-    const client = new AcpWebClient(connection);
+    const client = new AcpWebClient(connection, interactions);
 
     try {
       await connection.agent.request(acp.methods.agent.initialize, {
@@ -61,7 +62,10 @@ export class AcpWebClient {
       throw error;
     }
 
-    void connection.closed.then(handlers.onClose);
+    void connection.closed.then(() => {
+      interactions.cancelAll();
+      handlers.onClose();
+    });
     return client;
   }
 
@@ -117,7 +121,87 @@ export class AcpWebClient {
     });
   }
 
+  /**
+   * UI 只提交用户决定，不接触 ACP request handler 的 Promise resolver。
+   * resolver 的所有权留在连接对象，连接关闭时也能集中释放所有悬挂请求。
+   */
+  resolveInteraction(
+    interaction: PendingInteractionState,
+    value: acp.RequestPermissionResponse | acp.CreateElicitationResponse,
+  ): void {
+    this.interactions.resolve(interaction, value);
+  }
+
+  cancelInteractions(): void {
+    this.interactions.cancelAll();
+  }
+
   close(): void {
+    this.interactions.cancelAll();
     this.connection.close();
+  }
+}
+
+type PendingReply =
+  | {
+      kind: "permission";
+      resolve: (value: acp.RequestPermissionResponse) => void;
+    }
+  | {
+      kind: "elicitation";
+      resolve: (value: acp.CreateElicitationResponse) => void;
+    };
+
+/** ACP Reverse Request 的 continuation 只存在于传输层，不进入 Zustand。 */
+class PendingAcpInteractions {
+  private readonly byId = new Map<string, PendingReply>();
+
+  constructor(private readonly handlers: ClientHandlers) {}
+
+  requestPermission(
+    request: acp.RequestPermissionRequest,
+  ): Promise<acp.RequestPermissionResponse> {
+    const id = crypto.randomUUID();
+    return new Promise((resolve) => {
+      this.byId.set(id, { kind: "permission", resolve });
+      this.handlers.onInteraction({ id, kind: "permission", request });
+    });
+  }
+
+  requestElicitation(
+    request: acp.CreateElicitationRequest,
+  ): Promise<acp.CreateElicitationResponse> {
+    const id = crypto.randomUUID();
+    return new Promise((resolve) => {
+      this.byId.set(id, { kind: "elicitation", resolve });
+      this.handlers.onInteraction({ id, kind: "elicitation", request });
+    });
+  }
+
+  resolve(
+    interaction: PendingInteractionState,
+    value: acp.RequestPermissionResponse | acp.CreateElicitationResponse,
+  ): void {
+    const pending = this.byId.get(interaction.id);
+    if (!pending || pending.kind !== interaction.kind) return;
+    this.byId.delete(interaction.id);
+    if (pending.kind === "permission") {
+      pending.resolve(value as acp.RequestPermissionResponse);
+    } else {
+      pending.resolve(value as acp.CreateElicitationResponse);
+    }
+    this.handlers.onInteractionResolved(interaction.id);
+  }
+
+  cancelAll(): void {
+    for (const [id, pending] of [...this.byId]) {
+      this.byId.delete(id);
+      if (pending.kind === "permission") {
+        pending.resolve({ outcome: { outcome: "cancelled" } });
+      } else {
+        pending.resolve({ action: "cancel" });
+      }
+      this.handlers.onInteractionResolved(id);
+    }
   }
 }

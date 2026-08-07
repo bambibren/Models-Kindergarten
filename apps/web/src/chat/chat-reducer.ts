@@ -1,4 +1,4 @@
-import type { ContentBlock, SessionNotification, StopReason, ToolCall, ToolCallUpdate } from "@agentclientprotocol/sdk";
+import type { ContentBlock, SessionNotification, ToolCall, ToolCallUpdate } from "@agentclientprotocol/sdk";
 import { readMessageMeta } from "@kindergarten/contracts";
 import type { ChatEntry, ChatState, EntryCollection, MessageEntry, StreamSource, ThoughtEntry, ToolCallEntry } from "./chat-types.js";
 import { emptyEntries } from "./chat-types.js";
@@ -6,20 +6,20 @@ import { emptyEntries } from "./chat-types.js";
 export type ChatAction =
   | { type: "session/open"; sessionId: string }
   | { type: "stream/start"; operationId: string; source: StreamSource; turnId: string; optimisticContent?: ContentBlock[] }
-  | { type: "stream/commit"; operationId: string; stopReason?: StopReason }
+  | { type: "stream/commit"; operationId: string }
   | { type: "acp/update"; value: SessionNotification };
 
 export const emptyChat: ChatState = {
   sessionId: null,
-  entries: emptyEntries(),
-  streamingEntries: emptyEntries(),
+  historyChatEntries: emptyEntries(),
+  streamingChatEntries: emptyEntries(),
   streaming: null,
 };
 
 /** ACP Chat Assembler：只负责把 SessionUpdate 归约为稳定的 ChatEntry。 */
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   if (action.type === "session/open") {
-    return { sessionId: action.sessionId, entries: emptyEntries(), streamingEntries: emptyEntries(), streaming: null };
+    return { sessionId: action.sessionId, historyChatEntries: emptyEntries(), streamingChatEntries: emptyEntries(), streaming: null };
   }
   if (action.type === "stream/start") {
     const optimistic = action.optimisticContent
@@ -27,7 +27,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       : undefined;
     return {
       ...state,
-      streamingEntries: optimistic ? collectionOf(optimistic) : emptyEntries(),
+      streamingChatEntries: optimistic ? collectionOf(optimistic) : emptyEntries(),
       streaming: {
         operationId: action.operationId,
         source: action.source,
@@ -41,10 +41,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     if (state.streaming?.operationId !== action.operationId) return state;
     return {
       ...state,
-      entries: mergeCollections(state.entries, state.streamingEntries),
-      streamingEntries: emptyEntries(),
+      historyChatEntries: mergeCollections(state.historyChatEntries, state.streamingChatEntries),
+      streamingChatEntries: emptyEntries(),
       streaming: null,
-      ...(action.stopReason ? { lastStopReason: action.stopReason } : {}),
     };
   }
   if (action.value.sessionId !== state.sessionId || !state.streaming) return state;
@@ -65,7 +64,7 @@ function reduceMessage(state: ChatState, role: MessageEntry["role"], messageId: 
   if (!meta) return state;
   const chunk = `${messageId}:${meta.chunkIndex}`;
   if (state.streaming.seenChunks.has(chunk)) return state;
-  let collection = state.streamingEntries;
+  let collection = state.streamingChatEntries;
   let streaming = addSeen(state.streaming, chunk);
   const id = `message:${messageId}`;
   const current = collection.byId[id];
@@ -79,7 +78,7 @@ function reduceMessage(state: ChatState, role: MessageEntry["role"], messageId: 
         status: meta.final ? "done" : "streaming",
       });
       streaming = { ...streaming, optimisticUserEntryId: id };
-      return { ...state, streamingEntries: collection, streaming };
+      return { ...state, streamingChatEntries: collection, streaming };
     }
   }
 
@@ -96,7 +95,7 @@ function reduceMessage(state: ChatState, role: MessageEntry["role"], messageId: 
       status: meta.final ? "done" : current.status,
     });
   }
-  return { ...state, streamingEntries: collection, streaming };
+  return { ...state, streamingChatEntries: collection, streaming };
 }
 
 function reduceThought(state: ChatState, messageId: string | null | undefined, content: ContentBlock, rawMeta: unknown): ChatState {
@@ -107,8 +106,8 @@ function reduceThought(state: ChatState, messageId: string | null | undefined, c
   if (state.streaming.seenChunks.has(chunk)) return state;
   const streaming = addSeen(state.streaming, chunk);
   const id = `thought:${messageId}`;
-  const current = state.streamingEntries.byId[id];
-  let collection = state.streamingEntries;
+  const current = state.streamingChatEntries.byId[id];
+  let collection = state.streamingChatEntries;
   if (!current) {
     if (isEmptyText(content) && meta.final) return { ...state, streaming };
     collection = upsert(collection, {
@@ -121,15 +120,15 @@ function reduceThought(state: ChatState, messageId: string | null | undefined, c
       status: meta.final ? "done" : current.status,
     });
   }
-  return { ...state, streamingEntries: collection, streaming };
+  return { ...state, streamingChatEntries: collection, streaming };
 }
 
 function reduceTool(state: ChatState, update: ToolCall | ToolCallUpdate, creating: boolean): ChatState {
   if (!state.streaming) return state;
   const id = `tool:${update.toolCallId}`;
-  const current = state.streamingEntries.byId[id];
+  const current = state.streamingChatEntries.byId[id];
   const base = current?.type === "tool_call" ? current : toolPlaceholder(state.streaming.turnId, update.toolCallId);
-  return { ...state, streamingEntries: upsert(state.streamingEntries, patchTool(base, update, creating)) };
+  return { ...state, streamingChatEntries: upsert(state.streamingChatEntries, patchTool(base, update, creating)) };
 }
 
 function patchTool(current: ToolCallEntry, update: ToolCall | ToolCallUpdate, creating: boolean): ToolCallEntry {

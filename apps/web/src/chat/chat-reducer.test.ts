@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { chatReducer, emptyChat } from "./chat-reducer.js";
 
 describe("chatReducer", () => {
-  it("在 PromptResponse 前只更新 streamingEntries，结束后整体提交", () => {
+  it("在 PromptResponse 前只更新 streamingChatEntries，结束后整体提交", () => {
     let state = openStream("prompt", [{ type: "text", text: "你好" }]);
 
     state = chatReducer(state, {
@@ -28,8 +28,8 @@ describe("chatReducer", () => {
       value: messageNotice("assistant", "assistant-1", "", 2, true),
     });
 
-    expect(state.entries.order).toHaveLength(0);
-    expect(values(state.streamingEntries)).toMatchObject([
+    expect(state.historyChatEntries.order).toHaveLength(0);
+    expect(values(state.streamingChatEntries)).toMatchObject([
       { type: "message", messageId: "user-agent-id", status: "done" },
       {
         type: "message",
@@ -42,10 +42,9 @@ describe("chatReducer", () => {
     state = chatReducer(state, {
       type: "stream/commit",
       operationId: "operation-1",
-      stopReason: "end_turn",
     });
-    expect(state.entries.order).toHaveLength(2);
-    expect(state.streamingEntries.order).toHaveLength(0);
+    expect(state.historyChatEntries.order).toHaveLength(2);
+    expect(state.streamingChatEntries.order).toHaveLength(0);
     expect(state.streaming).toBeNull();
   });
 
@@ -72,7 +71,7 @@ describe("chatReducer", () => {
       rawOutput: { result: "B 先完成" },
     });
 
-    expect(values(state.streamingEntries)).toMatchObject([
+    expect(values(state.streamingChatEntries)).toMatchObject([
       { type: "tool_call", toolCallId: "tool-a", status: "in_progress" },
       { type: "tool_call", toolCallId: "tool-b", status: "completed" },
     ]);
@@ -95,7 +94,7 @@ describe("chatReducer", () => {
       rawOutput: { result: "A 后完成" },
     });
 
-    expect(state.streamingEntries.order).toEqual([
+    expect(state.streamingChatEntries.order).toEqual([
       "tool:tool-a",
       "tool:tool-b",
       "message:message-after-tools",
@@ -117,7 +116,7 @@ describe("chatReducer", () => {
       kind: "search",
       status: "in_progress",
     });
-    expect(values(state.streamingEntries)).toMatchObject([
+    expect(values(state.streamingChatEntries)).toMatchObject([
       {
         type: "tool_call",
         toolCallId: "late-tool",
@@ -135,7 +134,24 @@ describe("chatReducer", () => {
         sessionId: "session-2",
       },
     });
-    expect(state.streamingEntries.order).toHaveLength(0);
+    expect(state.streamingChatEntries.order).toHaveLength(0);
+  });
+
+  it("提交旧流后可以开始新的 streamingEntries", () => {
+    let state = openStream("prompt", [{ type: "text", text: "上一轮" }]);
+    state = chatReducer(state, {
+      type: "stream/commit",
+      operationId: "operation-1",
+    });
+    expect(state.streaming).toBeNull();
+    state = chatReducer(state, {
+      type: "stream/start",
+      operationId: "operation-2",
+      source: "prompt",
+      turnId: "turn-2",
+      optimisticContent: [{ type: "text", text: "新一轮" }],
+    });
+    expect(state.streaming?.operationId).toBe("operation-2");
   });
 });
 
@@ -157,7 +173,7 @@ function openStream(
   return state;
 }
 
-function values(collection: ReturnType<typeof openStream>["streamingEntries"]) {
+function values(collection: ReturnType<typeof openStream>["streamingChatEntries"]) {
   return collection.order.map((id) => collection.byId[id]);
 }
 

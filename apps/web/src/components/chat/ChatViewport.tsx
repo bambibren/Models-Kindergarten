@@ -1,15 +1,29 @@
 import { useEffect, useMemo, useRef } from "react";
 import { GraduationCap } from "lucide-react";
 import type { EntryCollection } from "../../chat/chat-types.js";
+import {
+  isPromptTurnActive,
+  type PromptTurnState,
+  type TurnAction,
+} from "../../prompt-turn/prompt-turn-types.js";
 import { ChatBlockList } from "./ChatBlockList.js";
 import { PromptTurnLoader } from "./PromptTurnLoader.js";
+import { PromptTurnStatusRow } from "../errors/PromptTurnStatusRow.js";
 
-export function ChatViewport({ entries, streamingEntries, running }: { entries: EntryCollection; streamingEntries: EntryCollection; running: boolean }) {
+export function ChatViewport({ historyChatEntries, streamingChatEntries, promptTurn, onTurnAction }: {
+  historyChatEntries: EntryCollection;
+  streamingChatEntries: EntryCollection;
+  promptTurn: PromptTurnState;
+  onTurnAction: (action: TurnAction) => void;
+}) {
   const viewportRef = useRef<HTMLElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const followsBottom = useRef(true);
-  const count = entries.order.length + streamingEntries.order.length;
-  const lastId = useMemo(() => streamingEntries.order.at(-1) ?? entries.order.at(-1), [entries.order, streamingEntries.order]);
+  const count = historyChatEntries.order.length + streamingChatEntries.order.length;
+  const lastId = useMemo(
+    () => streamingChatEntries.order.at(-1) ?? historyChatEntries.order.at(-1),
+    [historyChatEntries.order, streamingChatEntries.order],
+  );
   useEffect(() => {
     const viewport = viewportRef.current;
     const content = contentRef.current;
@@ -35,8 +49,9 @@ export function ChatViewport({ entries, streamingEntries, running }: { entries: 
     <div className="suggestion-grid"><span>总结 sandbox 中的文件</span><span>新建一份学习笔记</span><span>读取 README 并解释架构</span></div>
   </section>;
   return <section className="chat-viewport" ref={viewportRef} onScroll={updateFollowState} aria-live="polite"><div className="chat-content" ref={contentRef}>
-    <ChatBlockList collection={entries} />
-    <ChatBlockList collection={streamingEntries} />
-    {running && <PromptTurnLoader />}
+    <ChatBlockList collection={historyChatEntries} />
+    <ChatBlockList collection={streamingChatEntries} />
+    {isPromptTurnActive(promptTurn) && <PromptTurnLoader />}
+    {!isPromptTurnActive(promptTurn) && <PromptTurnStatusRow state={promptTurn} onAction={onTurnAction} />}
   </div></section>;
 }

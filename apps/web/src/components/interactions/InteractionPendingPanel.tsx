@@ -1,9 +1,16 @@
 import { ShieldCheck, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type * as acp from "@agentclientprotocol/sdk";
-import type { PendingInteraction } from "../../store/app-store.js";
+import type { PendingInteractionState } from "../../prompt-turn/prompt-turn-types.js";
 
-interface Props { interaction: PendingInteraction; queued: number; onResolve: (interaction: PendingInteraction, value: acp.RequestPermissionResponse | acp.CreateElicitationResponse) => void; }
+interface Props {
+  interaction: PendingInteractionState;
+  queued: number;
+  onResolve: (
+    interaction: PendingInteractionState,
+    value: acp.RequestPermissionResponse | acp.CreateElicitationResponse,
+  ) => void;
+}
 
 /** 当前等待用户处理的 ACP reverse request；固定在 Composer 上方，不属于聊天历史。 */
 export function InteractionPendingPanel({ interaction, queued, onResolve }: Props) {
@@ -14,7 +21,7 @@ export function InteractionPendingPanel({ interaction, queued, onResolve }: Prop
   return <AskUserPanel interaction={interaction} queued={queued} onResolve={onResolve} />;
 }
 
-function AskUserPanel({ interaction, queued, onResolve }: Props & { interaction: Extract<PendingInteraction, { kind: "elicitation" }> }) {
+function AskUserPanel({ interaction, queued, onResolve }: Props & { interaction: Extract<PendingInteractionState, { kind: "elicitation" }> }) {
   const [answer, setAnswer] = useState("");
   return <section className="interaction-pending-panel">
     <div className="interaction-heading"><span><Sparkles size={17} /></span><div><strong>Agent 正在等你回答</strong><p>{interaction.request.message}</p></div>{queued > 1 && <small>{queued - 1} 个待处理</small>}</div>

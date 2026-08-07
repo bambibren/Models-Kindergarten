@@ -1,4 +1,5 @@
 import {
+  readdir,
   lstat,
   mkdir,
   readFile,
@@ -15,6 +16,12 @@ export interface SandboxWriteResult {
   path: string;
   oldText: string | null;
   newText: string;
+}
+
+export interface SandboxListItem {
+  path: string;
+  type: "file" | "directory";
+  size?: number;
 }
 
 /**
@@ -50,6 +57,22 @@ export class FileSandbox {
       throw new Error(`文件超过 ${MAX_FILE_BYTES} 字节限制`);
     }
     return { path: target, content: await readFile(target, "utf8") };
+  }
+
+  async list(input = ".", maxItems = 200): Promise<SandboxListItem[]> {
+    await this.ensureReady();
+    const target = input === "." ? this.root : this.preview(input);
+    await this.assertSafeComponents(target, false);
+    const info = await stat(target);
+    if (!info.isDirectory()) throw new Error("目标不是目录");
+    const values = await readdir(target, { withFileTypes: true });
+    return values
+      .filter((item) => !item.isSymbolicLink() && (item.isFile() || item.isDirectory()))
+      .slice(0, maxItems)
+      .map((item) => ({
+        path: relative(this.root, resolve(target, item.name)) || ".",
+        type: item.isDirectory() ? "directory" as const : "file" as const,
+      }));
   }
 
   async writeText(input: string, content: string): Promise<SandboxWriteResult> {

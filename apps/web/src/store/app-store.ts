@@ -1,53 +1,41 @@
 import type { SessionInfo } from "@agentclientprotocol/sdk";
-import type * as acp from "@agentclientprotocol/sdk";
 import { create } from "zustand";
 import { chatReducer, emptyChat, type ChatAction } from "../chat/chat-reducer.js";
+import {
+  promptTurnReducer,
+  type PromptTurnAction,
+} from "../prompt-turn/prompt-turn-reducer.js";
+import {
+  idlePromptTurn,
+  type PromptTurnState,
+} from "../prompt-turn/prompt-turn-types.js";
 
-export type ConnectionState = "connecting" | "connected" | "disconnected";
-export type PendingInteraction =
-  | { id: string; kind: "permission"; request: acp.RequestPermissionRequest; resolve: (value: acp.RequestPermissionResponse) => void }
-  | { id: string; kind: "elicitation"; request: acp.CreateElicitationRequest; resolve: (value: acp.CreateElicitationResponse) => void };
+export type ConnectionState =
+  | { phase: "connecting" }
+  | { phase: "connected" }
+  | { phase: "disconnected"; message: string };
 
 interface AppState {
   connection: ConnectionState;
   sessions: SessionInfo[];
   chat: typeof emptyChat;
-  running: boolean;
-  error: string;
-  interactionOrder: string[];
-  interactionsById: Record<string, PendingInteraction>;
+  promptTurn: PromptTurnState;
   setConnection: (value: ConnectionState) => void;
   setSessions: (value: SessionInfo[]) => void;
   dispatchChat: (action: ChatAction) => void;
-  setRunning: (value: boolean) => void;
-  setError: (value: string) => void;
-  enqueueInteraction: (value: PendingInteraction) => void;
-  removeInteraction: (id: string) => void;
-  clearInteractions: () => void;
+  dispatchPromptTurn: (action: PromptTurnAction) => void;
 }
 
 /** 一个 Store 聚合应用状态；组件通过窄 selector 各自订阅，不靠 ref 驱动业务 UI。 */
 export const useAppStore = create<AppState>((set) => ({
-  connection: "connecting",
+  connection: { phase: "connecting" },
   sessions: [],
   chat: emptyChat,
-  running: false,
-  error: "",
-  interactionOrder: [],
-  interactionsById: {},
+  promptTurn: idlePromptTurn,
   setConnection: (connection) => set({ connection }),
   setSessions: (sessions) => set({ sessions }),
   dispatchChat: (action) => set((state) => ({ chat: chatReducer(state.chat, action) })),
-  setRunning: (running) => set({ running }),
-  setError: (error) => set({ error }),
-  enqueueInteraction: (interaction) => set((state) => ({
-    interactionOrder: [...state.interactionOrder, interaction.id],
-    interactionsById: { ...state.interactionsById, [interaction.id]: interaction },
+  dispatchPromptTurn: (action) => set((state) => ({
+    promptTurn: promptTurnReducer(state.promptTurn, action),
   })),
-  removeInteraction: (id) => set((state) => {
-    const interactionsById = { ...state.interactionsById };
-    delete interactionsById[id];
-    return { interactionOrder: state.interactionOrder.filter((value) => value !== id), interactionsById };
-  }),
-  clearInteractions: () => set({ interactionOrder: [], interactionsById: {} }),
 }));

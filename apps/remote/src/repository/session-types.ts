@@ -5,18 +5,18 @@ import type {
   ToolKind,
 } from "@agentclientprotocol/sdk";
 
-export type StoredRole = "user" | "assistant";
+export type SessionRole = "user" | "assistant";
 
-export interface StoredMessage {
+export interface SessionMessageEntry {
   type: "message";
-  role: StoredRole;
+  role: SessionRole;
   text: string;
   turnId: string;
   messageId: string;
   createdAt: string;
 }
 
-export interface StoredThought {
+export interface SessionThoughtEntry {
   type: "thought";
   text: string;
   turnId: string;
@@ -24,7 +24,13 @@ export interface StoredThought {
   createdAt: string;
 }
 
-export interface StoredToolCall {
+export type SessionToolOutcomeStatus =
+  | "success"
+  | "error"
+  | "denied"
+  | "duplicate_blocked";
+
+export interface SessionToolCallEntry {
   type: "tool_call";
   turnId: string;
   toolCallId: string;
@@ -34,18 +40,24 @@ export interface StoredToolCall {
   status: ToolCallStatus;
   rawInput: unknown;
   rawOutput?: unknown;
+  modelContent?: string;
+  outcomeStatus?: SessionToolOutcomeStatus;
   content: ToolCallContent[];
   locations: ToolCallLocation[];
   createdAt: string;
 }
 
-/** 稳定会话历史使用与 Web ChatEntry 相同的顺序语义，但不保存流式草稿。 */
-export type StoredEntry = StoredMessage | StoredThought | StoredToolCall;
+/** SessionEntry 是聊天历史和模型上下文共同使用的唯一事实源。 */
+export type SessionEntry =
+  | SessionMessageEntry
+  | SessionThoughtEntry
+  | SessionToolCallEntry;
 
-export interface StoredSession {
+export interface SessionRecord {
   id: string;
+  revision: number;
   cwd: string;
   title: string;
   updatedAt: string;
-  entries: StoredEntry[];
+  sessionEntries: SessionEntry[];
 }

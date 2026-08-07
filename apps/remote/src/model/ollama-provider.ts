@@ -5,9 +5,13 @@ import type {
   ModelStudent,
   ModelToolCall,
 } from "./model-provider.js";
+import { CircuitBreaker } from "../resilience/circuit-breaker.js";
+import { withRetry } from "../resilience/retry.js";
+import { ModelProviderError } from "./model-error.js";
 
 /** Ollama 是 V1 唯一面向用户的真实 Provider。 */
 export class OllamaProvider implements ModelProvider {
+  private readonly circuit = new CircuitBreaker("ollama");
   constructor(readonly student: ModelStudent) {
     if (student.provider.kind !== "ollama") {
       throw new Error("OllamaProvider 只能接收 ollama ModelStudent");
@@ -15,23 +19,38 @@ export class OllamaProvider implements ModelProvider {
   }
 
   async verify(): Promise<void> {
-    const response = await fetch(new URL("/api/tags", this.student.provider.baseUrl));
+    let response: Response;
+    try {
+      response = await this.fetchWithResilience(
+        new URL("/api/tags", this.student.provider.baseUrl),
+      );
+    } catch (error) {
+      throw modelConnectionError(error, "无法连接本地 Ollama 服务");
+    }
     if (!response.ok) {
-      throw new Error(`Ollama 健康检查失败 (${response.status})`);
+      throw new ModelProviderError(
+        "dependency_unavailable",
+        `Ollama 健康检查失败 (${response.status})`,
+        response.status === 429 || response.status >= 500,
+      );
     }
     const value = await response.json() as unknown;
     const models = readModelNames(value);
     if (!models.has(this.student.provider.model)) {
-      throw new Error(
+      throw new ModelProviderError(
+        "dependency_unavailable",
         `本地模型 ${this.student.provider.model} 未安装，请先运行 ollama pull ${this.student.provider.model}`,
+        false,
       );
     }
   }
 
   async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
-    const response = await fetch(
-      new URL("/api/chat", this.student.provider.baseUrl),
-      {
+    let response: Response;
+    try {
+      response = await this.fetchWithResilience(
+        new URL("/api/chat", this.student.provider.baseUrl),
+        {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -47,24 +66,34 @@ export class OllamaProvider implements ModelProvider {
               role: "system",
               content: this.student.agentConfig.systemPrompt,
             },
-            ...input.messages,
+            ...input.messages.map(toOllamaMessage),
           ],
         }),
         signal,
-      },
-    );
+        },
+      );
+    } catch (error) {
+      if (isAbort(error) || signal.aborted) throw error;
+      throw modelConnectionError(error, "Ollama 请求失败");
+    }
 
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 240);
-      throw new Error(
+      throw new ModelProviderError(
+        "model_request_failed",
         `Ollama 请求失败 (${response.status}): ${detail || response.statusText}`,
+        response.status === 429 || response.status >= 500,
       );
     }
-    if (!response.body) throw new Error("Ollama 响应没有流式 Body");
+    if (!response.body) {
+      throw new ModelProviderError("invalid_model_response", "Ollama 响应没有流式 Body", false);
+    }
 
     for await (const line of readLines(response.body)) {
       const chunk = parseChunk(line);
-      if (chunk.error) throw new Error(`Ollama: ${chunk.error}`);
+      if (chunk.error) {
+        throw new ModelProviderError("model_request_failed", `Ollama: ${chunk.error}`, false);
+      }
       if (chunk.thinking) {
         yield { type: "thinking_delta", text: chunk.thinking };
       }
@@ -88,6 +117,79 @@ export class OllamaProvider implements ModelProvider {
       }
     }
   }
+
+  private fetchWithResilience(
+    url: URL,
+    init?: RequestInit,
+  ): Promise<Response> {
+    return this.circuit.execute(() => withRetry(async () => {
+      const response = await fetch(url, init);
+      if (response.status === 429 || response.status >= 500) {
+        await response.body?.cancel();
+        throw new RetryableHttpError(response.status);
+      }
+      return response;
+    }, {
+      maxAttempts: 3,
+      initialDelayMs: 200,
+      maxDelayMs: 1_500,
+      jitter: true,
+      shouldRetry: isTransientModelError,
+    }, init?.signal instanceof AbortSignal ? init.signal : undefined));
+  }
+}
+
+function toOllamaMessage(message: ModelInput["messages"][number]): Record<string, unknown> {
+  if (message.role === "assistant" && message.toolCalls?.length) {
+    return {
+      role: "assistant",
+      content: message.content,
+      tool_calls: message.toolCalls.map((call) => ({
+        function: { name: call.name, arguments: call.arguments },
+      })),
+    };
+  }
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      content: message.content,
+      ...(message.toolName ? { tool_name: message.toolName } : {}),
+    };
+  }
+  return {
+    role: message.role,
+    content: message.content,
+    ...(message.thinking ? { thinking: message.thinking } : {}),
+  };
+}
+
+class RetryableHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`);
+  }
+}
+
+function isTransientModelError(error: unknown): boolean {
+  return error instanceof RetryableHttpError || error instanceof TypeError;
+}
+
+function modelConnectionError(error: unknown, message: string): ModelProviderError {
+  if (error instanceof ModelProviderError) return error;
+  if (error instanceof RetryableHttpError) {
+    return new ModelProviderError("model_request_failed", `${message} (HTTP ${error.status})`, true, { cause: error });
+  }
+  if (error instanceof TypeError || errorText(error).includes("熔断")) {
+    return new ModelProviderError("dependency_unavailable", message, true, { cause: error });
+  }
+  return new ModelProviderError("model_request_failed", message, false, { cause: error });
+}
+
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function errorText(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
 }
 
 interface ParsedChunk {
@@ -101,8 +203,15 @@ interface ParsedChunk {
 }
 
 function parseChunk(line: string): ParsedChunk {
-  const value = JSON.parse(line) as unknown;
-  if (!isRecord(value)) throw new Error("Ollama 返回了无效 JSON Chunk");
+  let value: unknown;
+  try {
+    value = JSON.parse(line) as unknown;
+  } catch (error) {
+    throw new ModelProviderError("invalid_model_response", "Ollama 返回了无效 JSON Chunk", false, { cause: error });
+  }
+  if (!isRecord(value)) {
+    throw new ModelProviderError("invalid_model_response", "Ollama 返回了无效 JSON Chunk", false);
+  }
 
   const message = value.message;
   return {

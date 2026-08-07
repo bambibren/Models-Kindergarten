@@ -34,7 +34,7 @@ describe("ACP WebSocket", () => {
     const sessions = new SessionRepository(dir);
     const sandbox = new FileSandbox(join(dir, "sandbox"));
     await sandbox.initialize();
-    const runtime = new AgentRuntime(
+    const runtime = AgentRuntime.fromRegistry(
       new FixtureProvider(),
       new ToolRegistry(sandbox),
     );
