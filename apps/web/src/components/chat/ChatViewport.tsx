@@ -10,7 +10,8 @@ import { ChatBlockList } from "./ChatBlockList.js";
 import { PromptTurnLoader } from "./PromptTurnLoader.js";
 import { PromptTurnStatusRow } from "../errors/PromptTurnStatusRow.js";
 
-export function ChatViewport({ historyChatEntries, streamingChatEntries, promptTurn, onTurnAction }: {
+export function ChatViewport({ sessionId, historyChatEntries, streamingChatEntries, promptTurn, onTurnAction }: {
+  sessionId: string | null;
   historyChatEntries: EntryCollection;
   streamingChatEntries: EntryCollection;
   promptTurn: PromptTurnState;
@@ -49,8 +50,8 @@ export function ChatViewport({ historyChatEntries, streamingChatEntries, promptT
     <div className="suggestion-grid"><span>总结 sandbox 中的文件</span><span>新建一份学习笔记</span><span>读取 README 并解释架构</span></div>
   </section>;
   return <section className="chat-viewport" ref={viewportRef} onScroll={updateFollowState} aria-live="polite"><div className="chat-content" ref={contentRef}>
-    <ChatBlockList collection={historyChatEntries} />
-    <ChatBlockList collection={streamingChatEntries} />
+    <ChatBlockList collection={historyChatEntries} sessionId={sessionId} showEvaluationLinks />
+    <ChatBlockList collection={streamingChatEntries} sessionId={sessionId} />
     {isPromptTurnActive(promptTurn) && <PromptTurnLoader />}
     {!isPromptTurnActive(promptTurn) && <PromptTurnStatusRow state={promptTurn} onAction={onTurnAction} />}
   </div></section>;

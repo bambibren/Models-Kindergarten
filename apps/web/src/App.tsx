@@ -258,6 +258,7 @@ export default function App() {
     <section className="chat-screen">
       <ChatHeader connection={connection} />
       <ChatViewport
+        sessionId={chat.sessionId}
         historyChatEntries={chat.historyChatEntries}
         streamingChatEntries={chat.streamingChatEntries}
         promptTurn={promptTurn}

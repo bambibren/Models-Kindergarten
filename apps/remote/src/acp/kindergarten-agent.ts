@@ -135,7 +135,12 @@ export class KindergartenAgent {
 
     try {
       const result = await this.runtime.run(
-        { text, sessionEntries: session.sessionEntries },
+        {
+          text,
+          sessionEntries: session.sessionEntries,
+          sessionId: session.id,
+          turnId,
+        },
         projection,
         controller.signal,
       );

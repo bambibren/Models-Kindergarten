@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { EvaluationTraceExporter } from "@kindergarten/evaluation-exporter";
 import { KindergartenAgent } from "./acp/kindergarten-agent.js";
 import { OllamaProvider } from "./model/ollama-provider.js";
 import type { ModelStudent } from "./model/model-provider.js";
@@ -25,7 +26,10 @@ try {
 const sessions = new SessionRepository(dataDir);
 const sandbox = new FileSandbox(sandboxDir);
 await sandbox.initialize();
-const runtime = AgentRuntime.fromRegistry(model, new ToolRegistry(sandbox));
+const evaluation = new EvaluationTraceExporter(
+  process.env.EVALUATION_SERVICE_URL ?? "http://127.0.0.1:7441",
+);
+const runtime = AgentRuntime.fromRegistry(model, new ToolRegistry(sandbox), evaluation);
 const agent = new KindergartenAgent(sessions, runtime).createApp();
 const server = new RemoteServer(agent, {
   studentId: student.id,
@@ -41,7 +45,7 @@ console.log(`Sandbox: ${sandbox.root}`);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    void server.close().finally(() => process.exit(0));
+    void Promise.all([server.close(), evaluation.flush()]).finally(() => process.exit(0));
   });
 }
 

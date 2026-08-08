@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { selectEntryBlocks } from "./chat-blocks.js";
+import {
+  selectEntryBlocks,
+  selectTurnEvaluationAnchors,
+} from "./chat-blocks.js";
 import type { EntryCollection, MessageEntry, ThoughtEntry, ToolCallEntry } from "./chat-types.js";
 
 describe("selectEntryBlocks", () => {
@@ -22,6 +25,22 @@ describe("selectEntryBlocks", () => {
       { type: "activity", turnId: "turn-2", itemIds: [nextThought.id] },
     ]);
   });
+
+  it("为每个真实 Turn 选择最后一个渲染块作为稳定评测入口", () => {
+    const collection = entries([
+      message("u1", "turn-1", "user"),
+      thinking("t1", "turn-1"),
+      message("a1", "turn-1", "assistant"),
+      message("u2", "turn-2", "user"),
+      tool("tool-2", "turn-2", "call-2"),
+      message("a2", "turn-2", "assistant"),
+      message("loading", "load:temporary", "assistant"),
+    ]);
+    expect(selectTurnEvaluationAnchors(collection)).toEqual([
+      { turnId: "turn-1", afterBlockId: "entry:a1" },
+      { turnId: "turn-2", afterBlockId: "entry:a2" },
+    ]);
+  });
 });
 
 function message(id: string, turnId: string, role: MessageEntry["role"]): MessageEntry {
@@ -32,4 +51,10 @@ function thinking(id: string, turnId: string): ThoughtEntry {
 }
 function tool(id: string, turnId: string, toolCallId: string): ToolCallEntry {
   return { type: "tool_call", id, toolCallId, turnId, title: id, kind: "other", status: "in_progress", content: [], locations: [] };
+}
+function entries(values: Array<MessageEntry | ThoughtEntry | ToolCallEntry>): EntryCollection {
+  return {
+    order: values.map((entry) => entry.id),
+    byId: Object.fromEntries(values.map((entry) => [entry.id, entry])),
+  };
 }

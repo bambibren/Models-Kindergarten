@@ -16,9 +16,16 @@ ACP Agent Adapter
               ├─ PermissionGate（执行策略）
               ├─ RetryExecutor
               └─ ToolExecutor → Sandboxes
+          └─ RuntimeObservationSink
+              → EvaluationTraceExporter → HTTP
+
+Independent Evaluation Web
+  ⇄ Independent Evaluation Service
+      → Minimal Evaluator
+      → Turn Trace Repository
 ```
 
-ACP Adapter 不实现模型循环或工具安全；Model Provider 不依赖 ACP；ToolRuntime 不依赖 Ollama；Web 不保存 Runtime 状态。
+ACP Adapter 不实现模型循环或工具安全；Model Provider 不依赖 ACP；ToolRuntime 不依赖 Ollama；Chat Web 不保存 Runtime 状态。Evaluation 通过只读端口旁路观察主链，上传失败不能改变 Agent 结果。
 
 ## 单一事实源与投影
 

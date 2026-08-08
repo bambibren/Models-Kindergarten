@@ -8,9 +8,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter @kindergarten/remote --filter @kindergarten/web dev",
+    "dev": "pnpm --parallel --filter @kindergarten/remote --filter @kindergarten/web --filter @kindergarten/evaluation-service --filter @kindergarten/evaluation-web dev",
     "dev:remote": "pnpm --filter @kindergarten/remote dev",
     "dev:web": "pnpm --filter @kindergarten/web dev",
+    "dev:evaluation": "pnpm --parallel --filter @kindergarten/evaluation-service --filter @kindergarten/evaluation-web dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"

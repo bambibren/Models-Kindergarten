@@ -11,7 +11,10 @@ User → React Chat → ACP Client ⇄ Remote ACP Agent
                                        ├→ AgentRunner
                                        ├→ Ollama qwen3:8b
                                        ├→ ToolRuntime
-                                       └→ Session Repository
+                                       ├→ Session Repository
+                                       └→ Observation Port → Evaluation Exporter
+
+Evaluation Web ⇄ Evaluation Service ⇄ Turn Trace Repository
 ```
 
 V1.5 是单用户、单 Agent、本地模型实验作品。Browser 与 Remote 只使用 ACP；不增加 Java/RCS、SSE、EventBus 或第二套 Runtime Event 协议。
@@ -29,6 +32,9 @@ V1.5 是单用户、单 Agent、本地模型实验作品。Browser 与 Remote �
 | ModelProvider | 与 ACP 解耦；当前实现 Ollama，保留 API Adapter 接口 |
 | Resilience | 有限重试、指数退避、jitter、外部依赖熔断 |
 | Web Chat Projection | ACP Update 归约为历史/流式 ChatEntry，按 ID 原位更新 |
+| Runtime Observation Port | 只读发布本轮执行事实，不依赖 HTTP、存储或评测规则 |
+| Evaluation Service | 独立进程接收终态 Trace、计算最小客观指标并持久化 |
+| Evaluation Web | 独立页面按 Session/Turn 查询并展示执行树与评分结果 |
 
 ## 3. 数据设计
 
@@ -68,7 +74,13 @@ ToolCallLedger 使用 `toolName + canonicalJson(arguments)` 作为精确 `dedupe
 
 Plan 能力完全不做：没有 `update_plan`、PlanState、PlanStore、ACP Plan UI、Planner/Executor 或 Workflow/DAG。
 
-## 6. ACP 不变量
+## 6. Turn Evaluation 最小链路
+
+AgentRunner 在关键执行边界向只读 Observation Port 发布事件。Exporter 按 `runId` 聚合终态 Trace，并异步通过 HTTP 发送给 Evaluation Service。Chat Web 只在 Turn 完成后生成带 `sessionId + turnId` 的导航链接，不读取评测数据。
+
+Evaluation 当前只计算客观字段：完成状态、Model Round、Tool 调用与成败、重复调用、上下文与输出 Token、上下文截断、首 Token 延迟、总耗时、错误及权限违规。不包含 Dataset、Judge、总分和模型对比。
+
+## 7. ACP 不变量
 
 - 一个浏览器页面只有一个 ACP connection owner；
 - 一个 Session 同时最多一个 Prompt；
