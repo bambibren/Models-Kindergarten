@@ -7,6 +7,27 @@ export interface RuntimeVariantSnapshot {
   systemPromptHash: string;
   runtimeVersion: string;
   toolNames: string[];
+  capabilities?: {
+    tools: Array<{
+      id: string;
+      modelName: string;
+      origin: "builtin" | "mcp" | "skill_runtime";
+      schemaHash: string;
+      serverId?: string;
+      remoteName?: string;
+    }>;
+    mcpServers: Array<{
+      serverId: string;
+      protocolEra: "modern" | "legacy";
+      revision: string;
+      toolSchemaHashes: Record<string, string>;
+    }>;
+    skills: Array<{
+      skillId: string;
+      contentHash: string;
+      source: "builtin" | "project" | "user" | "git";
+    }>;
+  };
 }
 
 export type ContextMessageSource =
@@ -16,7 +37,10 @@ export type ContextMessageSource =
   | "tool_result"
   | "memory"
   | "retrieval"
-  | "summary";
+  | "summary"
+  | "skill_catalog"
+  | "mcp_resource_catalog"
+  | "mcp_resource";
 
 export interface ContextMessageObservation {
   role: "system" | "user" | "assistant" | "tool";

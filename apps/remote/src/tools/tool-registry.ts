@@ -1,4 +1,6 @@
 import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
+import { createHash } from "node:crypto";
+import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.js";
 import type { ModelToolCall, ModelToolDefinition } from "../model/model-provider.js";
 import { ProcessSandbox } from "./process-sandbox.js";
 import { FileSandbox } from "./sandbox.js";
@@ -10,6 +12,8 @@ export type ToolOutcomeStatus = "success" | "error" | "denied" | "duplicate_bloc
 export type ToolErrorCategory =
   | "validation"
   | "permission"
+  | "authentication"
+  | "protocol"
   | "timeout"
   | "network"
   | "execution"
@@ -40,6 +44,14 @@ export interface ToolResult {
   locations: ToolCallLocation[];
 }
 
+/** ToolRuntime 依赖的最小端口；内置、MCP 和 Skill Provider 使用同一条执行链。 */
+export interface ToolRegistryPort {
+  readonly definitions: ModelToolDefinition[];
+  prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall;
+  execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult>;
+  capabilitySnapshot(): RuntimeCapabilitySnapshot;
+}
+
 export interface ToolOutcome extends ToolResult {
   status: ToolOutcomeStatus;
   retryable: boolean;
@@ -60,7 +72,8 @@ export type ToolName =
   | "ask_user";
 
 /** Registry 只拥有 Tool Schema、参数规范化和具体 Handler。 */
-export class ToolRegistry {
+export class ToolRegistry implements ToolRegistryPort {
+  readonly providerId = "builtin";
   readonly definitions: ModelToolDefinition[] = definitions;
   readonly process: ProcessSandbox;
   readonly web: WebToolClient;
@@ -184,6 +197,21 @@ export class ToolRegistry {
     }
     throw new Error(`未知工具: ${call.name}`);
   }
+
+  capabilitySnapshot(): RuntimeCapabilitySnapshot {
+    return {
+      tools: this.definitions.map((definition) => ({
+        id: `builtin:tool:${definition.function.name}`,
+        modelName: definition.function.name,
+        origin: "builtin",
+        schemaHash: createHash("sha256")
+          .update(canonicalJson(definition))
+          .digest("hex"),
+      })),
+      mcpServers: [],
+      skills: [],
+    };
+  }
 }
 
 function prepared(
@@ -272,7 +300,7 @@ const definitions: ModelToolDefinition[] = [
 function definition(
   name: ToolName,
   description: string,
-  properties: ModelToolDefinition["function"]["parameters"]["properties"],
+  properties: Record<string, unknown>,
   required?: string[],
 ): ModelToolDefinition {
   return {
@@ -315,7 +343,7 @@ function optionalNumberArg(input: Record<string, unknown>, name: string): number
   return value;
 }
 
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)

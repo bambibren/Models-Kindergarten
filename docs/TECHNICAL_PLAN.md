@@ -1,9 +1,9 @@
 # Models Kindergarten 技术方案与演进路线
 
-> 当前实现基线：V1.5 Conventional Single-Agent Runtime
-> 当前目标：打通常规 Agent Runtime 的最小完整功能链路，不以复杂算法优化模型效果。
+> 当前实现基线：V1.6 Conventional Single-Agent Runtime + MCP/Agent Skills
+> 当前目标：在不改变 ACP Chat 主链的前提下，打通标准化外部能力与渐进知识包链路。
 
-## 1. V1.5 产品边界
+## 1. V1.6 产品边界
 
 ```text
 User → React Chat → ACP Client ⇄ Remote ACP Agent
@@ -11,22 +11,26 @@ User → React Chat → ACP Client ⇄ Remote ACP Agent
                                        ├→ AgentRunner
                                        ├→ Ollama qwen3:8b
                                        ├→ ToolRuntime
+                                       │   └→ RuntimeCapabilityCatalog
+                                       │       ├→ Built-in Tools
+                                       │       ├→ MCP Host
+                                       │       └→ Agent Skills
                                        ├→ Session Repository
                                        └→ Observation Port → Evaluation Exporter
 
 Evaluation Web ⇄ Evaluation Service ⇄ Turn Trace Repository
 ```
 
-V1.5 是单用户、单 Agent、本地模型实验作品。Browser 与 Remote 只使用 ACP；不增加 Java/RCS、SSE、EventBus 或第二套 Runtime Event 协议。
+V1.6 仍是单用户、单 Agent、本地模型实验作品。Browser 与 Remote 只使用 ACP；MCP 是 Remote 到外部能力的协议，不替代 ACP，也不增加 Java/RCS、SSE、EventBus 或第二套 Runtime Event 协议。
 
 ## 2. 核心模块
 
-| 模块 | V1.5 职责 |
+| 模块 | V1.6 职责 |
 | --- | --- |
 | ACP Adapter | Session lifecycle、Prompt、流式 Update、Permission、Elicitation |
 | AgentRuntime | 聚合 Runner、Context、Tool 和可靠性能力 |
 | AgentRunner | 驱动一次 Prompt 的模型—工具循环并确定性停止 |
-| ContextBuilder | `sessionEntries → modelMessages`，保留多轮消息与 Tool Result |
+| ContextAssembler | `sessionEntries + capability context → modelMessages`，保留来源、信任级别与 Hash |
 | ConversationRepository | V3 SessionEntry 事实、revision、串行原子写入和旧数据迁移 |
 | ToolRuntime | 注册、校验、权限、精确去重、局部重试、执行和 ToolOutcome |
 | ModelProvider | 与 ACP 解耦；当前实现 Ollama，保留 API Adapter 接口 |
@@ -35,6 +39,8 @@ V1.5 是单用户、单 Agent、本地模型实验作品。Browser 与 Remote �
 | Runtime Observation Port | 只读发布本轮执行事实，不依赖 HTTP、存储或评测规则 |
 | Evaluation Service | 独立进程接收终态 Trace、计算最小客观指标并持久化 |
 | Evaluation Web | 独立页面按 Session/Turn 查询并展示执行树与评分结果 |
+| MCP Host | 管理 stdio/Streamable HTTP Client、鉴权引用、发现、调用和 Resource |
+| Agent Skills | 安装校验、作用域发现、渐进激活与资源读取 |
 
 ## 3. 数据设计
 
@@ -90,7 +96,7 @@ Evaluation 当前只计算客观字段：完成状态、Model Round、Tool 调�
 - PromptResponse 是 Web 当前流式投影的整体提交边界；
 - Permission 是安全授权，Elicitation 是信息补充。
 
-## 7. 验收范围
+## 8. 验收范围
 
 - 多轮 user/assistant/tool 上下文；
 - Tool Result 进入下一次模型调用并可从历史恢复；
@@ -102,16 +108,16 @@ Evaluation 当前只计算客观字段：完成状态、Model Round、Tool 调�
 - Session V1/V2→V3 迁移、原子提交、Load/Resume；
 - typecheck、test、build 和真实页面链路。
 
-## 8. 后续演进
+## 9. 后续演进
 
-V1.5 之后按独立闭环选择，不默认一次全部进入：
+V1.6 之后按独立闭环选择，不默认一次全部进入：
 
 | 阶段 | 候选能力 |
 | --- | --- |
 | V2 | Context 预算优化、总结压缩、来源追踪；Runtime Trace/可观测性 |
 | V3 | Evaluation、Benchmark、失败分类和对比实验 |
-| V4 | ModelStudent/AgentVersion 配置管理、课程与 Skill 绑定 |
+| V4 | ModelStudent/AgentVersion 配置管理、课程与图形化能力绑定 |
 | V5 | 长短期 Memory、检索、Revision、污染治理 |
 | V6 | 多 Agent、Handoff、共享记忆和协作评测 |
 
-当前明确不做：Runtime Timeline/Event Store、长期记忆、RAG、多 Agent、MCP 管理平台、云沙箱、容器调度、多租户、语义相似判重和自动模型降级。
+当前明确不做：Runtime Timeline/Event Store、长期记忆、RAG、多 Agent、MCP 市场与管理 UI、MCP Tasks/Apps、Skill 自动升级与脚本自动执行、云沙箱、容器调度、多租户、语义相似判重和自动模型降级。

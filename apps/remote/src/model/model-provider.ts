@@ -40,21 +40,16 @@ export interface ModelToolDefinition {
   function: {
     name: string;
     description: string;
-    parameters: {
-      type: "object";
-      properties: Record<string, ModelToolParameter>;
-      required?: string[];
-      additionalProperties?: boolean;
-    };
+    /** MCP Tool 可以声明完整 JSON Schema，Provider Adapter 不应截断方言。 */
+    parameters: ModelToolSchema;
   };
 }
 
-export interface ModelToolParameter {
-  type: "string" | "number" | "integer" | "boolean" | "array";
-  description?: string;
-  items?: { type: "string" };
-  minLength?: number;
-  maxLength?: number;
+export interface ModelToolSchema extends Record<string, unknown> {
+  type: "object";
+  properties?: Record<string, unknown>;
+  required?: string[];
+  additionalProperties?: boolean;
 }
 
 export type ModelEvent =

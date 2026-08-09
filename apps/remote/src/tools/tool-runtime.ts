@@ -5,7 +5,7 @@ import {
   type PreparedToolCall,
   type ToolErrorCategory,
   type ToolOutcome,
-  type ToolRegistry,
+  type ToolRegistryPort,
 } from "./tool-registry.js";
 import { PermissionGate } from "./permission-gate.js";
 import { ToolExecutionError } from "./tool-error.js";
@@ -53,7 +53,7 @@ export class ToolCallLedger {
 /** ToolRuntime 在模型已经提出调用后，统一执行去重、权限、局部重试和 Handler。 */
 export class ToolRuntime {
   constructor(
-    readonly registry: ToolRegistry,
+    readonly registry: ToolRegistryPort,
     private readonly permissions = new PermissionGate(),
   ) {}
 

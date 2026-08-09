@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
 import {
-  ContextBuilder,
+  ContextAssembler,
   observeMessage,
-} from "../conversation/context-builder.js";
+} from "../conversation/context-assembler.js";
 import type { ModelProvider, ModelToolCall } from "../model/model-provider.js";
 import type { SessionEntry } from "../repository/session-types.js";
 import {
@@ -19,7 +19,7 @@ import {
 import type {
   PreparedToolCall,
   ToolOutcome,
-  ToolRegistry,
+  ToolRegistryPort,
 } from "../tools/tool-registry.js";
 
 export interface RunInput {
@@ -51,7 +51,7 @@ export class AgentRuntime {
   constructor(
     readonly model: ModelProvider,
     readonly tools: ToolRuntime,
-    context = new ContextBuilder(),
+    context = new ContextAssembler(),
     observations: RuntimeObservationSink = noopRuntimeObservationSink,
   ) {
     this.runner = new AgentRunner(model, tools, context, observations);
@@ -59,10 +59,10 @@ export class AgentRuntime {
 
   static fromRegistry(
     model: ModelProvider,
-    registry: ToolRegistry,
+    registry: ToolRegistryPort,
     observations: RuntimeObservationSink = noopRuntimeObservationSink,
   ): AgentRuntime {
-    return new AgentRuntime(model, new ToolRuntime(registry), new ContextBuilder(), observations);
+    return new AgentRuntime(model, new ToolRuntime(registry), new ContextAssembler(), observations);
   }
 
   run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<RunResult> {
@@ -74,16 +74,18 @@ export class AgentRunner {
   constructor(
     private readonly model: ModelProvider,
     private readonly tools: ToolRuntime,
-    private readonly context: ContextBuilder,
+    private readonly context: ContextAssembler,
     private readonly observations: RuntimeObservationSink,
   ) {}
 
   async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<RunResult> {
     const runId = randomUUID();
     const startedAt = Date.now();
-    const built = this.context.buildObserved(input.sessionEntries, input.text);
+    const built = await this.context.buildObserved(input.sessionEntries, input.text, signal);
     const messages = built.messages;
     const contextObservations = built.observations;
+    const toolDefinitions = structuredClone(this.tools.registry.definitions);
+    const capabilitySnapshot = structuredClone(this.tools.registry.capabilitySnapshot());
     const ledger = new ToolCallLedger();
     const observed = new ObservedRunObserver(observer, this.observations, runId);
     this.observations.emit({
@@ -92,7 +94,11 @@ export class AgentRunner {
       sessionId: input.sessionId ?? `runtime:${runId}`,
       turnId: input.turnId ?? runId,
       startedAt,
-      variant: variantSnapshot(this.model, this.tools.registry.definitions.map((tool) => tool.function.name)),
+      variant: variantSnapshot(
+        this.model,
+        toolDefinitions.map((tool) => tool.function.name),
+        capabilitySnapshot,
+      ),
     });
 
     for (let round = 0; ; round += 1) {
@@ -124,7 +130,7 @@ export class AgentRunner {
 
       try {
         for await (const event of this.model.stream(
-          { messages, tools: this.tools.registry.definitions },
+          { messages, tools: toolDefinitions },
           signal,
         )) {
           if (
@@ -339,7 +345,11 @@ class ObservedRunObserver implements RunObserver {
   }
 }
 
-function variantSnapshot(model: ModelProvider, toolNames: string[]) {
+function variantSnapshot(
+  model: ModelProvider,
+  toolNames: string[],
+  capabilities: ReturnType<ToolRegistryPort["capabilitySnapshot"]>,
+) {
   return {
     studentId: model.student.id,
     studentName: model.student.name,
@@ -351,13 +361,14 @@ function variantSnapshot(model: ModelProvider, toolNames: string[]) {
     systemPromptHash: createHash("sha256")
       .update(model.student.agentConfig.systemPrompt)
       .digest("hex"),
-    runtimeVersion: "1.5",
+    runtimeVersion: "1.6",
     toolNames,
+    capabilities,
   };
 }
 
 function prepareCall(
-  registry: ToolRegistry,
+  registry: ToolRegistryPort,
   modelCall: ModelToolCall,
   fallbackId: string,
 ): { modelCall: ModelToolCall; call: PreparedToolCall } {

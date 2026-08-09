@@ -9,7 +9,7 @@
 
 ## 支持矩阵
 
-| ACP method/update | V1.5 |
+| ACP method/update | V1.6 |
 | --- | --- |
 | initialize | 支持；Client 宣告 `elicitation.form` |
 | session/new、list、load、resume、close | 支持 |

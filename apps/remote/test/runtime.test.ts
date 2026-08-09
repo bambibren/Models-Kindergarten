@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ContextBuilder } from "../src/conversation/context-builder.js";
+import { ContextAssembler } from "../src/conversation/context-assembler.js";
 import type {
   ModelEvent,
   ModelInput,
@@ -23,7 +23,7 @@ afterEach(async () => {
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-describe("V1.5 Agent Runtime", () => {
+describe("V1.6 Agent Runtime", () => {
   it("成功工具被重复提议时只执行一次，并把缓存结果继续交给模型", async () => {
     const sandbox = await makeSandbox();
     const provider = new RepeatingProvider("write_file", {
@@ -75,7 +75,7 @@ describe("V1.5 Agent Runtime", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("同一 SessionEntry 源分别投影历史工具结果和当前用户消息", () => {
+  it("同一 SessionEntry 源分别投影历史工具结果和当前用户消息", async () => {
     const entries: SessionEntry[] = [
       message("user", "请读取文件", "m1"),
       {
@@ -95,7 +95,7 @@ describe("V1.5 Agent Runtime", () => {
         createdAt: new Date().toISOString(),
       },
     ];
-    const modelMessages = new ContextBuilder().build(entries, "继续");
+    const modelMessages = await new ContextAssembler().build(entries, "继续");
     expect(modelMessages).toMatchObject([
       { role: "user", content: "请读取文件" },
       { role: "assistant", toolCalls: [{ id: "tc1", name: "read_file" }] },

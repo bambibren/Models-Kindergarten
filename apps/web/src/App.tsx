@@ -152,7 +152,7 @@ export default function App() {
     try {
       await loadSession(client, session);
     } catch (cause) {
-      // V1.5 暂不引入另一套全局错误中心；保留诊断信息且不污染当前 Turn。
+      // V1.6 不引入另一套全局错误中心；保留诊断信息且不污染当前 Turn。
       console.error("加载 Session 失败", cause);
     }
   }

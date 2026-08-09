@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "servers": [
+    {
+      "id": "example-local",
+      "displayName": "示例本地 MCP",
+      "enabled": false,
+      "source": "manual",
+      "trust": "approved",
+      "transport": {
+        "kind": "stdio",
+        "command": "/absolute/path/to/already-installed-mcp-server",
+        "args": [],
+        "cwd": ".data/sandbox",
+        "envRefs": {},
+        "sandbox": {
+          "readPaths": [".data/sandbox"],
+          "writePaths": [".data/sandbox"],
+          "network": false
+        }
+      }
+    },
+    {
+      "id": "example-remote",
+      "displayName": "示例远程 MCP",
+      "enabled": false,
+      "source": "manual",
+      "trust": "untrusted",
+      "transport": {
+        "kind": "streamable_http",
+        "url": "https://example.com/mcp",
+        "authProfileId": "example-token"
+      }
+    }
+  ],
+  "authProfiles": [
+    {
+      "id": "example-token",
+      "kind": "bearer",
+      "tokenRef": {
+        "provider": "env",
+        "key": "EXAMPLE_MCP_TOKEN"
+      }
+    }
+  ],
+  "agentCapabilities": {
+    "mcpTools": [],
+    "skills": ["skill:sandbox-notes"],
+    "resources": []
+  }
+}
