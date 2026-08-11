@@ -24,6 +24,11 @@ export interface ContextSegment {
   contentHash: string;
   estimatedTokens: number;
   lifetime: "agent_version" | "turn";
+  summary: {
+    title: string;
+    detail?: string;
+    itemCount?: number;
+  };
 }
 
 export interface ContextSource {
@@ -71,7 +76,12 @@ export class ContextAssembler {
     const history: Array<{ message: ModelMessage; observation: ContextMessageObservation }> = [];
     for (let index = 0; index < sessionEntries.length; index += 1) {
       const entry = sessionEntries[index];
-      if (!entry || entry.type === "thought") continue;
+      if (
+        !entry ||
+        entry.type === "thought" ||
+        entry.type === "context_summary" ||
+        entry.type === "token_usage"
+      ) continue;
       if (entry.type === "message") {
         const message = { role: entry.role, content: entry.text } satisfies ModelMessage;
         history.push({ message, observation: observation(message, "session_history", entry.messageId) });
@@ -150,6 +160,11 @@ export class SkillCatalogContextSource implements ContextSource {
       sourceId: "agent-version:skills",
       content,
       lifetime: "agent_version",
+      summary: {
+        title: "可用技能",
+        detail: items.map((item) => item.name).join("、"),
+        itemCount: items.length,
+      },
     })];
   }
 }
@@ -181,6 +196,11 @@ export class McpResourceContextSource implements ContextSource {
       sourceId: "agent-version:mcp-resources",
       content: catalogContent,
       lifetime: "agent_version",
+      summary: {
+        title: "MCP 资源目录",
+        detail: metadata.map((item) => item.name ?? item.uri).join("、"),
+        itemCount: metadata.length,
+      },
     })];
     for (const binding of bindings.filter((item) => item.mode === "preload")) {
       const result = await this.manager.readResource(binding.serverId, binding.uri, signal);
@@ -200,6 +220,11 @@ export class McpResourceContextSource implements ContextSource {
         sourceId: `${binding.serverId}:${binding.uri}`,
         content,
         lifetime: "turn",
+        summary: {
+          title: "预载 MCP 资源",
+          detail: `${binding.serverId} · ${binding.uri}`,
+          itemCount: 1,
+        },
       }));
     }
     return segments;

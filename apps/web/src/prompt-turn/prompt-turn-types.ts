@@ -70,3 +70,21 @@ export function isPromptTurnActive(
 ): state is ActivePromptTurnState {
   return state.phase === "running" || state.phase === "waiting_for_user";
 }
+
+/**
+ * 会话总量只展示已经稳定的事实。
+ * running 与 waiting_for_user 都仍属于同一个未结束的 Prompt Turn，
+ * 即使 UI 暂时没有收到文本 Chunk，也不能提前展示会继续变化的累计值。
+ */
+export function canDisplaySessionTokenTotal(state: PromptTurnState): boolean {
+  switch (state.phase) {
+    case "running":
+    case "waiting_for_user":
+      return false;
+    case "idle":
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return true;
+  }
+}

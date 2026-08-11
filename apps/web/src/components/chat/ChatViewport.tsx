@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { GraduationCap } from "lucide-react";
 import type { EntryCollection } from "../../chat/chat-types.js";
 import {
+  canDisplaySessionTokenTotal,
   isPromptTurnActive,
   type PromptTurnState,
   type TurnAction,
@@ -9,9 +10,9 @@ import {
 import { ChatBlockList } from "./ChatBlockList.js";
 import { PromptTurnLoader } from "./PromptTurnLoader.js";
 import { PromptTurnStatusRow } from "../errors/PromptTurnStatusRow.js";
+import { TokenUsageTotal } from "./TokenUsageTotal.js";
 
-export function ChatViewport({ sessionId, historyChatEntries, streamingChatEntries, promptTurn, onTurnAction }: {
-  sessionId: string | null;
+export function ChatViewport({ historyChatEntries, streamingChatEntries, promptTurn, onTurnAction }: {
   historyChatEntries: EntryCollection;
   streamingChatEntries: EntryCollection;
   promptTurn: PromptTurnState;
@@ -50,9 +51,13 @@ export function ChatViewport({ sessionId, historyChatEntries, streamingChatEntri
     <div className="suggestion-grid"><span>总结 sandbox 中的文件</span><span>新建一份学习笔记</span><span>读取 README 并解释架构</span></div>
   </section>;
   return <section className="chat-viewport" ref={viewportRef} onScroll={updateFollowState} aria-live="polite"><div className="chat-content" ref={contentRef}>
-    <ChatBlockList collection={historyChatEntries} sessionId={sessionId} showEvaluationLinks />
-    <ChatBlockList collection={streamingChatEntries} sessionId={sessionId} />
+    <ChatBlockList collection={historyChatEntries} />
+    <ChatBlockList collection={streamingChatEntries} />
     {isPromptTurnActive(promptTurn) && <PromptTurnLoader />}
     {!isPromptTurnActive(promptTurn) && <PromptTurnStatusRow state={promptTurn} onAction={onTurnAction} />}
+    {canDisplaySessionTokenTotal(promptTurn) && <TokenUsageTotal
+      history={historyChatEntries}
+      streaming={streamingChatEntries}
+    />}
   </div></section>;
 }

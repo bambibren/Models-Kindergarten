@@ -1,5 +1,10 @@
 import type { ContentBlock, SessionNotification, ToolCall, ToolCallUpdate } from "@agentclientprotocol/sdk";
-import { readMessageMeta } from "@kindergarten/contracts";
+import {
+  readMessageMeta,
+  type ContextSummaryNotification,
+  type TokenUsageComponent,
+  type TokenUsageNotification,
+} from "@kindergarten/contracts";
 import type { ChatEntry, ChatState, EntryCollection, MessageEntry, StreamSource, ThoughtEntry, ToolCallEntry } from "./chat-types.js";
 import { emptyEntries } from "./chat-types.js";
 
@@ -7,6 +12,8 @@ export type ChatAction =
   | { type: "session/open"; sessionId: string }
   | { type: "stream/start"; operationId: string; source: StreamSource; turnId: string; optimisticContent?: ContentBlock[] }
   | { type: "stream/commit"; operationId: string }
+  | { type: "context/summary"; value: ContextSummaryNotification }
+  | { type: "token/usage"; value: TokenUsageNotification }
   | { type: "acp/update"; value: SessionNotification };
 
 export const emptyChat: ChatState = {
@@ -45,6 +52,34 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       streamingChatEntries: emptyEntries(),
       streaming: null,
     };
+  }
+  if (action.type === "context/summary") {
+    if (action.value.sessionId !== state.sessionId || !state.streaming) return state;
+    const summary = action.value.summary;
+    return {
+      ...state,
+      streamingChatEntries: upsert(state.streamingChatEntries, {
+        type: "context_summary",
+        id: `context:${summary.turnId}`,
+        turnId: summary.turnId,
+        summary,
+      }),
+    };
+  }
+  if (action.type === "token/usage") {
+    if (action.value.sessionId !== state.sessionId || !state.streaming) return state;
+    const usage = action.value.usage;
+    let collection = state.streamingChatEntries;
+    for (const component of usage.components) {
+      collection = applyTokenEstimate(collection, component);
+    }
+    collection = upsert(collection, {
+      type: "token_usage",
+      id: `usage:${usage.turnId}`,
+      turnId: usage.turnId,
+      usage,
+    });
+    return { ...state, streamingChatEntries: collection };
   }
   if (action.value.sessionId !== state.sessionId || !state.streaming) return state;
   const update = action.value.update;
@@ -177,7 +212,34 @@ function mergeCollections(committed: EntryCollection, streaming: EntryCollection
 }
 
 function finalizeEntry(entry: ChatEntry): ChatEntry {
-  return entry.type === "tool_call" ? entry : { ...entry, status: "done" } as MessageEntry | ThoughtEntry;
+  if (
+    entry.type === "tool_call" ||
+    entry.type === "context_summary" ||
+    entry.type === "token_usage"
+  ) return entry;
+  return { ...entry, status: "done" } as MessageEntry | ThoughtEntry;
+}
+
+function applyTokenEstimate(
+  collection: EntryCollection,
+  component: TokenUsageComponent,
+): EntryCollection {
+  if (component.targetType === "message") {
+    const entry = collection.byId[`message:${component.targetId}`];
+    return entry?.type === "message"
+      ? upsert(collection, { ...entry, tokenEstimate: component })
+      : collection;
+  }
+  if (component.targetType === "thought") {
+    const entry = collection.byId[`thought:${component.targetId}`];
+    return entry?.type === "thought"
+      ? upsert(collection, { ...entry, tokenEstimate: component })
+      : collection;
+  }
+  const entry = collection.byId[`tool:${component.targetId}`];
+  return entry?.type === "tool_call"
+    ? upsert(collection, { ...entry, tokenEstimate: component })
+    : collection;
 }
 
 function appendContent(current: ContentBlock[], next: ContentBlock): ContentBlock[] {

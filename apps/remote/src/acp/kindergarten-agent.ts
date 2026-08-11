@@ -1,16 +1,24 @@
 import { randomUUID } from "node:crypto";
 import * as acp from "@agentclientprotocol/sdk";
-import { readPromptMeta } from "@kindergarten/contracts";
+import {
+  readPromptMeta,
+  type ContextSummary,
+  type TokenUsageComponent,
+  type TurnTokenUsage,
+} from "@kindergarten/contracts";
 import { AcpOutput } from "./acp-output.js";
 import type {
   AgentRuntime,
   RunObserver,
+  TurnModelUsage,
 } from "../runtime/agent-runtime.js";
 import type { SessionRepository } from "../repository/session-repository.js";
 import type {
   SessionEntry,
+  SessionContextSummaryEntry,
   SessionMessageEntry,
   SessionRecord,
+  SessionTokenUsageEntry,
   SessionThoughtEntry,
   SessionToolCallEntry,
 } from "../repository/session-types.js";
@@ -144,6 +152,7 @@ export class KindergartenAgent {
         projection,
         controller.signal,
       );
+      await projection.usage(result.usage);
       if (result.reason === "cancelled") reason = "cancelled";
       else if (result.reason === "length") reason = "max_tokens";
     } catch (error) {
@@ -189,6 +198,46 @@ class TurnProjection implements RunObserver {
     private readonly output: AcpOutput,
     private readonly client: acp.AgentContext,
   ) {}
+
+  async context(summary: ContextSummary): Promise<void> {
+    const entry: SessionContextSummaryEntry = {
+      type: "context_summary",
+      turnId: this.turnId,
+      summary: structuredClone(summary),
+      createdAt: new Date().toISOString(),
+    };
+    this.streamingSessionEntries.push(entry);
+    await this.output.contextSummary(summary);
+  }
+
+  async usage(modelUsage: TurnModelUsage): Promise<void> {
+    const usage: TurnTokenUsage = {
+      schemaVersion: 1,
+      turnId: this.turnId,
+      modelRequests: modelUsage.modelRequests,
+      components: tokenComponents(this.streamingSessionEntries),
+      ...(modelUsage.inputTokens !== undefined
+        ? { inputTokens: modelUsage.inputTokens }
+        : {}),
+      ...(modelUsage.outputTokens !== undefined
+        ? { outputTokens: modelUsage.outputTokens }
+        : {}),
+      ...(modelUsage.cachedInputTokens !== undefined
+        ? { cachedInputTokens: modelUsage.cachedInputTokens }
+        : {}),
+      ...(modelUsage.reasoningOutputTokens !== undefined
+        ? { reasoningOutputTokens: modelUsage.reasoningOutputTokens }
+        : {}),
+    };
+    const entry: SessionTokenUsageEntry = {
+      type: "token_usage",
+      turnId: this.turnId,
+      usage: structuredClone(usage),
+      createdAt: new Date().toISOString(),
+    };
+    this.streamingSessionEntries.push(entry);
+    await this.output.tokenUsage(usage);
+  }
 
   async text(round: number, value: string): Promise<void> {
     const entry = this.ensureMessage(round);
@@ -388,6 +437,10 @@ async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void
       chunkIndex: 0,
       final: true,
     });
+  } else if (entry.type === "context_summary") {
+    await output.contextSummary(entry.summary);
+  } else if (entry.type === "token_usage") {
+    await output.tokenUsage(entry.usage);
   } else if (entry.type === "thought") {
     await output.thought(entry.messageId, entry.text, {
       schemaVersion: 1,
@@ -407,6 +460,52 @@ async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void
       content: entry.content,
       locations: entry.locations,
     });
+  }
+}
+
+function tokenComponents(entries: SessionEntry[]): TokenUsageComponent[] {
+  const components: TokenUsageComponent[] = [];
+  for (const entry of entries) {
+    if (entry.type === "message") {
+      components.push({
+        category: entry.role === "user" ? "current_prompt" : "answer",
+        targetType: "message",
+        targetId: entry.messageId,
+        estimatedTokens: estimateTokens(entry.text),
+      });
+    }
+    else if (entry.type === "thought") {
+      components.push({
+        category: "reasoning",
+        targetType: "thought",
+        targetId: entry.messageId,
+        estimatedTokens: estimateTokens(entry.text),
+      });
+    }
+    else if (entry.type === "tool_call") {
+      components.push({
+        category: "tool_call",
+        targetType: "tool_call",
+        targetId: entry.toolCallId,
+        estimatedTokens: estimateTokens(safeJson({
+          name: entry.name,
+          arguments: entry.rawInput,
+        })),
+      });
+    }
+  }
+  return components;
+}
+
+function estimateTokens(value: string): number {
+  return value.length === 0 ? 0 : Math.max(1, Math.ceil(value.length / 4));
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return String(value);
   }
 }
 

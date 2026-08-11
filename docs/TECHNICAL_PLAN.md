@@ -116,8 +116,8 @@ V1.6 之后按独立闭环选择，不默认一次全部进入：
 | --- | --- |
 | V2 | Context 预算优化、总结压缩、来源追踪；Runtime Trace/可观测性 |
 | V3 | Evaluation、Benchmark、失败分类和对比实验 |
-| V4 | ModelStudent/AgentVersion 配置管理、课程与图形化能力绑定 |
+| V4 | ModelStudent/Agent 配置管理、Skills 安装入口、对话安装与图形化能力绑定 |
 | V5 | 长短期 Memory、检索、Revision、污染治理 |
 | V6 | 多 Agent、Handoff、共享记忆和协作评测 |
 
-当前明确不做：Runtime Timeline/Event Store、长期记忆、RAG、多 Agent、MCP 市场与管理 UI、MCP Tasks/Apps、Skill 自动升级与脚本自动执行、云沙箱、容器调度、多租户、语义相似判重和自动模型降级。
+当前明确不做：Runtime Timeline/Event Store、长期记忆、RAG、多 Agent、MCP 市场、MCP Tasks/Apps、Skill 自动升级与脚本自动执行、云沙箱、容器调度、多租户、语义相似判重和自动模型降级。用户级 Skills 安装与 Agent 绑定管理 UI 已进入 V4 规划，但当前真实实现仍只有 CLI 安装。

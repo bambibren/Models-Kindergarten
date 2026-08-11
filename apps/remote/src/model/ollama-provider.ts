@@ -1,4 +1,6 @@
 import type {
+  ModelContextFragment,
+  ModelContextSerialization,
   ModelEvent,
   ModelInput,
   ModelProvider,
@@ -45,6 +47,30 @@ export class OllamaProvider implements ModelProvider {
     }
   }
 
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    let value: unknown;
+    switch (fragment.kind) {
+      case "system":
+        value = toOllamaSystemMessage(fragment.content);
+        break;
+      case "tools":
+        value = fragment.tools;
+        break;
+      case "messages":
+        value = fragment.messages.map(toOllamaMessage);
+        break;
+      case "omitted":
+        value = { sent: false, sourceIds: fragment.sourceIds };
+        break;
+    }
+    return {
+      provider: "ollama",
+      model: this.student.provider.model,
+      format: "json",
+      value: JSON.stringify(value, null, 2),
+    };
+  }
+
   async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
     let response: Response;
     try {
@@ -53,22 +79,7 @@ export class OllamaProvider implements ModelProvider {
         {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          model: this.student.provider.model,
-          stream: true,
-          think: true,
-          tools: input.tools,
-          options: {
-            temperature: this.student.agentConfig.temperature ?? 0.4,
-          },
-          messages: [
-            {
-              role: "system",
-              content: this.student.agentConfig.systemPrompt,
-            },
-            ...input.messages.map(toOllamaMessage),
-          ],
-        }),
+        body: JSON.stringify(toOllamaRequest(this.student, input)),
         signal,
         },
       );
@@ -137,6 +148,26 @@ export class OllamaProvider implements ModelProvider {
       shouldRetry: isTransientModelError,
     }, init?.signal instanceof AbortSignal ? init.signal : undefined));
   }
+}
+
+function toOllamaRequest(student: ModelStudent, input: ModelInput): Record<string, unknown> {
+  return {
+    model: student.provider.model,
+    stream: true,
+    think: true,
+    tools: input.tools,
+    options: {
+      temperature: student.agentConfig.temperature ?? 0.4,
+    },
+    messages: [
+      toOllamaSystemMessage(student.agentConfig.systemPrompt),
+      ...input.messages.map(toOllamaMessage),
+    ],
+  };
+}
+
+function toOllamaSystemMessage(content: string): Record<string, unknown> {
+  return { role: "system", content };
 }
 
 function toOllamaMessage(message: ModelInput["messages"][number]): Record<string, unknown> {

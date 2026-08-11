@@ -67,11 +67,11 @@ Thought 只用于聊天回放；Tool Call/Result 通过 `toolCallId` 恢复到�
 
 ## MCP 与 Agent Skills
 
-Remote 是唯一 MCP Host，每个 Server 对应一个独立 Client。MCP 支持 stdio、Streamable HTTP 和 modern/legacy 自动协商；外部 Tool 适配为现有 PreparedToolCall/ToolOutcome 后统一进入 ToolRuntime。MCP Resource 只按 AgentVersion 绑定，默认只注入元数据，需要时通过 `read_mcp_resource` 读取。
+Remote 是唯一 MCP Host，每个 Server 对应一个独立 Client。MCP 支持 stdio、Streamable HTTP 和 modern/legacy 自动协商；外部 Tool 适配为现有 PreparedToolCall/ToolOutcome 后统一进入 ToolRuntime。MCP Resource 只按当前 Agent 配置绑定，默认只注入元数据，需要时通过 `read_mcp_resource` 读取。产品和内部领域模型都不引入 AgentVersion/AgentRevision；Session 只关联 `agentId`。
 
 Skills 按 builtin、project、user 三个作用域发现。上下文只常驻 name/description；模型调用 `activate_skill` 后才读取正文，通过 `read_skill_resource` 按需读取 references/assets/scripts。当前不会自动执行 Skill 脚本。
 
-每次 Turn 冻结 Tool Schema、MCP capability revision 和 Skill content hash，供 Runtime Trace 与后续 Benchmark 复现。完整设计见 [MCP 与 Agent Skills](MCP_SKILLS.md)。
+当前实现会在每次 Turn 开始时冻结 Tool Schema、MCP capability revision 和 Skill content hash。规划中的 `ensure_agent_skills` 是唯一显式能力变更边界：安装并更新当前 Agent 后，在同一 Turn 的下一次模型请求前重建能力目录；该能力尚未实现。完整设计见 [MCP 与 Agent Skills](MCP_SKILLS.md)。
 
 ## ToolRuntime
 

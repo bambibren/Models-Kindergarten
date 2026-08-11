@@ -1,11 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
+import type {
+  ContextSummary,
+  ContextSummaryItem,
+} from "@kindergarten/contracts";
 import {
   ContextAssembler,
   observeMessage,
+  type ContextBuildResult,
 } from "../conversation/context-assembler.js";
-import type { ModelProvider, ModelToolCall } from "../model/model-provider.js";
+import type {
+  ModelProvider,
+  ModelToolCall,
+  ModelToolDefinition,
+  ModelUsage,
+} from "../model/model-provider.js";
 import type { SessionEntry } from "../repository/session-types.js";
 import {
   noopRuntimeObservationSink,
@@ -30,6 +40,7 @@ export interface RunInput {
 }
 
 export interface RunObserver {
+  context(summary: ContextSummary): Promise<void>;
   text(round: number, value: string): Promise<void>;
   thought(round: number, value: string): Promise<void>;
   roundComplete(round: number): Promise<void>;
@@ -39,9 +50,19 @@ export interface RunObserver {
   askUser(question: string, toolCallId: string): Promise<string>;
 }
 
+export interface ModelRoundUsage extends ModelUsage {
+  round: number;
+}
+
+export interface TurnModelUsage extends ModelUsage {
+  modelRequests: number;
+  rounds: ModelRoundUsage[];
+}
+
 export interface RunResult {
   runId: string;
   reason: "stop" | "length" | "cancelled";
+  usage: TurnModelUsage;
 }
 
 /** AgentRuntime 聚合完整能力；AgentRunner 只执行一次 session/prompt。 */
@@ -87,7 +108,15 @@ export class AgentRunner {
     const toolDefinitions = structuredClone(this.tools.registry.definitions);
     const capabilitySnapshot = structuredClone(this.tools.registry.capabilitySnapshot());
     const ledger = new ToolCallLedger();
+    const roundUsages: ModelRoundUsage[] = [];
+    let modelRequests = 0;
     const observed = new ObservedRunObserver(observer, this.observations, runId);
+    await observed.context(contextSummary(
+      input.turnId ?? runId,
+      this.model,
+      toolDefinitions,
+      built,
+    ));
     this.observations.emit({
       type: "turn_started",
       runId,
@@ -102,6 +131,7 @@ export class AgentRunner {
     });
 
     for (let round = 0; ; round += 1) {
+      modelRequests += 1;
       const roundId = `${runId}:round:${round}`;
       observed.enterRound(roundId);
       this.observations.emit({
@@ -127,6 +157,7 @@ export class AgentRunner {
       let reason: "stop" | "length" | "cancelled" = "stop";
       const calls = new Map<string, ModelToolCall>();
       let firstTokenSeen = false;
+      let roundUsage: ModelUsage | undefined;
 
       try {
         for await (const event of this.model.stream(
@@ -156,6 +187,7 @@ export class AgentRunner {
           } else if (event.type === "tool_calls") {
             for (const call of event.calls) calls.set(toolCallKey(call), call);
           } else if (event.type === "usage") {
+            roundUsage = mergeUsage(roundUsage, event);
             this.observations.emit({
               type: "model_round_usage",
               runId,
@@ -170,13 +202,19 @@ export class AgentRunner {
       } catch (error) {
         if (isAbort(error) || signal.aborted) {
           this.completeTurn(runId, "cancelled", "cancelled");
-          return { runId, reason: "cancelled" };
+          return {
+            runId,
+            reason: "cancelled",
+            usage: aggregateUsage(modelRequests, roundUsages),
+          };
         }
         this.runtimeError(runId, "model", error);
         this.completeTurn(runId, "failed");
         // 模型流无法继续时才提升为 Turn 级失败；具体错误文本保持不变。
         throw toRunFailure(error);
       }
+
+      if (roundUsage) roundUsages.push({ round, ...roundUsage });
 
       this.observations.emit({
         type: "model_round_completed",
@@ -193,7 +231,11 @@ export class AgentRunner {
       const modelCalls = [...calls.values()];
       if (modelCalls.length === 0) {
         this.completeTurn(runId, reason === "cancelled" ? "cancelled" : "completed", reason);
-        return { runId, reason };
+        return {
+          runId,
+          reason,
+          usage: aggregateUsage(modelRequests, roundUsages),
+        };
       }
 
       const prepared = modelCalls.map((call, index) =>
@@ -227,7 +269,11 @@ export class AgentRunner {
       } catch (error) {
         if (isAbort(error) || signal.aborted) {
           this.completeTurn(runId, "cancelled", "cancelled");
-          return { runId, reason: "cancelled" };
+          return {
+            runId,
+            reason: "cancelled",
+            usage: aggregateUsage(modelRequests, roundUsages),
+          };
         }
         this.runtimeError(runId, "tool_runtime", error);
         this.completeTurn(runId, "failed");
@@ -279,6 +325,49 @@ export class AgentRunner {
   }
 }
 
+function mergeUsage(current: ModelUsage | undefined, next: ModelUsage): ModelUsage {
+  return {
+    ...(next.inputTokens !== undefined
+      ? { inputTokens: next.inputTokens }
+      : current?.inputTokens !== undefined ? { inputTokens: current.inputTokens } : {}),
+    ...(next.outputTokens !== undefined
+      ? { outputTokens: next.outputTokens }
+      : current?.outputTokens !== undefined ? { outputTokens: current.outputTokens } : {}),
+    ...(next.cachedInputTokens !== undefined
+      ? { cachedInputTokens: next.cachedInputTokens }
+      : current?.cachedInputTokens !== undefined ? { cachedInputTokens: current.cachedInputTokens } : {}),
+    ...(next.reasoningOutputTokens !== undefined
+      ? { reasoningOutputTokens: next.reasoningOutputTokens }
+      : current?.reasoningOutputTokens !== undefined ? { reasoningOutputTokens: current.reasoningOutputTokens } : {}),
+  };
+}
+
+function aggregateUsage(
+  modelRequests: number,
+  rounds: ModelRoundUsage[],
+): TurnModelUsage {
+  return {
+    modelRequests,
+    rounds: structuredClone(rounds),
+    ...sumUsageField(rounds, "inputTokens"),
+    ...sumUsageField(rounds, "outputTokens"),
+    ...sumUsageField(rounds, "cachedInputTokens"),
+    ...sumUsageField(rounds, "reasoningOutputTokens"),
+  };
+}
+
+function sumUsageField<K extends keyof ModelUsage>(
+  rounds: ModelRoundUsage[],
+  key: K,
+): Pick<ModelUsage, K> | Record<string, never> {
+  const values = rounds.flatMap((round) =>
+    typeof round[key] === "number" ? [round[key] as number] : [],
+  );
+  return values.length > 0
+    ? { [key]: values.reduce((total, value) => total + value, 0) } as Pick<ModelUsage, K>
+    : {};
+}
+
 class ObservedRunObserver implements RunObserver {
   private roundId = "";
 
@@ -289,6 +378,7 @@ class ObservedRunObserver implements RunObserver {
   ) {}
 
   enterRound(roundId: string): void { this.roundId = roundId; }
+  context(summary: ContextSummary): Promise<void> { return this.delegate.context(summary); }
   text(round: number, value: string): Promise<void> { return this.delegate.text(round, value); }
   thought(round: number, value: string): Promise<void> { return this.delegate.thought(round, value); }
   roundComplete(round: number): Promise<void> { return this.delegate.roundComplete(round); }
@@ -365,6 +455,124 @@ function variantSnapshot(
     toolNames,
     capabilities,
   };
+}
+
+function contextSummary(
+  turnId: string,
+  model: ModelProvider,
+  tools: ModelToolDefinition[],
+  built: ContextBuildResult,
+): ContextSummary {
+  const systemPrompt = model.student.agentConfig.systemPrompt;
+  const items: ContextSummaryItem[] = [
+    {
+      id: "system-prompt",
+      kind: "system_instruction",
+      title: "Agent 基础指令",
+      detail: "行为边界、工具使用与回答要求",
+      estimatedTokens: estimateTokens(systemPrompt),
+      trust: "trusted",
+      raw: model.serializeContext({ kind: "system", content: systemPrompt }),
+    },
+  ];
+
+  if (tools.length > 0) {
+    items.push({
+      id: "available-tools",
+      kind: "available_tools",
+      title: "可用工具",
+      detail: tools.map((tool) => tool.function.name).join("、"),
+      itemCount: tools.length,
+      estimatedTokens: estimateTokens(JSON.stringify(tools)),
+      trust: "trusted",
+      raw: model.serializeContext({ kind: "tools", tools }),
+    });
+  }
+
+  for (const segment of built.segments) {
+    const messages = contextMessages(built, (item) =>
+      item.source === segment.kind && item.sourceId === segment.sourceId
+    );
+    items.push({
+      id: segment.id,
+      kind: segment.kind,
+      title: segment.summary.title,
+      estimatedTokens: segment.estimatedTokens,
+      trust: segment.trust,
+      raw: model.serializeContext({ kind: "messages", messages }),
+      ...(segment.summary.detail ? { detail: segment.summary.detail } : {}),
+      ...(segment.summary.itemCount !== undefined
+        ? { itemCount: segment.summary.itemCount }
+        : {}),
+    });
+  }
+
+  const history = built.observations.filter(
+    (item) => item.source === "session_history" || item.source === "tool_result",
+  );
+  if (history.length > 0) {
+    const toolResults = history.filter((item) => item.source === "tool_result").length;
+    const messageCount = history.length - toolResults;
+    items.push({
+      id: "session-history",
+      kind: "session_history",
+      title: "对话历史",
+      detail: [
+        messageCount > 0 ? `${messageCount} 条消息` : "",
+        toolResults > 0 ? `${toolResults} 条工具结果` : "",
+      ].filter(Boolean).join(" · "),
+      itemCount: history.length,
+      estimatedTokens: history.reduce((total, item) => total + item.estimatedTokens, 0),
+      trust: "trusted",
+      raw: model.serializeContext({
+        kind: "messages",
+        messages: contextMessages(
+          built,
+          (item) => item.source === "session_history" || item.source === "tool_result",
+        ),
+      }),
+    });
+  }
+
+  if (built.truncatedSourceIds.length > 0) {
+    items.push({
+      id: "truncated-history",
+      kind: "truncated_history",
+      title: "较早历史已裁剪",
+      detail: `${built.truncatedSourceIds.length} 个来源未进入本轮上下文`,
+      itemCount: built.truncatedSourceIds.length,
+      estimatedTokens: 0,
+      trust: "trusted",
+      raw: model.serializeContext({
+        kind: "omitted",
+        sourceIds: built.truncatedSourceIds,
+      }),
+    });
+  }
+
+  return {
+    schemaVersion: 1,
+    turnId,
+    items,
+    totalEstimatedTokens: items.reduce(
+      (total, item) => total + item.estimatedTokens,
+      0,
+    ),
+  };
+}
+
+function contextMessages(
+  built: ContextBuildResult,
+  select: (item: ContextBuildResult["observations"][number]) => boolean,
+) {
+  return built.messages.filter((_message, index) => {
+    const item = built.observations[index];
+    return item !== undefined && select(item);
+  });
+}
+
+function estimateTokens(value: string): number {
+  return Math.max(1, Math.ceil(value.length / 4));
 }
 
 function prepareCall(

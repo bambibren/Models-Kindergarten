@@ -34,6 +34,14 @@ export default function App() {
       try {
         const client = await AcpWebClient.open(ACP_URL, {
           onUpdate: (value) => store().dispatchChat({ type: "acp/update", value }),
+          onContextSummary: (value) => store().dispatchChat({
+            type: "context/summary",
+            value,
+          }),
+          onTokenUsage: (value) => store().dispatchChat({
+            type: "token/usage",
+            value,
+          }),
           onInteraction: (interaction) => {
             store().dispatchPromptTurn({ type: "interaction/enqueue", interaction });
           },
@@ -258,7 +266,6 @@ export default function App() {
     <section className="chat-screen">
       <ChatHeader connection={connection} />
       <ChatViewport
-        sessionId={chat.sessionId}
         historyChatEntries={chat.historyChatEntries}
         streamingChatEntries={chat.streamingChatEntries}
         promptTurn={promptTurn}

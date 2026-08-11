@@ -23,6 +23,11 @@ import type {
 } from "@kindergarten/evaluation-contract";
 import { loadTurnEvaluation } from "./api.js";
 import { buildRuntimeTree } from "./runtime-tree.js";
+import { AgentEvaluationDemoPage } from "./demo/agent-evaluation/AgentEvaluationDemoPage.js";
+
+type PageRoute =
+  | { kind: "turn"; sessionId: string; turnId: string }
+  | { kind: "agent-evaluation-demo" };
 
 type PageState =
   | { phase: "loading" }
@@ -39,6 +44,7 @@ export default function App() {
       setState({ phase: "error", message: "页面地址缺少 sessionId 或 turnId" });
       return;
     }
+    if (route.kind === "agent-evaluation-demo") return;
     let disposed = false;
     void loadTurnEvaluation(route.sessionId, route.turnId)
       .then((record) => {
@@ -50,6 +56,7 @@ export default function App() {
     return () => { disposed = true; };
   }, [route]);
 
+  if (route?.kind === "agent-evaluation-demo") return <AgentEvaluationDemoPage />;
   if (state.phase === "loading") return <CenteredState title="正在读取本轮评测" detail="等待 Runtime Trace 完成上传…" />;
   if (state.phase === "not_found") return <CenteredState title="尚未生成本轮评测" detail="该 Turn 可能仍在上传，或 Remote 未连接 Evaluation Service。" />;
   if (state.phase === "error") return <CenteredState title="无法打开评测" detail={state.message} failed />;
@@ -172,10 +179,13 @@ function CenteredState({ title, detail, failed = false }: { title: string; detai
   return <main className="centered-state"><div className={failed ? "failed" : ""}>{failed ? <AlertTriangle size={20} /> : <Gauge size={20} />}<h1>{title}</h1><p>{detail}</p><button type="button" onClick={() => history.back()}><ArrowLeft size={14} />返回</button></div></main>;
 }
 
-function readRoute(): { sessionId: string; turnId: string } | null {
+function readRoute(): PageRoute | null {
+  if (/^\/evaluation\/demo\/agent-comparison\/?$/.test(location.pathname)) {
+    return { kind: "agent-evaluation-demo" };
+  }
   const match = location.pathname.match(/^\/evaluation\/sessions\/([^/]+)\/turns\/([^/]+)\/?$/);
   return match?.[1] && match[2]
-    ? { sessionId: decodeURIComponent(match[1]), turnId: decodeURIComponent(match[2]) }
+    ? { kind: "turn", sessionId: decodeURIComponent(match[1]), turnId: decodeURIComponent(match[2]) }
     : null;
 }
 

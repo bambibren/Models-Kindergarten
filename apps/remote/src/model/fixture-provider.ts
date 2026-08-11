@@ -1,4 +1,6 @@
 import type {
+  ModelContextFragment,
+  ModelContextSerialization,
   ModelEvent,
   ModelInput,
   ModelProvider,
@@ -18,6 +20,10 @@ export class FixtureProvider implements ModelProvider {
     agentConfig: { systemPrompt: "fixture" },
   };
 
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeFixtureContext(this.student, fragment);
+  }
+
   async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
     const turns = input.messages.filter((item) => item.role === "user").length;
     const reply = [
@@ -32,6 +38,25 @@ export class FixtureProvider implements ModelProvider {
     }
     yield { type: "finish", reason: "stop" };
   }
+}
+
+function serializeFixtureContext(
+  student: ModelStudent,
+  fragment: ModelContextFragment,
+): ModelContextSerialization {
+  const value = fragment.kind === "system"
+    ? { role: "system", content: fragment.content }
+    : fragment.kind === "tools"
+      ? fragment.tools
+      : fragment.kind === "messages"
+        ? fragment.messages
+        : { sent: false, sourceIds: fragment.sourceIds };
+  return {
+    provider: student.provider.kind,
+    model: student.provider.model,
+    format: "json",
+    value: JSON.stringify(value, null, 2),
+  };
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {

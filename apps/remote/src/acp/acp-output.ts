@@ -1,5 +1,12 @@
 import * as acp from "@agentclientprotocol/sdk";
-import { makeAcpMeta, type MessageMeta } from "@kindergarten/contracts";
+import {
+  CONTEXT_SUMMARY_NOTIFICATION,
+  TOKEN_USAGE_NOTIFICATION,
+  makeAcpMeta,
+  type ContextSummary,
+  type MessageMeta,
+  type TurnTokenUsage,
+} from "@kindergarten/contracts";
 
 export type MessageRole = "user" | "assistant";
 type MessageUpdate =
@@ -47,6 +54,20 @@ export class AcpOutput {
     await this.client.notify(acp.methods.client.session.update, {
       sessionId: this.sessionId,
       update: { sessionUpdate: "tool_call_update", ...value },
+    });
+  }
+
+  async contextSummary(summary: ContextSummary): Promise<void> {
+    await this.client.notify(CONTEXT_SUMMARY_NOTIFICATION, {
+      sessionId: this.sessionId,
+      summary,
+    });
+  }
+
+  async tokenUsage(usage: TurnTokenUsage): Promise<void> {
+    await this.client.notify(TOKEN_USAGE_NOTIFICATION, {
+      sessionId: this.sessionId,
+      usage,
     });
   }
 

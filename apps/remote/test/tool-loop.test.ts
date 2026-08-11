@@ -6,6 +6,8 @@ import { makePromptMeta } from "@kindergarten/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { KindergartenAgent } from "../src/acp/kindergarten-agent.js";
 import type {
+  ModelContextFragment,
+  ModelContextSerialization,
   ModelEvent,
   ModelInput,
   ModelProvider,
@@ -118,6 +120,21 @@ class ScriptedToolProvider implements ModelProvider {
     provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
     agentConfig: { systemPrompt: "test" },
   };
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    const value = fragment.kind === "system"
+      ? { role: "system", content: fragment.content }
+      : fragment.kind === "tools"
+        ? fragment.tools
+        : fragment.kind === "messages"
+          ? fragment.messages
+          : { sent: false, sourceIds: fragment.sourceIds };
+    return {
+      provider: this.student.provider.kind,
+      model: this.student.provider.model,
+      format: "json",
+      value: JSON.stringify(value, null, 2),
+    };
+  }
 
   async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     const results = input.messages.filter((item) => item.role === "tool");

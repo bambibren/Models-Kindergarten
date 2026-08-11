@@ -2,8 +2,11 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { ContextSummary } from "@kindergarten/contracts";
 import { ContextAssembler } from "../src/conversation/context-assembler.js";
 import type {
+  ModelContextFragment,
+  ModelContextSerialization,
   ModelEvent,
   ModelInput,
   ModelProvider,
@@ -40,6 +43,12 @@ describe("V1.6 Agent Runtime", () => {
     );
 
     expect(result.reason).toBe("stop");
+    expect(result.usage).toMatchObject({
+      modelRequests: 4,
+      inputTokens: 410,
+      outputTokens: 40,
+    });
+    expect(result.usage.rounds).toHaveLength(4);
     expect(observer.permissionCount).toBe(1);
     expect(observer.outcomes.map((item) => item.status)).toEqual([
       "success",
@@ -48,6 +57,14 @@ describe("V1.6 Agent Runtime", () => {
     ]);
     expect(await readFile(join(sandbox.root, "repeat.txt"), "utf8")).toBe("只写一次");
     expect(observer.textOutput).toContain("模型已读取去重结果");
+    expect(observer.contextSummaries).toHaveLength(1);
+    expect(observer.contextSummaries[0]?.items.map((item) => item.kind)).toEqual([
+      "system_instruction",
+      "available_tools",
+    ]);
+    expect(observer.contextSummaries[0]?.items.every((item) => item.raw?.provider === "ollama"))
+      .toBe(true);
+    expect(JSON.stringify(observer.contextSummaries[0])).not.toContain("重复写入");
   });
 
   it("权限拒绝后相同命令不会再次询问或执行", async () => {
@@ -162,6 +179,9 @@ class FailedProvider implements ModelProvider {
     provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
     agentConfig: { systemPrompt: "test" },
   };
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
   async *stream(): AsyncIterable<ModelEvent> {
     throw new ModelProviderError("dependency_unavailable", "Ollama 不可用", true);
   }
@@ -175,6 +195,10 @@ class RepeatingProvider implements ModelProvider {
     agentConfig: { systemPrompt: "test" },
   };
 
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+
   constructor(
     private readonly name: string,
     private readonly argumentsValue: Record<string, unknown>,
@@ -186,6 +210,7 @@ class RepeatingProvider implements ModelProvider {
     this.rounds += 1;
     if (this.rounds > 3) {
       yield { type: "text_delta", text: "模型已读取去重结果" };
+      yield { type: "usage", inputTokens: 100 + this.rounds, outputTokens: 10 };
       yield { type: "finish", reason: "stop" };
       return;
     }
@@ -193,16 +218,38 @@ class RepeatingProvider implements ModelProvider {
       type: "tool_calls",
       calls: [{ name: this.name, arguments: this.argumentsValue }],
     };
+    yield { type: "usage", inputTokens: 100 + this.rounds, outputTokens: 10 };
     yield { type: "finish", reason: "stop" };
   }
 }
 
+function serializeTestContext(
+  student: ModelStudent,
+  fragment: ModelContextFragment,
+): ModelContextSerialization {
+  const value = fragment.kind === "system"
+    ? { role: "system", content: fragment.content }
+    : fragment.kind === "tools"
+      ? fragment.tools
+      : fragment.kind === "messages"
+        ? fragment.messages
+        : { sent: false, sourceIds: fragment.sourceIds };
+  return {
+    provider: student.provider.kind,
+    model: student.provider.model,
+    format: "json",
+    value: JSON.stringify(value, null, 2),
+  };
+}
+
 class TestObserver implements RunObserver {
   outcomes: ToolOutcome[] = [];
+  contextSummaries: ContextSummary[] = [];
   textOutput = "";
   permissionCount = 0;
 
   constructor(private readonly permission: boolean) {}
+  async context(summary: ContextSummary): Promise<void> { this.contextSummaries.push(summary); }
   async text(_round: number, value: string): Promise<void> { this.textOutput += value; }
   async thought(): Promise<void> {}
   async roundComplete(): Promise<void> {}

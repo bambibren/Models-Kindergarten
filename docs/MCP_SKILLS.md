@@ -80,6 +80,14 @@ pnpm --filter @kindergarten/remote skill:install -- \
 
 Git 安装最终记录解析后的 40 位 Commit。安装过程不会运行 lifecycle 或 Skill scripts；同名 Skill 直接拒绝，内容与 lock Hash 不一致时 Remote 启动失败。
 
+### 规划中的产品安装入口（尚未实现）
+
+- “我的 → Skills”与 Agent 编辑页将通过同一 Remote Control API 调用现有安装底层；Browser 不复制 Skill 文件。
+- 两处手动入口只把 Ready Skill 加入用户库；Agent 编辑页安装成功后变为可勾选项，但默认不自动勾选。
+- 对话内新增 Runtime 原生 Tool `ensure_agent_skills(source_urls[])`。目标 Agent 由当前 Session 的 `agentId` 注入，模型不能传入任意 Agent ID。
+- 对话安装整批成功后把 Skill 并集绑定到当前 Agent，并在同一 Prompt Turn 的下一次模型请求前刷新 Skill catalog；失败批次不修改 Agent。
+- 产品和内部领域只保留可编辑 Agent，不引入 AgentVersion/AgentRevision。Session 关联 `agentId`，每个新 Turn 使用该 Agent 当前配置。
+
 运行时只把 Skill `id/name/description/trust` 放入 `skill_catalog`。模型通过：
 
 - `activate_skill(skill_id)` 读取完整 SKILL.md；
@@ -95,7 +103,7 @@ Git 安装最终记录解析后的 40 位 Commit。安装过程不会运行 life
 - Skill metadata catalog；
 - MCP Resource catalog 与显式 preload 数据。
 
-MCP Resource 以 user/data 消息进入，并包裹不可信数据标记。MCP Server instructions 不会自动拼入 Core System Prompt。每次 Prompt Turn 在开始时冻结 Tool definitions 和 capability snapshot；连接或目录变化只影响下一 Turn。
+MCP Resource 以 user/data 消息进入，并包裹不可信数据标记。MCP Server instructions 不会自动拼入 Core System Prompt。当前实现会在 Prompt Turn 开始时冻结 Tool definitions 和 capability snapshot；连接或目录变化只影响下一 Turn。规划中的 `ensure_agent_skills` 将作为唯一显式 capability transition，在 Tool 完成后重建当前 Turn 下一次模型请求的 Skill 能力；这不是静默目录变化，也不是 Agent 版本。
 
 Runtime Trace 的 variant 保存：
 
@@ -107,4 +115,4 @@ Runtime Trace 的 variant 保存：
 
 已实现：stdio、Streamable HTTP、modern/legacy 协商、Tools、Resources、Prompts 发现、MRTR/Elicitation、SecretRef、能力 allowlist、Skills 本地/Git 安装、渐进加载和 Turn 能力快照。
 
-未实现：旧 HTTP+SSE、Roots/Sampling/Logging、Tasks、MCP Apps、Registry 市场 UI、OAuth 浏览器授权 UI、通知订阅、Skill 自动更新、依赖安装和脚本自动执行。
+未实现：旧 HTTP+SSE、Roots/Sampling/Logging、Tasks、MCP Apps、Registry 市场 UI、用户级 Web 安装入口、对话安装 Tool、OAuth 浏览器授权 UI、通知订阅、Skill 自动更新、依赖安装和脚本自动执行。

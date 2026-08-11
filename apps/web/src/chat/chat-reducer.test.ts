@@ -12,6 +12,23 @@ describe("chatReducer", () => {
       value: messageNotice("user", "user-agent-id", "你好", 0, true),
     });
     state = chatReducer(state, {
+      type: "context/summary",
+      value: {
+        sessionId: "session-1",
+        summary: {
+          schemaVersion: 1,
+          turnId: "turn-1",
+          items: [{
+            id: "system-prompt",
+            kind: "system_instruction",
+            title: "Agent 基础指令",
+            estimatedTokens: 12,
+          }],
+          totalEstimatedTokens: 12,
+        },
+      },
+    });
+    state = chatReducer(state, {
       type: "acp/update",
       value: messageNotice("assistant", "assistant-1", "你", 0),
     });
@@ -27,23 +44,58 @@ describe("chatReducer", () => {
       type: "acp/update",
       value: messageNotice("assistant", "assistant-1", "", 2, true),
     });
+    state = chatReducer(state, {
+      type: "token/usage",
+      value: {
+        sessionId: "session-1",
+        usage: {
+          schemaVersion: 1,
+          turnId: "turn-1",
+          modelRequests: 1,
+          inputTokens: 18,
+          outputTokens: 7,
+          components: [
+            {
+              category: "current_prompt",
+              targetType: "message",
+              targetId: "user-agent-id",
+              estimatedTokens: 1,
+            },
+            {
+              category: "answer",
+              targetType: "message",
+              targetId: "assistant-1",
+              estimatedTokens: 1,
+            },
+          ],
+        },
+      },
+    });
 
     expect(state.historyChatEntries.order).toHaveLength(0);
     expect(values(state.streamingChatEntries)).toMatchObject([
-      { type: "message", messageId: "user-agent-id", status: "done" },
+      {
+        type: "message",
+        messageId: "user-agent-id",
+        status: "done",
+        tokenEstimate: { category: "current_prompt", estimatedTokens: 1 },
+      },
+      { type: "context_summary", turnId: "turn-1" },
       {
         type: "message",
         messageId: "assistant-1",
         status: "done",
         content: [{ type: "text", text: "你好" }],
+        tokenEstimate: { category: "answer", estimatedTokens: 1 },
       },
+      { type: "token_usage", usage: { inputTokens: 18, outputTokens: 7 } },
     ]);
 
     state = chatReducer(state, {
       type: "stream/commit",
       operationId: "operation-1",
     });
-    expect(state.historyChatEntries.order).toHaveLength(2);
+    expect(state.historyChatEntries.order).toHaveLength(4);
     expect(state.streamingChatEntries.order).toHaveLength(0);
     expect(state.streaming).toBeNull();
   });

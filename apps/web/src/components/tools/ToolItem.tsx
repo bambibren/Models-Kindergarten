@@ -4,6 +4,7 @@ import type { ToolCallContent } from "@agentclientprotocol/sdk";
 import type { ToolCallEntry } from "../../chat/chat-types.js";
 import { useAutoDisclosure, type ActivityPhase } from "../../hooks/use-auto-disclosure.js";
 import { ContentRenderer } from "../chat/ContentRenderer.js";
+import { formatTokenCount } from "../tokens/token-format.js";
 
 export function ToolItem({ entry }: { entry: ToolCallEntry }) {
   const phase = toolPhase(entry.status);
@@ -12,7 +13,10 @@ export function ToolItem({ entry }: { entry: ToolCallEntry }) {
     <Collapsible.Trigger className="activity-trigger">
       <span className="activity-icon">{toolIcon(entry, phase)}</span>
       <span className="activity-title">{entry.title}</span>
-      <span className="activity-status">{phaseLabel(phase)}</span>
+      <span className="activity-meta">
+        <span className="activity-status">{phaseLabel(phase)}</span>
+        {entry.tokenEstimate && <span className="activity-token">调用约 {formatTokenCount(entry.tokenEstimate.estimatedTokens)} tokens</span>}
+      </span>
       <ChevronDown className="disclosure-chevron" size={15} />
     </Collapsible.Trigger>
     <Collapsible.Content className="activity-content tool-detail">

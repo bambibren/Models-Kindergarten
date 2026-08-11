@@ -1,0 +1,15 @@
+{
+  "scannedAt": "2026-08-10T20:58:57+08:00",
+  "designSystem": "design.md generated from existing code and annotated screenshots",
+  "fontStack": "Inter, ui-sans-serif, Apple and Segoe fallbacks in apps/web/src/styles.css",
+  "palette": "warm neutral light system: #fff, #fbfbfa, #f7f7f4, #30312e, #74766f, #e2e2dc",
+  "motion": "motion-cut; CSS transitions and Radix disclosure only",
+  "spacing": "compact 4/8/12/16/24px rhythm",
+  "framework": "React 19 + Vite 8 + plain CSS",
+  "sourceMtimes": {
+    "package.json": 1786115448,
+    "apps/web/package.json": 1786012506,
+    "apps/web/src/styles.css": 1786347986,
+    "design.md": 1786342292
+  }
+}

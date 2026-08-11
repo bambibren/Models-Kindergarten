@@ -1,6 +1,14 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { createWebSocketStream } from "@agentclientprotocol/sdk/experimental/ws-client";
-import { makePromptMeta } from "@kindergarten/contracts";
+import {
+  CONTEXT_SUMMARY_NOTIFICATION,
+  TOKEN_USAGE_NOTIFICATION,
+  makePromptMeta,
+  readContextSummaryNotification,
+  readTokenUsageNotification,
+  type ContextSummaryNotification,
+  type TokenUsageNotification,
+} from "@kindergarten/contracts";
 import type { PendingInteractionState } from "../prompt-turn/prompt-turn-types.js";
 
 export interface PromptIds {
@@ -9,6 +17,8 @@ export interface PromptIds {
 
 export interface ClientHandlers {
   onUpdate: (value: acp.SessionNotification) => void;
+  onContextSummary: (value: ContextSummaryNotification) => void;
+  onTokenUsage: (value: TokenUsageNotification) => void;
   onInteraction: (value: PendingInteractionState) => void;
   onInteractionResolved: (id: string) => void;
   onClose: () => void;
@@ -34,6 +44,16 @@ export class AcpWebClient {
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         handlers.onUpdate(params);
       })
+      .onNotification(
+        CONTEXT_SUMMARY_NOTIFICATION,
+        readContextSummaryNotification,
+        ({ params }) => handlers.onContextSummary(params),
+      )
+      .onNotification(
+        TOKEN_USAGE_NOTIFICATION,
+        readTokenUsageNotification,
+        ({ params }) => handlers.onTokenUsage(params),
+      )
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) =>
         interactions.requestPermission(params),
       )

@@ -5,6 +5,11 @@ import type {
   ToolCallStatus,
   ToolKind,
 } from "@agentclientprotocol/sdk";
+import type {
+  ContextSummary,
+  TokenUsageComponent,
+  TurnTokenUsage,
+} from "@kindergarten/contracts";
 
 export type EntryId = string;
 export type ChatRole = "user" | "assistant";
@@ -21,6 +26,7 @@ export interface MessageEntry extends EntryBase {
   role: ChatRole;
   content: ContentBlock[];
   status: "streaming" | "done";
+  tokenEstimate?: TokenUsageComponent;
 }
 
 export interface ThoughtEntry extends EntryBase {
@@ -28,6 +34,12 @@ export interface ThoughtEntry extends EntryBase {
   messageId: string;
   content: ContentBlock[];
   status: "streaming" | "done";
+  tokenEstimate?: TokenUsageComponent;
+}
+
+export interface ContextSummaryEntry extends EntryBase {
+  type: "context_summary";
+  summary: ContextSummary;
 }
 
 export interface ToolCallEntry extends EntryBase {
@@ -41,9 +53,20 @@ export interface ToolCallEntry extends EntryBase {
   locations: ToolCallLocation[];
   rawInput?: unknown;
   rawOutput?: unknown;
+  tokenEstimate?: TokenUsageComponent;
 }
 
-export type ChatEntry = MessageEntry | ThoughtEntry | ToolCallEntry;
+export interface TokenUsageEntry extends EntryBase {
+  type: "token_usage";
+  usage: TurnTokenUsage;
+}
+
+export type ChatEntry =
+  | MessageEntry
+  | ContextSummaryEntry
+  | ThoughtEntry
+  | ToolCallEntry
+  | TokenUsageEntry;
 
 export interface EntryCollection {
   order: EntryId[];

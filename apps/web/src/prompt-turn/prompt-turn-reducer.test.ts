@@ -1,7 +1,11 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
 import { promptTurnReducer } from "./prompt-turn-reducer.js";
-import { idlePromptTurn, type PromptRequestState } from "./prompt-turn-types.js";
+import {
+  canDisplaySessionTokenTotal,
+  idlePromptTurn,
+  type PromptRequestState,
+} from "./prompt-turn-types.js";
 
 const request: PromptRequestState = {
   operationId: "operation-1",
@@ -70,6 +74,37 @@ describe("prompt turn reducer", () => {
       operationId: request.operationId,
     });
     expect(cancelled).toMatchObject({ phase: "cancelled", request });
+  });
+
+  it("会话总量仅在 Prompt Turn 非活动状态展示", () => {
+    const running = promptTurnReducer(idlePromptTurn, { type: "turn/start", request });
+    const waiting = promptTurnReducer(running, {
+      type: "interaction/enqueue",
+      interaction: permission("permission-1"),
+    });
+    const completed = promptTurnReducer(running, {
+      type: "turn/complete",
+      operationId: request.operationId,
+      reason: "end_turn",
+    });
+    const failed = promptTurnReducer(running, {
+      type: "turn/fail",
+      operationId: request.operationId,
+      failure: { kind: "backend_error", message: "模型调用失败" },
+    });
+    const cancelled = promptTurnReducer(running, {
+      type: "turn/cancel",
+      operationId: request.operationId,
+    });
+
+    expect([
+      canDisplaySessionTokenTotal(idlePromptTurn),
+      canDisplaySessionTokenTotal(running),
+      canDisplaySessionTokenTotal(waiting),
+      canDisplaySessionTokenTotal(completed),
+      canDisplaySessionTokenTotal(failed),
+      canDisplaySessionTokenTotal(cancelled),
+    ]).toEqual([true, false, false, true, true, true]);
   });
 });
 

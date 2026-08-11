@@ -2,7 +2,7 @@
 
 V1.6 是一条可运行的单 Agent 实验链路：React Web 通过 ACP WebSocket 连接 Remote Agent，Remote 使用本地 `qwen3:8b` 完成流式推理、权限交互和受控工具循环，并可从 MCP Server 与 Agent Skills 装配外部能力。每次 Prompt Turn 完成后，独立 Evaluation Service 会保存 Runtime Trace 和最小客观评分集。
 
-完整设计见 [技术方案](docs/TECHNICAL_PLAN.md)，MCP 学习见 [MCP 入门与产品能力手册](docs/MCP_LEARNING_GUIDE.md)，工程实现见 [MCP/Skills 能力接入设计](docs/MCP_SKILLS.md)，评测边界见 [Turn Evaluation 设计](docs/TURN_EVALUATION.md)，ACP 边界见 [ACP 兼容说明](docs/ACP_COMPAT.md)。
+完整设计见 [技术方案](docs/TECHNICAL_PLAN.md)，模型接入见 [ModelStudent 入园设计](docs/MODEL_ADMISSION.md)，MCP 学习见 [MCP 入门与产品能力手册](docs/MCP_LEARNING_GUIDE.md)，工程实现见 [MCP/Skills 能力接入设计](docs/MCP_SKILLS.md)，评测边界见 [Turn Evaluation 设计](docs/TURN_EVALUATION.md)，ACP 边界见 [ACP 兼容说明](docs/ACP_COMPAT.md)。
 
 ```mermaid
 flowchart LR
