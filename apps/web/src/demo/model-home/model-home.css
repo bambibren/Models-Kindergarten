@@ -35,7 +35,9 @@
 .mk-model-home-hero > p { margin: 10px 0 24px; color: var(--demo-muted); font-size: 13px; line-height: 1.7; }
 .mk-model-capabilities { display: grid; grid-template-columns: 1.08fr .92fr 1.16fr; gap: 8px; width: min(720px, 100%); }
 .mk-model-capabilities button, .mk-model-capabilities a { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 58px; padding: 10px 12px; border: 1px solid var(--demo-line); border-radius: 11px; color: var(--demo-ink-2); background: var(--demo-surface); text-align: left; text-decoration: none; }
-.mk-model-capabilities button:hover, .mk-model-capabilities a:hover { border-color: #cdcdc7; background: var(--demo-surface-soft); }
+.mk-model-capabilities button:not(:disabled):hover, .mk-model-capabilities a:hover { border-color: #cdcdc7; background: var(--demo-surface-soft); }
+.mk-model-capabilities button:disabled { color: var(--demo-faint); background: var(--demo-surface-soft); cursor: not-allowed; }
+.mk-model-capabilities button:disabled svg { color: #b4b5af; }
 .mk-model-capabilities button.active { border-color: #bfc0b9; background: var(--demo-surface-muted); box-shadow: inset 0 0 0 1px rgb(67 69 63 / .04); }
 .mk-model-capabilities button:active, .mk-model-capabilities a:active { background: var(--demo-surface-muted); }
 .mk-model-capabilities svg { color: var(--demo-muted); }

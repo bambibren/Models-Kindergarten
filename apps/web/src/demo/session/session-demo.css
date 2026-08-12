@@ -40,14 +40,17 @@
 .mk-demo-markdown-preview code { font-family: var(--demo-mono); }
 .mk-demo-artifact-body iframe { width: 100%; height: 100%; min-height: 520px; border: 0; background: #f7f7f4; }
 .mk-session-resizer { display: flex; align-items: center; justify-content: center; width: 9px; min-height: 0; color: #aaa9a3; background: #efefeb; cursor: col-resize; touch-action: none; }
-.mk-session-resizer:hover, .mk-session-resizer:focus-visible { color: var(--demo-ink); background: #ddddd7; }
+.mk-session-resizer:hover, .mk-session-workspace.is-resizing .mk-session-resizer { color: var(--demo-ink); background: #ddddd7; }
 .mk-session-resizer svg:last-child { margin-left: -5px; }
+.mk-session-workspace.is-resizing { cursor: col-resize; user-select: none; }
+.mk-session-workspace.is-resizing iframe { pointer-events: none; }
+.mk-session-workspace.is-resizing::after { position: fixed; z-index: 1000; inset: 0; cursor: col-resize; content: ""; }
 .mk-session-chat { display: grid; grid-template-rows: 48px minmax(0, 1fr) auto; }
 .mk-session-chat > header div { display: grid; min-width: 0; gap: 1px; }
 .mk-session-chat > header strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .mk-session-chat > header small { color: var(--demo-faint); font-size: 8px; }
-.mk-session-agent-select { display: inline-flex; align-items: center; gap: 6px; color: var(--demo-faint); font-size: 8px; }
-.mk-session-agent-select select { max-width: 150px; min-height: 29px; padding: 0 25px 0 8px; border: 1px solid var(--demo-line); border-radius: 7px; outline: 0; color: var(--demo-ink-2); background: var(--demo-surface-soft); font-size: 9px; }
+.mk-session-agent-identity { display: inline-flex; align-items: baseline; gap: 6px; color: var(--demo-faint); font-size: 8px; }
+.mk-session-agent-identity strong { color: var(--demo-ink-2); font-size: 9px; font-weight: 650; }
 .mk-session-chat-scroll { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .mk-demo-chat-stream { width: min(760px, 100%); margin: 0 auto; padding: 34px 28px 42px; }
 .mk-demo-user-turn { display: flex; align-items: flex-end; flex-direction: column; margin-bottom: 22px; }

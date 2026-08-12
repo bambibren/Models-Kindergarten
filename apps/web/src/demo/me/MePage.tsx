@@ -21,7 +21,6 @@ import { loadRemovedMcpIds, loadSavedMcps, mcpStateLabel, mergeMcpInstallations 
 import { SkillInstallControl } from "../skills/SkillInstallControl.js";
 import { listDemoSkills, type DemoSkillRecord } from "../skills/skill-install-state.js";
 import { DemoTopNav } from "../shared/DemoTopNav.js";
-import { loadSavedModelStudents, mergeModelStudents } from "../model-admission/model-admission-state.js";
 import { filterExperiments, pageCount, pageExperiments } from "./me-data.js";
 import "./me.css";
 
@@ -42,7 +41,7 @@ export function MePage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [agents] = useState(() => mergeAgentStrategies(loadSavedAgents(sessionStorage), demoAgentStrategies));
-  const [models] = useState(() => mergeModelStudents(loadSavedModelStudents(sessionStorage), demoModelStudents));
+  const models = demoModelStudents;
   const [mcps] = useState(() => mergeMcpInstallations(loadSavedMcps(sessionStorage), demoMcpInstallations, loadRemovedMcpIds(sessionStorage)));
   const [skills, setSkills] = useState(() => listDemoSkills(sessionStorage));
   const filtered = filterExperiments(demoExperiments, search);
@@ -140,7 +139,7 @@ function AgentPanel({ agents }: { agents: DemoAgentStrategy[] }) {
 
 function ModelPanel({ models }: { models: DemoModelStudent[] }) {
   return <section className="mk-me-panel">
-    <header className="mk-me-panel-heading"><div><strong>我的 Models</strong><small>包含内置示例和通过入园 Demo 保存的 ModelStudent；API Key 原文不会显示或持久化。</small></div><a className="mk-me-agent-add" href="/demo/model-admission"><Plus size={13} />新模型入园</a></header>
+    <header className="mk-me-panel-heading"><div><strong>我的 Models</strong><small>当前只展示内置 ModelStudent；模型入园功能不在本轮范围内。</small></div></header>
     <div className="mk-me-resource-list">
       {models.map((model) => <article key={model.id}><div><strong>{model.name}</strong><p>{model.model} · {model.provider}</p></div><span>{protocolLabel(model)} · {model.score === null ? "待评测" : `${model.score} 分`}</span><em>{model.state}</em></article>)}
     </div>

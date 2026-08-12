@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, UserRound } from "lucide-react";
 import { demoAgentStrategies, demoArtifacts, demoChatStream, demoMcpInstallations, demoModelStudents, demoSessions } from "../demo-data.js";
@@ -12,7 +12,6 @@ import { DemoTopNav } from "../shared/DemoTopNav.js";
 import { ArtifactPanel } from "./ArtifactPanel.js";
 import { SkillInstallBanner } from "./SkillInstallBanner.js";
 import { clampArtifactWidth, defaultArtifactWidth } from "./split-pane.js";
-import { loadSavedModelStudents, mergeModelStudents } from "../model-admission/model-admission-state.js";
 import "./session-demo.css";
 
 export function SessionDemoPage() {
@@ -21,16 +20,15 @@ export function SessionDemoPage() {
   const selectedModelId = sessionStorage.getItem("mk-demo-model-student");
   const initialAgentId = sessionStorage.getItem("mk-demo-agent") ?? "agent-default";
   const websiteFlow = Boolean(draftPrompt && sessionStorage.getItem("mk-demo-home-flow") === "website-development" && isWebsiteDevelopmentRequest(draftPrompt));
-  const [models] = useState(() => mergeModelStudents(loadSavedModelStudents(sessionStorage), demoModelStudents));
-  const selectedModel = models.find((model) => model.id === selectedModelId) ?? models[0];
+  const selectedModel = demoModelStudents.find((model) => model.id === selectedModelId) ?? demoModelStudents[0];
   const [agents] = useState(() => mergeAgentStrategies(loadSavedAgents(sessionStorage), demoAgentStrategies));
   const [installations] = useState(() => mergeMcpInstallations(loadSavedMcps(sessionStorage), demoMcpInstallations, loadRemovedMcpIds(sessionStorage)));
-  const [selectedAgentId, setSelectedAgentId] = useState(initialAgentId);
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? demoAgentStrategies[0];
+  const selectedAgent = agents.find((agent) => agent.id === initialAgentId) ?? agents[0] ?? demoAgentStrategies[0];
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [activeSession, setActiveSession] = useState(query.get("draft") ? "demo-new-session" : query.get("sessionId") ?? demoSessions[0]?.id ?? "");
   const [artifact, setArtifact] = useState<DemoArtifact | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(520);
+  const [isResizing, setIsResizing] = useState(false);
   const [narrowView, setNarrowView] = useState<"artifact" | "chat">("artifact");
   const [websiteReady, setWebsiteReady] = useState(false);
   const [showInstallBanner, setShowInstallBanner] = useState(websiteFlow);
@@ -57,24 +55,25 @@ export function SessionDemoPage() {
 
   function startResize(event: ReactPointerEvent<HTMLDivElement>) {
     const workspace = workspaceRef.current;
-    if (!workspace) return;
+    if (!workspace || event.button !== 0) return;
     event.preventDefault();
+    const pointerId = event.pointerId;
     const rect = workspace.getBoundingClientRect();
-    const move = (pointer: PointerEvent) => setArtifactWidth(clampArtifactWidth(pointer.clientX - rect.left, rect.width));
-    const stop = () => {
+    const move = (pointer: PointerEvent) => {
+      if (pointer.pointerId !== pointerId) return;
+      setArtifactWidth(clampArtifactWidth(pointer.clientX - rect.left, rect.width));
+    };
+    const stop = (pointer: PointerEvent) => {
+      if (pointer.pointerId !== pointerId) return;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      setIsResizing(false);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
-  }
-
-  function resizeWithKeyboard(event: KeyboardEvent<HTMLDivElement>) {
-    const workspace = workspaceRef.current;
-    if (!workspace || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
-    event.preventDefault();
-    const delta = event.key === "ArrowLeft" ? -24 : 24;
-    setArtifactWidth((current) => clampArtifactWidth(current + delta, workspace.clientWidth));
+    window.addEventListener("pointercancel", stop);
+    setIsResizing(true);
   }
 
   const workspaceStyle = { "--artifact-width": `${artifactWidth}px` } as CSSProperties;
@@ -108,23 +107,17 @@ export function SessionDemoPage() {
           <button className={narrowView === "artifact" ? "active" : ""} type="button" onClick={() => setNarrowView("artifact")}>产物</button>
           <button className={narrowView === "chat" ? "active" : ""} type="button" onClick={() => setNarrowView("chat")}>聊天</button>
         </div>}
-        <div className={`mk-session-workspace narrow-${narrowView}`} ref={workspaceRef} style={workspaceStyle}>
+        <div className={`mk-session-workspace narrow-${narrowView} ${isResizing ? "is-resizing" : ""}`} ref={workspaceRef} style={workspaceStyle}>
           {artifact && <ArtifactPanel artifact={artifact} onClose={() => setArtifact(null)} />}
           {artifact && <div
             aria-label="调整产物与聊天宽度"
             aria-orientation="vertical"
             className="mk-session-resizer"
-            onDoubleClick={() => {
-              const containerWidth = workspaceRef.current?.clientWidth;
-              if (containerWidth) setArtifactWidth(defaultArtifactWidth(containerWidth));
-            }}
-            onKeyDown={resizeWithKeyboard}
             onPointerDown={startResize}
             role="separator"
-            tabIndex={0}
           ><ChevronLeft size={10} /><ChevronRight size={10} /></div>}
           <section className="mk-session-chat">
-            <header><div><strong>{sessionTitle}</strong><small>{selectedModel?.model ?? "qwen3:8b"} · {readyMcpCount} 个 MCP 已授权 · UI Demo</small></div><label className="mk-session-agent-select"><span>Agent</span><select aria-label="选择会话 Agent" value={selectedAgent?.id} onChange={(event) => { setSelectedAgentId(event.target.value); sessionStorage.setItem("mk-demo-agent", event.target.value); }}>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></header>
+            <header><div><strong>{sessionTitle}</strong><small>{selectedModel?.model ?? "qwen3:8b"} · {readyMcpCount} 个 MCP 已授权 · UI Demo</small></div><div className="mk-session-agent-identity"><span>Agent</span><strong>{selectedAgent?.name}</strong></div></header>
             <div className="mk-session-chat-scroll">
               <DemoChatStream artifacts={demoArtifacts} items={chatItems} onOpenArtifact={openArtifact} />
             </div>

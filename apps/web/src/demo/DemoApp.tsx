@@ -4,13 +4,11 @@ import { MePage } from "./me/MePage.js";
 import { ModelHomePage } from "./model-home/ModelHomePage.js";
 import { SessionDemoPage } from "./session/SessionDemoPage.js";
 import { McpEditorPage } from "./mcp/McpEditorPage.js";
-import { ModelAdmissionPage } from "./model-admission/ModelAdmissionPage.js";
 import { DemoTopNav } from "./shared/DemoTopNav.js";
 import "./demo.css";
 
 const routes = new Set([
   "/demo/model-home",
-  "/demo/model-admission",
   "/demo/session",
   "/demo/context-lab",
   "/demo/agent-editor",
@@ -25,7 +23,6 @@ export function isDemoRoute(pathname: string): boolean {
 export function DemoApp() {
   const path = normalize(location.pathname);
   if (path === "/demo/model-home") return <ModelHomePage />;
-  if (path === "/demo/model-admission") return <ModelAdmissionPage />;
   if (path === "/demo/session") return <SessionDemoPage />;
   if (path === "/demo/context-lab") return <ContextLabPage />;
   if (path === "/demo/agent-editor") return <AgentEditorPage />;

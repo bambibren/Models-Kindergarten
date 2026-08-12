@@ -1,22 +1,20 @@
-import { ArrowUp, BookOpenText, Bot, Check, ChevronDown, Code2, FlaskConical, GraduationCap, Plus, UserPlus } from "lucide-react";
+import { ArrowUp, BookOpenText, Bot, Check, ChevronDown, Code2, FlaskConical, GraduationCap, Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { demoAgentStrategies, demoModelStudents, demoSessions } from "../demo-data.js";
 import { loadSavedAgents, mergeAgentStrategies } from "../agent-editor/agent-storage.js";
 import { isWebsiteDevelopmentRequest, websiteDevelopmentPrompt, websiteSkillSources } from "../skills/skill-install-state.js";
-import { loadSavedModelStudents, mergeModelStudents } from "../model-admission/model-admission-state.js";
 import { DemoTopNav } from "../shared/DemoTopNav.js";
 import "./model-home.css";
 
 const prompts = {
-  novel: "帮我构思一篇发生在月球幼儿园的科幻短篇，先梳理世界观和主要人物。",
   site: websiteDevelopmentPrompt,
 };
 
 export function ModelHomePage() {
   const [prompt, setPrompt] = useState("");
   const [expanded, setExpanded] = useState(false);
-  const [models] = useState(() => mergeModelStudents(loadSavedModelStudents(sessionStorage), demoModelStudents));
+  const models = demoModelStudents;
   const [selectedModelId, setSelectedModelId] = useState(() => {
     const saved = sessionStorage.getItem("mk-demo-model-student");
     return models.some((model) => model.id === saved) ? saved! : models[0]?.id ?? "";
@@ -59,13 +57,11 @@ export function ModelHomePage() {
               </button>)}
             </div>
           </details>
-          <a className="mk-model-admission" href="/demo/model-admission"><UserPlus size={15} />新模型入园</a>
         </div>
-        {new URLSearchParams(location.search).get("admitted") === "1" && <div className="mk-model-admission-notice" role="status">新 ModelStudent 已入园并设为当前学生；完成真实任务后再生成评分。</div>}
         <h1>今天想让模型学习什么？</h1>
         <p>从一个具体任务开始，或进入上下文实验比较不同策略。</p>
         <div className="mk-model-capabilities" aria-label="学习方向">
-          <button type="button" onClick={() => setPrompt(prompts.novel)}><BookOpenText size={16} /><span><strong>小说创作</strong><small>从世界观与人物开始</small></span></button>
+          <button aria-label="小说创作（功能调研中）" disabled type="button"><BookOpenText size={16} /><span><strong>小说创作</strong><small>功能调研中</small></span></button>
           <button className={websiteRequest ? "active" : ""} type="button" onClick={() => setPrompt(prompts.site)}><Code2 size={16} /><span><strong>网站开发</strong><small>安装 3 个 Skills 后生成 HTML</small></span></button>
           <a href="/demo/context-lab?mode=new"><FlaskConical size={16} /><span><strong>模型上下文实验</strong><small>比较 2–3 种输入策略</small></span></a>
         </div>
