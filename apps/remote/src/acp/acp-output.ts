@@ -2,11 +2,14 @@ import * as acp from "@agentclientprotocol/sdk";
 import {
   CONTEXT_SUMMARY_NOTIFICATION,
   TOKEN_USAGE_NOTIFICATION,
+  TURN_STATE_NOTIFICATION,
   makeAcpMeta,
   type ContextSummary,
   type MessageMeta,
   type TurnTokenUsage,
+  type TurnState,
 } from "@kindergarten/contracts";
+import { SessionAcpChannel } from "./session-acp-channel.js";
 
 export type MessageRole = "user" | "assistant";
 type MessageUpdate =
@@ -18,7 +21,7 @@ type MessageUpdate =
 export class AcpOutput {
   constructor(
     private readonly sessionId: string,
-    private readonly client: acp.AgentContext,
+    private readonly channel: SessionAcpChannel,
   ) {}
 
   async message(
@@ -44,31 +47,38 @@ export class AcpOutput {
   }
 
   async toolCall(value: acp.ToolCall): Promise<void> {
-    await this.client.notify(acp.methods.client.session.update, {
+    await this.channel.project((client) => client.notify(acp.methods.client.session.update, {
       sessionId: this.sessionId,
       update: { sessionUpdate: "tool_call", ...value },
-    });
+    }), `tool_call/${value.toolCallId}`);
   }
 
   async toolUpdate(value: acp.ToolCallUpdate): Promise<void> {
-    await this.client.notify(acp.methods.client.session.update, {
+    await this.channel.project((client) => client.notify(acp.methods.client.session.update, {
       sessionId: this.sessionId,
       update: { sessionUpdate: "tool_call_update", ...value },
-    });
+    }), `tool_call_update/${value.toolCallId}`);
   }
 
   async contextSummary(summary: ContextSummary): Promise<void> {
-    await this.client.notify(CONTEXT_SUMMARY_NOTIFICATION, {
+    await this.channel.project((client) => client.notify(CONTEXT_SUMMARY_NOTIFICATION, {
       sessionId: this.sessionId,
       summary,
-    });
+    }), `context_summary/${summary.turnId}`);
   }
 
   async tokenUsage(usage: TurnTokenUsage): Promise<void> {
-    await this.client.notify(TOKEN_USAGE_NOTIFICATION, {
+    await this.channel.project((client) => client.notify(TOKEN_USAGE_NOTIFICATION, {
       sessionId: this.sessionId,
       usage,
-    });
+    }), `token_usage/${usage.turnId}`);
+  }
+
+  async turnState(turn: TurnState): Promise<void> {
+    await this.channel.project((client) => client.notify(TURN_STATE_NOTIFICATION, {
+        sessionId: this.sessionId,
+        turn,
+      }), `turn_state/${turn.turnId}/${turn.status}`);
   }
 
   private async content(
@@ -77,7 +87,7 @@ export class AcpOutput {
     text: string,
     meta: MessageMeta,
   ): Promise<void> {
-    await this.client.notify(acp.methods.client.session.update, {
+    await this.channel.project((client) => client.notify(acp.methods.client.session.update, {
       sessionId: this.sessionId,
       update: {
         sessionUpdate,
@@ -85,6 +95,7 @@ export class AcpOutput {
         messageId,
         _meta: makeAcpMeta(meta),
       },
-    });
+    }), `${sessionUpdate}/${messageId}`);
   }
+
 }

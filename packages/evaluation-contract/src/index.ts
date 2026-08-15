@@ -1,5 +1,6 @@
 import type {
   ContextMessageObservation,
+  RuntimeResolvedReasoningSnapshot,
   RuntimeVariantSnapshot,
 } from "@kindergarten/runtime-observation";
 
@@ -7,6 +8,7 @@ export interface ModelRoundTrace {
   id: string;
   index: number;
   startedAt: number;
+  resolvedReasoning: RuntimeResolvedReasoningSnapshot;
   firstTokenAt?: number;
   completedAt?: number;
   stopReason?: "stop" | "length" | "cancelled";
@@ -20,6 +22,8 @@ export interface ModelRoundTrace {
     inputTokens?: number;
   };
   outputTokens?: number;
+  cachedInputTokens?: number;
+  reasoningOutputTokens?: number;
 }
 
 export interface ToolCallTrace {
@@ -56,6 +60,7 @@ export interface TurnTraceDocument {
   sessionId: string;
   turnId: string;
   variant: RuntimeVariantSnapshot;
+  resolvedReasoning: RuntimeResolvedReasoningSnapshot;
   status: "completed" | "failed" | "cancelled";
   stopReason?: string;
   startedAt: number;

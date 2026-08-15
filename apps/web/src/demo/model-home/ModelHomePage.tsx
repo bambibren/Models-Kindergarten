@@ -1,10 +1,13 @@
 import { ArrowUp, BookOpenText, Bot, Check, ChevronDown, Code2, FlaskConical, GraduationCap, Plus } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import type { ReasoningProfile } from "@kindergarten/contracts";
 import { demoAgentStrategies, demoModelStudents, demoSessions } from "../demo-data.js";
 import { loadSavedAgents, mergeAgentStrategies } from "../agent-editor/agent-storage.js";
 import { isWebsiteDevelopmentRequest, websiteDevelopmentPrompt, websiteSkillSources } from "../skills/skill-install-state.js";
 import { DemoTopNav } from "../shared/DemoTopNav.js";
+import { ReasoningProfileSelect } from "../../components/reasoning/ReasoningProfileSelect.js";
+import { saveDemoSessionReasoning } from "../reasoning/demo-reasoning-state.js";
 import "./model-home.css";
 
 const prompts = {
@@ -21,11 +24,20 @@ export function ModelHomePage() {
   });
   const [agents] = useState(() => mergeAgentStrategies(loadSavedAgents(sessionStorage), demoAgentStrategies));
   const [selectedAgentId, setSelectedAgentId] = useState(agents[0]?.id ?? "");
+  const [reasoningProfile, setReasoningProfile] = useState<ReasoningProfile>("auto");
   const modelPickerRef = useRef<HTMLDetailsElement>(null);
   const agentPickerRef = useRef<HTMLDetailsElement>(null);
   const selectedModel = models.find((model) => model.id === selectedModelId) ?? models[0];
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
+  const reasoningCapability = selectedModel?.capabilities.reasoningControl;
   const websiteRequest = isWebsiteDevelopmentRequest(prompt);
+
+  useEffect(() => {
+    if (!reasoningCapability?.adjustable
+      || (reasoningProfile !== "auto" && !reasoningCapability.supportedProfiles.includes(reasoningProfile))) {
+      setReasoningProfile("auto");
+    }
+  }, [reasoningCapability, reasoningProfile]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -33,6 +45,11 @@ export function ModelHomePage() {
     sessionStorage.setItem("mk-demo-home-prompt", prompt.trim());
     if (selectedModel) sessionStorage.setItem("mk-demo-model-student", selectedModel.id);
     if (selectedAgent) sessionStorage.setItem("mk-demo-agent", selectedAgent.id);
+    const launchReasoningProfile = reasoningCapability?.adjustable
+      && (reasoningProfile === "auto" || reasoningCapability.supportedProfiles.includes(reasoningProfile))
+      ? reasoningProfile
+      : "auto";
+    saveDemoSessionReasoning(sessionStorage, "demo-new-session", launchReasoningProfile);
     if (isWebsiteDevelopmentRequest(prompt)) sessionStorage.setItem("mk-demo-home-flow", "website-development");
     else sessionStorage.removeItem("mk-demo-home-flow");
     location.href = "/demo/session?draft=home-prompt";
@@ -72,6 +89,14 @@ export function ModelHomePage() {
               <summary><Bot size={13} /><strong>{selectedAgent?.name ?? "选择 Agent"}</strong><ChevronDown size={13} /></summary>
               <div>{agents.map((agent) => <button className={agent.id === selectedAgentId ? "selected" : ""} key={agent.id} type="button" onClick={() => { setSelectedAgentId(agent.id); agentPickerRef.current?.removeAttribute("open"); }}><span><Bot size={13} /></span><div><strong>{agent.name}</strong><small>{agent.description}</small></div>{agent.id === selectedAgentId && <Check size={12} />}</button>)}<a href="/demo/agent-editor?mode=create"><Plus size={13} />添加 Agent</a></div>
             </details>
+            {reasoningCapability?.adjustable && <ReasoningProfileSelect
+              capability={reasoningCapability}
+              choices={(["auto", ...reasoningCapability.supportedProfiles] as ReasoningProfile[]).map((profile) => ({ profile }))}
+              className="mk-demo-home-reasoning"
+              label="Demo 新会话思考强度"
+              onChange={setReasoningProfile}
+              value={reasoningProfile}
+            />}
             <span>本地模型可能会出错，请核对重要信息</span>
           </div>
           <button aria-label="发送" disabled={!prompt.trim()} type="submit"><ArrowUp size={16} /></button>

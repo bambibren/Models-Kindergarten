@@ -17,7 +17,7 @@
 
 需求裁决规则：
 
-1. 用户明确裁决高于 Demo：模型入园路由、小说真实创作流程、小说 MCP（Bearer Token）不进入本轮；小说卡片保留为不可点击的调研占位。评分实现三维人工注释量表 + Runtime 执行分的固定四维，不实现任何自动评分调用。
+1. 用户明确裁决高于旧 Demo：自定义 OpenAI Responses-compatible 模型入园已进入本轮；小说真实创作流程、小说 MCP（Bearer Token）仍不进入本轮。小说卡片保留为不可点击的调研占位。评分实现三维人工注释量表 + Runtime 执行分的固定四维，不实现任何自动评分调用。
 2. 实际路由和可操作效果高于只存在于文案中的设想。
 3. `AGENTS.md` 的协议、安全和状态归属规则高于页面便利性。
 4. 已有真实实现能满足同一需求时优先复用；若真实实现与需求冲突，则改变领域装配，不在 UI 里伪装。
@@ -124,7 +124,7 @@ evaluation-web 已有真实 Turn 详情：
 
 ## 5. 模型入园
 
-本轮不注册 `/model-admission` 或 `/demo/model-admission`，也不显示入园按钮。其他页面只消费 Remote 已配置好的 ModelStudent 只读目录；provider Secret 写入、连接检测、体检、创建和编辑均等待后续独立 ADR/TRD。
+正式产品注册 `/models/new`，从首页和“我的 Models”进入。当前提供 OpenAI 官方、自定义公网 HTTPS Responses 接口和硅基流动三种接入方式：先按各自协议对目标模型做有界真实体检，再把 Key 写入 macOS Keychain，并原子保存 Connection + ModelStudent。能力来自逐项请求证据，不按模型名、域名或服务商品牌推断。当前三种方式均手填 Model ID；模型目录发现、Ollama 管理入园、Anthropic Messages、Key 轮换与编辑仍是后续范围。
 
 ## 6. Session `/sessions/:sessionId`
 
@@ -310,8 +310,8 @@ evaluation-web 已有真实 Turn 详情：
 
 ### 9.6 Skills
 
-- 显示 skillId、名称、版本/commit、source、state、安装时间和失败摘要。
-- 支持 GitHub tree URL 或批准的本地来源安装，展示真实 Job。
+- 显示 Skill name、版本/commit、source、state、安装时间和失败摘要；Installation UUID 仅作内部绑定键。
+- 支持 GitHub 仓库根目录或仓库内目录 URL，以及批准的本地来源安装；从 URL 指向目录开始按层查找，只安装第一次出现 `SKILL.md` 的深度，并且找到后不继续进入更深目录。展示真实 Job。
 - 只有 ready 项可用于 Agent；quarantined/failed 可重试或查看安全错误。
 
 ## 10. MCP `/mcps/new`、`/mcps/:mcpId`
@@ -364,11 +364,12 @@ evaluation-web 已有真实 Turn 详情：
 - 每 lane 的 Agent 配置快照哈希、模型、context sources、能力、raw provider input 摘要、usage、stop reason；
 - 结构化差异视图和原始回答切换；
 - 完整人工注释量表：理解、规划、输出三个 0～100 维度，保留各自的需求勾选/映射、Workflow 步骤标记和最终输出文本标注语义；
+- 每次实验完成后调用当前 ModelStudent 生成标注题目：将原始需求分析合并为公共选项、逐 lane 提取 Workflow、逐 lane 完整切分结果。模型只生成可供人工判断的题目，不输出任何 verdict 或分数；结果随 Experiment 持久化，失败可重试，显式重新生成会使旧 Scorecard 失效；
 - 执行维度：根据同一 lane 的 Runtime Trace 和版本化 `ExecutionScorePolicy` 自动计算 0～100 分，这是确定性规则计算，不是自动评分模型调用；
 - 四维固定为理解、规划、输出、执行，默认各占 25%；服务端计算四维总分、排名和并列规则，前端显示四轴雷达图与 winner；
 - 保存标记和回到 Context Lab。
 
-“人工注释量表”不是只有一个数字输入框，而是 Demo 里现有的三套人工操作：确认真实需求并观察各回答命中情况、对规划步骤做标注、对最终输出文本做标注。服务端按量表版本把这些 annotation facts 换算为理解/规划/输出三维分。
+“人工注释量表”不是只有一个数字输入框。模型先负责出题：合并真实需求、提取每条 Workflow、分段每条最终输出；随后人分别判断需求命中、步骤有效性和结果段有效性。服务端按量表版本把这些人工 annotation facts 换算为理解/规划/输出三维分。
 
 ### 11.2 继续留白与指标边界
 
@@ -444,68 +445,68 @@ Runtime metrics 必须参与四维评分中的“执行”维度。首版输入�
 - 真实 Web 只有单页 chat，无生产资源管理；
 - evaluation comparison Demo 的评分和保存都只是浏览器内存。
 
-## 14. 逐项差距矩阵
+## 14. 逐项实现矩阵
 
-状态说明：`已有`=真实链已满足；`部分`=底层存在但领域装配不满足；`缺失`=没有真实实现；`留白`=本轮明确不实现。
+“实施前非 Demo 现状”保留了制定方案时的基线；“实施状态”反映 D2P-1.3 当前代码。`已实现`=本轮已接入真实链并有测试；`已有`=原真实链已满足；`部分`=仍有非关键收口；`留白`=本轮明确不实现。
 
-| ID | 需求 | Demo | 非 Demo 现状 | 状态 | 目标改造 |
+| ID | 需求 | Demo | 实施前非 Demo 现状 | 实施状态 | 目标改造 |
 | --- | --- | --- | --- | --- | --- |
-| G-01 | 生产多路由 | 有七个 demo route | 真实 Web 只有 Chat App | 缺失 | Router + App Shell + feature routes |
-| G-02 | 唯一 ACP owner | Demo 不连 ACP | App 一个 client | 部分 | Provider 化并覆盖所有生产页面 |
-| G-03 | 已有模型选择 | 写死模型列表 | index 一个 env ModelStudent | 部分 | 只读 ModelStudentCatalog；入园留白 |
-| G-04 | Agent 选择 | sessionStorage | 无 Agent domain | 缺失 | AgentRepository/Service；创建 Session 时固化绑定 |
-| G-05 | Session 模型绑定 | 视觉展示 | Session V3 无字段 | 缺失 | Session V4 modelStudentId |
-| G-06 | Session Agent 绑定 | 视觉展示 | Session V3 无字段 | 缺失 | Session V4 agentId |
-| G-07 | 最近会话 | mock | ACP list real | 部分 | enrich summary、purpose filter、分页 |
+| G-01 | 生产多路由 | 有七个 demo route | 真实 Web 只有 Chat App | 已实现 | Router + App Shell + feature routes |
+| G-02 | 唯一 ACP owner | Demo 不连 ACP | App 一个 client | 已实现 | Provider 化并覆盖所有生产页面 |
+| G-03 | 已有模型选择 | 写死模型列表 | index 一个 env ModelStudent | 已实现 | 动态 ModelStudentCatalog；Session 按 ID 解析 Provider |
+| G-04 | Agent 选择 | sessionStorage | 无 Agent domain | 已实现 | AgentRepository/Service；创建 Session 时固化绑定 |
+| G-05 | Session 模型绑定 | 视觉展示 | Session V3 无字段 | 已实现 | Session V4 modelStudentId |
+| G-06 | Session Agent 绑定 | 视觉展示 | Session V3 无字段 | 已实现 | Session V4 agentId |
+| G-07 | 最近会话 | mock | ACP list real | 已实现 | enrich summary、purpose filter、分页 |
 | G-08 | load/resume | 假列表 | 已实现且有测试 | 已有 | 保持不变量 |
 | G-09 | Prompt streaming | 写死片段 | ACP/Provider real | 已有 | 接入生产 Session 页面 |
 | G-10 | tool order | 写死卡片 | reducer + tests | 已有 | 回归保护 |
 | G-11 | permission | Demo 效果 | ACP real | 已有 | 原样复用 |
 | G-12 | AskUser | Demo 效果 | ACP real | 已有 | 原样复用 |
-| G-13 | Agent 内置工具策略 | 控件 | 全局 ToolRegistry | 缺失 | Agent binding + Resolver |
-| G-14 | Agent Skill 绑定 | sessionStorage | 全局 allowed IDs | 缺失 | Installation IDs in Agent |
-| G-15 | Agent MCP 绑定 | 前端投影 | 单个 config allowlist | 缺失 | per-Agent capability bindings |
-| G-16 | history policy | 控件 | ContextAssembler 固定 maxMessages | 部分 | per-Agent history policy |
+| G-13 | Agent 内置工具策略 | 控件 | 全局 ToolRegistry | 已实现 | Agent binding + Resolver |
+| G-14 | Agent Skill 绑定 | sessionStorage | 全局 allowed IDs | 已实现 | Installation IDs in Agent |
+| G-15 | Agent MCP 绑定 | 前端投影 | 单个 config allowlist | 已实现 | per-Agent capability bindings |
+| G-16 | history policy | 控件 | ContextAssembler 固定 maxMessages | 已实现 | per-Agent history policy |
 | G-17 | memory | 占位控件 | 无 memory domain | 留白 | 仅 `off` |
-| G-18 | Agent 保存 | 无 | 无 Store | 缺失 | 单进程串行写；最后一次成功提交生效 |
-| G-19 | Skill 手动安装 | 定时器 | CLI installer | 部分 | Control Job + shared service |
-| G-20 | 对话 Skill 安装 | 假 tool flow | 无 ensure tool | 缺失 | scoped `ensure_agent_skills` |
-| G-21 | 同 Turn 能力刷新 | 假完成 | Turn 开始冻结 | 缺失 | structured effect + re-resolve |
-| G-22 | Skill 进度恢复 | sessionStorage | 无 Job store | 缺失 | persistent Batch/Items |
-| G-23 | MCP 无认证安装 | 定时器 | config file + initialize | 部分 | Test Job + Installation Service |
-| G-24 | MCP 连接状态 | 假状态 | snapshot at startup | 部分 | Connection Supervisor |
-| G-25 | MCP 重连 | 按钮假动作 | 无管理方法 | 缺失 | reconnect operation/idempotency |
-| G-26 | MCP 禁用 | 本地开关 | 无生命周期 | 缺失 | persisted state + stop reconnect |
-| G-27 | MCP 卸载 | 调 sessionStorage | 无 UnitOfWork | 缺失 | cascade Agent bindings atomically |
-| G-28 | MCP discovery | mock | real connector | 部分 | persist snapshots/generation |
-| G-29 | MCP 运行时授权 | 前端过滤 | provider 全局 allowlist | 部分 | per-Turn filter + execution recheck |
+| G-18 | Agent 保存 | 无 | 无 Store | 已实现 | 单进程串行写；最后一次成功提交生效 |
+| G-19 | Skill 手动安装 | 定时器 | CLI installer | 已实现 | Control Job + shared service |
+| G-20 | 对话 Skill 安装 | 假 tool flow | 无 ensure tool | 已实现 | scoped `ensure_agent_skills` |
+| G-21 | 同 Turn 能力刷新 | 假完成 | Turn 开始冻结 | 已实现 | structured effect + re-resolve |
+| G-22 | Skill 进度恢复 | sessionStorage | 无 Job store | 已实现 | persistent Batch/Items |
+| G-23 | MCP 无认证安装 | 定时器 | config file + initialize | 已实现 | Test Job + Installation Service |
+| G-24 | MCP 连接状态 | 假状态 | snapshot at startup | 已实现 | Connection Supervisor |
+| G-25 | MCP 重连 | 按钮假动作 | 无管理方法 | 已实现 | reconnect operation/idempotency |
+| G-26 | MCP 禁用 | 本地开关 | 无生命周期 | 已实现 | persisted state + stop reconnect |
+| G-27 | MCP 卸载 | 调 sessionStorage | 无 UnitOfWork | 已实现 | cascade Agent bindings atomically |
+| G-28 | MCP discovery | mock | real connector | 已实现 | persist snapshots/generation |
+| G-29 | MCP 运行时授权 | 前端过滤 | provider 全局 allowlist | 已实现 | per-Turn filter + execution recheck |
 | G-30 | Bearer UI/小说 MCP | mock tail | secret read only | 留白 | 后续研究，不加写接口 |
-| G-31 | Context fresh draft | 本地 state | 无 domain | 缺失 | ExperimentDraft Store/API |
-| G-32 | Context history source | mock turn | Context Summary only | 部分 | immutable TurnExecutionRecord |
-| G-33 | A reuse snapshot | 写死 lane | 无实验 | 缺失 | reference original result, no rerun |
-| G-34 | B/C 真执行 | setTimeout | 无 orchestrator | 缺失 | ACP experiment Sessions |
-| G-35 | context token preview | 固定 map | provider serializer exists | 部分 | server preview/hash cache |
-| G-36 | raw provider input | mock/摘要 | Context Summary real | 部分 | persist/sanitize per Turn/lane |
-| G-37 | 实验恢复 | sessionStorage | 无 Store | 缺失 | Experiment/Run persisted states |
-| G-38 | 原始对比 | mock | demo-only component | 缺失 | production read-only result route |
-| G-39 | 实验保存 | useState | 无持久字段 | 缺失 | savedAt/savedBy update |
-| G-40 | 实验评分 | Demo 三维人工注释 + Runtime 执行分 | 仅基础 metrics | 部分 | annotation facts、ExecutionScorePolicy、固定四维、总分、雷达、排名、winner；不做自动评分调用 |
-| G-41 | write_file | 假产物 | real write + absolute location | 部分 | session sandbox + FileReference |
-| G-42 | ACP resource_link | 内存对象 |外链 renderer | 部分 | tool content emits opaque link |
-| G-43 | 内部预览 | iframe string | external new tab | 缺失 | File API + safe preview panel |
-| G-44 | 分栏交互 | 已完整 | 无真实 Artifact panel | 部分 | 提取纯 UI，接真实 file ID |
-| G-45 | Me experiments | mock/search | 无 experiment list | 缺失 | server pagination |
-| G-46 | Me agents | sessionStorage | 无 Store | 缺失 | Agent list/service |
-| G-47 | Me models | mock | env singleton | 部分 | read-only catalog |
-| G-48 | Me MCPs | sessionStorage | config singleton | 部分 | Installation list |
-| G-49 | Me Skills | timer/list | registry real | 部分 | Installation projection + Job |
-| G-50 | 错误合同 | 局部文案 | runtime error mapping | 部分 | ProblemDetail + requestId |
-| G-51 | 本地 API 安全 | 不涉及 | 只有 health/acp | 缺失 | loopback + Origin allowlist |
-| G-52 | 数据迁移 | 不涉及 | Session V3/global configs | 缺失 | versioned migrators/importers |
+| G-31 | Context fresh draft | 本地 state | 无 domain | 已实现 | ExperimentDraft Store/API |
+| G-32 | Context history source | mock turn | Context Summary only | 已实现 | immutable TurnExecutionRecord |
+| G-33 | A reuse snapshot | 写死 lane | 无实验 | 已实现 | reference original result, no rerun |
+| G-34 | B/C 真执行 | setTimeout | 无 orchestrator | 已实现 | ACP experiment Sessions |
+| G-35 | context token preview | 固定 map | provider serializer exists | 已实现 | server preview/hash cache |
+| G-36 | raw provider input | mock/摘要 | Context Summary real | 已实现 | persist/sanitize per Turn/lane |
+| G-37 | 实验恢复 | sessionStorage | 无 Store | 已实现 | Experiment/Run persisted states |
+| G-38 | 原始对比 | mock | demo-only component | 已实现 | production read-only result route |
+| G-39 | 实验保存 | useState | 无持久字段 | 已实现 | savedAt/savedBy update |
+| G-40 | 实验评分 | Demo 三维人工注释 + Runtime 执行分 | 仅基础 metrics | 已实现 | annotation facts、模型生成工作表、ExecutionScorePolicy、固定四维、总分、雷达、排名、winner；不做自动评分调用 |
+| G-41 | write_file | 假产物 | real write + absolute location | 已实现 | session sandbox + FileReference |
+| G-42 | ACP resource_link | 内存对象 |外链 renderer | 已实现 | tool content emits opaque link |
+| G-43 | 内部预览 | iframe string | external new tab | 已实现 | File API + safe preview panel |
+| G-44 | 分栏交互 | 已完整 | 无真实 Artifact panel | 已实现 | 提取纯 UI，接真实 file ID |
+| G-45 | Me experiments | mock/search | 无 experiment list | 已实现 | server pagination |
+| G-46 | Me agents | sessionStorage | 无 Store | 已实现 | Agent list/service |
+| G-47 | Me models | mock | env singleton | 已实现 | Catalog + OpenAI/自定义 Responses/硅基流动入园与删除 |
+| G-48 | Me MCPs | sessionStorage | config singleton | 已实现 | Installation list |
+| G-49 | Me Skills | timer/list | registry real | 已实现 | Installation projection + Job |
+| G-50 | 错误合同 | 局部文案 | runtime error mapping | 已实现 | ProblemDetail + requestId |
+| G-51 | 本地 API 安全 | 不涉及 | 只有 health/acp | 已实现 | loopback + Origin allowlist |
+| G-52 | 数据迁移 | 不涉及 | Session V3/global configs | 已实现 | versioned migrators/importers |
 | G-53 | 可观测性 | 视觉状态 | Turn observation real | 部分 | domain operation events/metrics |
 | G-54 | 小说创作 | 写死会话 | 无领域实现 | 留白 | 后续研究 |
-| G-55 | 模型入园 | Demo 页面 | 方案/Provider 雏形 | 留白 | 后续研究 |
-| G-56 | Responses Provider 启用门禁 | Demo 仅模拟 | Adapter 雏形尚未接 resolver | 留白 | 模型入园阶段先验证正式终态、逆序并行工具、严格调用校验和 Secret 脱敏 |
+| G-55 | 模型入园 | Demo 页面 | 方案/Provider 雏形 | 已实现 | ProviderPreset + Adapter Registry；OpenAI/自定义 Responses/硅基流动体检、Keychain、持久化与启动恢复；Anthropic 留白 |
+| G-56 | Responses Provider 启用门禁 | Demo 仅模拟 | Adapter 雏形尚未接 resolver | 已实现 | 正式终态、逐档 effort、Tool 续轮、Secret 脱敏、按 Session resolve |
 
 ## 15. 功能优先级与依赖
 
@@ -540,16 +541,16 @@ Runtime metrics 必须参与四维评分中的“执行”维度。首版输入�
 
 ## 16. 总体验收清单
 
-- [ ] 七个 Demo 入口都有明确生产映射或研究留白，未遗漏暗链。
-- [ ] 生产业务状态不读取 Demo `sessionStorage` key。
-- [ ] 生产异步流程不使用 UI timer 伪造服务端进度。
-- [ ] 生产功能不按 Prompt 文本、URL 字符串或模板名称分支。
-- [ ] 所有 Agent/Skill/MCP/Experiment 更新都可刷新恢复并处理并发。
-- [ ] 每个 Session 和 Turn 都可解释实际模型、Agent、能力与上下文。
-- [ ] Skill/MCP 只有通过服务端安装、绑定和运行时校验才对模型可见。
-- [ ] Context Lab 使用真实 serializer 和 ACP Runtime；历史 A 不重跑。
-- [ ] Artifact 使用 opaque FileReference，无法跨 Session 或通过路径越权。
-- [ ] evaluation 生产页的三维人工注释和 Runtime 执行分可持久恢复；四维总分、雷达图、排名和 winner 来自服务端 scorecard，不来自写死数据；自动评分入口/API 缺席。
-- [ ] 模型入园、自动评分、小说、Bearer 小说 MCP 明确处于 capability disabled/研究态；人工评分合同和页面属于本轮。
-- [ ] 若未来打开 Responses Provider，必须先通过 G-56 门禁；不能把 `[DONE]` 兜底当成协议成功。
+- [x] 七个 Demo 入口都有明确生产映射或研究留白，未遗漏暗链。
+- [x] 生产业务状态不读取 Demo `sessionStorage` key。
+- [x] 生产异步流程不使用 UI timer 伪造服务端进度。
+- [x] 生产功能不按 Prompt 文本、URL 字符串或模板名称分支。
+- [x] 所有 Agent/Skill/MCP/Experiment 更新都可刷新恢复；本地单进程写入串行化。
+- [x] 每个 Session 和 Turn 都可解释实际模型、Agent、能力与上下文。
+- [x] Skill/MCP 只有通过服务端安装、绑定和运行时校验才对模型可见。
+- [x] Context Lab 使用真实 serializer 和 ACP Runtime；历史 A 不重跑。
+- [x] Artifact 使用 opaque FileReference，无法跨 Session 或通过路径越权。
+- [x] evaluation 生产页的模型生成工作表、三维人工注释和 Runtime 执行分可持久恢复；四维总分、雷达图、排名和 winner 来自服务端 scorecard，不来自写死数据；自动评分入口/API 缺席。
+- [x] 自定义 Responses 模型入园已实现；自动评分、小说、Bearer 小说 MCP 仍处于 capability disabled/研究态。
+- [x] Responses Provider 已通过 G-56 门禁；`[DONE]` 仅是传输尾帧，不能替代正式终态。
 - [ ] 现有 ACP load/resume、PromptTurn、Permission、Elicitation、tool order 测试全部保持通过。

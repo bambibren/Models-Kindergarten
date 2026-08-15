@@ -26,14 +26,14 @@ describe("prompt turn reducer", () => {
       interaction: permission("permission-2"),
     });
 
-    expect(state.phase).toBe("waiting_for_user");
-    if (state.phase !== "waiting_for_user") throw new Error("状态错误");
+    expect(state.status).toBe("active");
+    if (state.status !== "active") throw new Error("状态错误");
     expect(state.interactions.order).toEqual(["permission-1", "permission-2"]);
 
     state = promptTurnReducer(state, { type: "interaction/remove", id: "permission-1" });
-    expect(state.phase).toBe("waiting_for_user");
+    expect(state.status).toBe("active");
     state = promptTurnReducer(state, { type: "interaction/remove", id: "permission-2" });
-    expect(state).toMatchObject({ phase: "running", request });
+    expect(state).toMatchObject({ status: "active", request, interactions: { order: [] } });
   });
 
   it("只接受当前 operation 的终态，并由 reducer 生成稳定操作", () => {
@@ -51,7 +51,7 @@ describe("prompt turn reducer", () => {
       failure: { kind: "backend_error", message: "Ollama 不可用" },
     });
     expect(failed).toMatchObject({
-      phase: "failed",
+      status: "failed",
       failure: { kind: "backend_error", message: "Ollama 不可用" },
       actions: [{ type: "retry_prompt", label: "重试回答" }],
     });
@@ -65,7 +65,7 @@ describe("prompt turn reducer", () => {
       failure: { kind: "connection_error", message: "连接已断开" },
     });
     expect(disconnected).toMatchObject({
-      phase: "failed",
+      status: "failed",
       actions: [{ type: "reconnect", label: "重新连接" }],
     });
 
@@ -73,7 +73,30 @@ describe("prompt turn reducer", () => {
       type: "turn/cancel",
       operationId: request.operationId,
     });
-    expect(cancelled).toMatchObject({ phase: "cancelled", request });
+    expect(cancelled).toMatchObject({ status: "cancelled", request });
+  });
+
+  it("服务端终态到达后不被矛盾的本地 RPC 结果覆盖", () => {
+    const active = promptTurnReducer(idlePromptTurn, { type: "turn/start", request });
+    const completed = promptTurnReducer(active, {
+      type: "turn/remote-state",
+      sessionId: request.sessionId,
+      turn: { schemaVersion: 1, turnId: request.turnId, status: "completed" },
+    });
+    const lostResponse = promptTurnReducer(completed, {
+      type: "turn/fail",
+      operationId: request.operationId,
+      failure: { kind: "connection_error", message: "响应丢失" },
+    });
+    expect(lostResponse).toBe(completed);
+
+    const cancelled = promptTurnReducer(active, { type: "turn/cancel", operationId: request.operationId });
+    const lateFailure = promptTurnReducer(cancelled, {
+      type: "turn/fail",
+      operationId: request.operationId,
+      failure: { kind: "backend_error", message: "晚到错误" },
+    });
+    expect(lateFailure).toBe(cancelled);
   });
 
   it("会话总量仅在 Prompt Turn 非活动状态展示", () => {

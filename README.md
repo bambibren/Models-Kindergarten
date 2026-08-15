@@ -2,7 +2,7 @@
 
 V1.6 是一条可运行的单 Agent 实验链路：React Web 通过 ACP WebSocket 连接 Remote Agent，Remote 使用本地 `qwen3:8b` 完成流式推理、权限交互和受控工具循环，并可从 MCP Server 与 Agent Skills 装配外部能力。每次 Prompt Turn 完成后，独立 Evaluation Service 会保存 Runtime Trace 和最小客观评分集。
 
-完整设计见 [技术方案](docs/TECHNICAL_PLAN.md)，模型接入见 [ModelStudent 入园设计](docs/MODEL_ADMISSION.md)，MCP 学习见 [MCP 入门与产品能力手册](docs/MCP_LEARNING_GUIDE.md)，工程实现见 [MCP/Skills 能力接入设计](docs/MCP_SKILLS.md)，评测边界见 [Turn Evaluation 设计](docs/TURN_EVALUATION.md)，ACP 边界见 [ACP 兼容说明](docs/ACP_COMPAT.md)。
+完整设计见 [技术方案](docs/TECHNICAL_PLAN.md)，模型接入见 [ModelStudent 入园设计](docs/MODEL_ADMISSION.md)，推理档位与执行快照见 [Model Reasoning Policy](docs/REASONING_POLICY.md)，MCP 学习见 [MCP 入门与产品能力手册](docs/MCP_LEARNING_GUIDE.md)，工程实现见 [MCP/Skills 能力接入设计](docs/MCP_SKILLS.md)，评测边界见 [Turn Evaluation 设计](docs/TURN_EVALUATION.md)，ACP 边界见 [ACP 兼容说明](docs/ACP_COMPAT.md)。
 
 ```mermaid
 flowchart LR
@@ -11,7 +11,7 @@ flowchart LR
     Adapter[Remote ACP Adapter]
     Runtime[AgentRuntime]
     Runner[AgentRunner]
-    Model[Ollama qwen3:8b]
+    Model[ModelProvider Catalog]
     Tools[ToolRuntime]
     Capabilities[Built-in / MCP / Skills]
     Sandbox[File / Process / Network Sandbox]
@@ -22,6 +22,9 @@ flowchart LR
     UI <--> ACP <-->|ACP over WebSocket| Adapter
     Adapter --> Runtime --> Runner
     Runner <--> Model
+    Model --> Ollama[Ollama]
+    Model --> Responses[OpenAI Responses]
+    Model --> Chat[SiliconFlow Chat Completions]
     Runner <--> Tools --> Capabilities
     Tools --> Sandbox
     Adapter -. permission / elicitation .-> ACP
@@ -41,13 +44,17 @@ flowchart LR
 - Agent Skills 本地/Git 安装、内容锁定、三作用域发现、渐进激活和按需资源读取；
 - 写文件需要 ACP Permission，终端每次都需要 Permission；
 - `ask_user` 使用 ACP Elicitation；
+- ModelStudent 声明结构化推理能力，Agent 保存产品级默认策略，当前 Session 可通过 ACP `thought_level` 覆盖；每个 Turn 冻结实际 Provider 原生参数；
+- OpenAI 官方、自定义 Responses 与硅基流动已接入统一模型入园、macOS Keychain、持久化 Catalog 和按 Session 动态 Provider 解析；固定 Preset 不接受浏览器 Base URL；
+- Responses 与 Chat Completions 各自执行目标端点能力体检，不按域名或模型名推断；布尔思考开关与 effort 档位使用不同控制语义；
+- Responses Adapter 覆盖 `store:false` opaque continuation、并行 Tool Call、跨 Turn 恢复和公开披露脱敏；Chat Completions Adapter 覆盖 reasoning、Tool 续轮、Usage 与严格 SSE 边界；
 - Tool 参数校验、结构化 ToolOutcome、精确重复调用拦截；
 - ToolCallLedger 精确去重，并向模型返回先前结构化结果；
 - 分布式错误识别、ACP 详细错误文案和 Web PromptTurnState 集中归约；
 - Ollama 与 Web 外部依赖有限重试、熔断；
 - 文件路径/大小/符号链接沙箱；macOS 终端写入与网络沙箱；网页 SSRF 和大小限制；
-- Session V1/V2 自动迁移到 V3，Prompt 事实批量原子提交；
-- `load` 完整回放、`resume` 零回放、单 Session 单 Prompt、Cancel 传播。
+- Session V1/V2/V3 自动迁移到 V4，Prompt 事实批量原子提交；
+- `load` 完整回放、`resume` 默认零回放并可按当前 Turn 游标补齐断线增量、单 Session 单 Prompt、Cancel 传播。
 - 独立 Turn Evaluation Service/Web，按 `sessionId + turnId` 查看 Runtime 执行树和 13 项最小客观指标；
 - Evaluation 上传失败与 Agent 主链隔离，不改变 Prompt Turn 的完成结果。
 
@@ -82,7 +89,7 @@ pnpm test
 pnpm build
 ```
 
-自动测试覆盖 ACP Session、真实 WebSocket、流式 UI 归约、Tool 乱序、权限、AskUser、Session 恢复、重复调用去重、历史 Tool Result 上下文、终端沙箱、私网 URL 拦截、MCP 发现/调用/失败状态、Skill 安装/Hash/激活，以及 Trace 聚合、最小评分、Evaluation HTTP 存取和 Runtime Tree 顺序。
+自动测试覆盖 ACP Session、真实 WebSocket、流式 UI 归约、Tool 乱序、权限、AskUser、Session 恢复、推理档位解析与 Provider 映射、Responses opaque continuation/跨 Turn Tool Result/脱敏边界、重复调用去重、历史 Tool Result 上下文、终端沙箱、私网 URL 拦截、MCP 发现/调用/失败状态、Skill 安装/Hash/激活，以及 Trace 聚合、最小评分、Evaluation HTTP 存取和 Runtime Tree 顺序。
 
 ## 暂不进入 V1.6
 

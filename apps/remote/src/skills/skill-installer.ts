@@ -1,12 +1,9 @@
-import { execFile } from "node:child_process";
 import { cp, mkdir, mkdtemp, realpath, rename, rm } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { promisify } from "node:util";
+import { basename, isAbsolute, posix, relative, resolve, sep } from "node:path";
+import { GitRepository } from "../git/git-repository.js";
 import type { SkillLockStore } from "./skill-lock-store.js";
 import type { SkillInstallRecord, SkillInstallRequest } from "./skill-types.js";
 import { validateSkillDirectory } from "./skill-validator.js";
-
-const execFileAsync = promisify(execFile);
 
 /** 安装器在隔离目录完成校验后再原子发布；不会执行 Skill 自带脚本。 */
 export class SkillInstaller {
@@ -15,7 +12,10 @@ export class SkillInstaller {
     private readonly lock: SkillLockStore,
   ) {}
 
-  async install(request: SkillInstallRequest): Promise<SkillInstallRecord> {
+  async install(
+    request: SkillInstallRequest,
+    options: { replaceExisting?: boolean } = {},
+  ): Promise<SkillInstallRecord> {
     if (!request.approved) throw new Error("安装 Skill 必须显式确认 approved=true");
     await mkdir(this.installRoot, { recursive: true });
     const quarantine = await mkdtemp(resolve(this.installRoot, ".install-"));
@@ -30,24 +30,41 @@ export class SkillInstaller {
         trust: "approved",
       });
       const target = resolve(this.installRoot, provisional.name);
-      if (await exists(target)) throw new Error(`Skill 已安装: ${provisional.name}`);
+      const targetExists = await exists(target);
+      if (targetExists && !options.replaceExisting) throw new Error(`Skill 已安装: ${provisional.name}`);
       const publish = resolve(quarantine, provisional.name);
       if (staged.path !== publish) await rename(staged.path, publish);
-      await rename(publish, target);
+      const previous = resolve(quarantine, `${provisional.name}.previous`);
+      if (targetExists) await rename(target, previous);
+      try {
+        await rename(publish, target);
+      } catch (error) {
+        if (targetExists) await rename(previous, target);
+        throw error;
+      }
       const record: SkillInstallRecord = {
         ...withoutInstructions(provisional),
         rootPath: await realpath(target),
       };
       try {
-        await this.lock.put(record);
+        if (targetExists) await this.lock.upsert(record);
+        else await this.lock.put(record);
       } catch (error) {
         await rm(target, { recursive: true, force: true });
+        if (targetExists) await rename(previous, target);
         throw error;
       }
+      if (targetExists) await rm(previous, { recursive: true, force: true });
       return record;
     } finally {
       await rm(quarantine, { recursive: true, force: true });
     }
+  }
+
+  async uninstall(name: string): Promise<void> {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("Skill name 无效");
+    await rm(resolve(this.installRoot, name), { recursive: true, force: true });
+    await this.lock.remove(name);
   }
 
   private async stageLocal(path: string, quarantine: string) {
@@ -67,17 +84,17 @@ export class SkillInstaller {
     const url = new URL(source.url);
     if (url.protocol !== "https:") throw new Error("Git Skill 来源只允许 HTTPS");
     if (!source.ref.trim()) throw new Error("Git Skill 必须指定 ref");
-    const repo = resolve(quarantine, "repo");
-    await execFileAsync("git", ["clone", "--filter=blob:none", "--no-checkout", source.url, repo], {
-      maxBuffer: 1024 * 1024,
-    });
-    await execFileAsync("git", ["-C", repo, "checkout", "--detach", source.ref], { maxBuffer: 1024 * 1024 });
-    const { stdout } = await execFileAsync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" });
-    const commit = stdout.trim();
-    if (!/^[0-9a-f]{40}$/i.test(commit)) throw new Error("无法固定 Git Skill Commit");
-    const skillPath = resolve(repo, source.subdir ?? ".");
+    const subdirectory = skillSubdirectory(source.subdir);
+    const repo = resolve(quarantine, ".checkout");
+    const repository = await GitRepository.clone(source.url, repo);
+    await repository.checkout(source.ref, subdirectory);
+    const commit = await repository.currentCommit();
+    const skillPath = resolve(repo, subdirectory);
     assertInside(repo, skillPath);
-    const target = resolve(quarantine, basename(await realpath(skillPath)));
+    const targetName = subdirectory !== "."
+      ? basename(await realpath(skillPath))
+      : basename(new URL(source.url).pathname).replace(/\.git$/i, "");
+    const target = resolve(quarantine, targetName);
     await cp(skillPath, target, {
       recursive: true,
       errorOnExist: true,
@@ -91,7 +108,7 @@ export class SkillInstaller {
         kind: "git" as const,
         url: source.url,
         commit,
-        ...(source.subdir ? { subdir: source.subdir } : {}),
+        ...(subdirectory !== "." ? { subdir: subdirectory } : {}),
       },
     };
   }
@@ -111,6 +128,15 @@ async function exists(path: string): Promise<boolean> {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return false;
     throw error;
   }
+}
+
+function skillSubdirectory(value: string | undefined): string {
+  const subdirectory = value?.trim() || ".";
+  const normalized = posix.normalize(subdirectory).replace(/^\.\//, "");
+  if (subdirectory.includes("\\") || normalized === ".." || normalized.startsWith("../") || posix.isAbsolute(normalized)) {
+    throw new Error("Git Skill subdir 越界");
+  }
+  return normalized;
 }
 
 function withoutInstructions<T extends { instructions: string }>(value: T): Omit<T, "instructions"> {

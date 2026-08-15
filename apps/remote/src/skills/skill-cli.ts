@@ -13,7 +13,6 @@ const request = installRequest(args);
 const record = await installer.install(request);
 console.log(JSON.stringify({
   installed: true,
-  id: record.id,
   name: record.name,
   contentHash: record.contentHash,
   source: record.source,

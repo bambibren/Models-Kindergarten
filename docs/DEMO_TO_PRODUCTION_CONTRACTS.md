@@ -153,9 +153,9 @@ export interface AgentInput {
 
 服务端负责规范化空白、去重、排序和能力引用校验。客户端不得提交 ownerId、时间戳或 resolved tool schema。
 
-## 4. ModelStudent 只读合同
+## 4. ModelStudent 管理合同
 
-模型入园留白，本轮只定义消费目录：
+消费目录保留统一 `ModelStudentSummary`；自定义 Responses 入园另通过 `POST /model-student-tests` 和 `POST /model-students` 两阶段完成。公开合同不返回 API Key 或 `credentialRef`：
 
 ```ts
 export interface ModelStudentSummary {
@@ -222,8 +222,7 @@ export interface CapabilitySnapshot {
     inputSchemaHash: string;
   }>;
   skills: Array<{
-    skillInstallationId: string;
-    skillId: string;
+    name: string;
     contentHash: string;
   }>;
   mcps: Array<{
@@ -310,7 +309,15 @@ export interface ModelRoundExecutionRecord {
 export interface TurnExecutionRecord {
   schemaVersion: 1;
   turnId: string;
-  status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  state:
+    | {
+        schemaVersion: 1;
+        turnId: string;
+        status: "active";
+        phase: "accepted" | "preparing_context" | "model_streaming" | "tool_execution" | "finalizing";
+        waitingFor: { permission: number; input: number };
+      }
+    | { schemaVersion: 1; turnId: string; status: "completed" | "failed" | "cancelled" | "interrupted" };
   promptEntryId: string;
   entryIds: string[];
   modelStudentId: string;
@@ -362,7 +369,7 @@ export interface SkillInstallation {
   schemaVersion: 1;
   skillInstallationId: string;
   ownerId: string;
-  skillId?: string;
+  skillName: string;
   displayName?: string;
   state: SkillInstallationState;
   source: SkillSource;
@@ -580,6 +587,7 @@ export interface ExperimentRecord {
   sourceTurnId?: string;
   variants: ExperimentVariant[];
   runs: ExperimentRun[];
+  annotationWorksheet?: ExperimentAnnotationWorksheet;
   savedAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -615,7 +623,48 @@ export interface ExperimentRun {
 }
 ```
 
-ExperimentRecord 只保存不可修改的运行事实，不直接混入评分。四维评分使用独立 scorecard 引用 experimentId；它保存三类人工 annotation facts、Runtime 执行分证据和派生结果：
+ExperimentRecord 保存不可修改的运行事实和当前标注工作表，不直接混入人工 verdict 或评分。每次实验的全部 lane 完成后，Remote 调用当前 ModelStudent 生成工作表；显式 `force=true` 重新生成时替换工作表并删除旧 scorecard：
+
+```ts
+export interface ExperimentAnnotationWorksheet {
+  schemaVersion: 1;
+  worksheetId: string;
+  experimentId: string;
+  requirements: Array<{
+    requirementId: string;
+    label: string;
+    weight: number;
+  }>;
+  workflows: Array<{
+    variantId: string;
+    steps: Array<{ stepId: string; label: string }>;
+  }>;
+  outputSections: Array<{
+    variantId: string;
+    sections: Array<{
+      answerSectionId: string;
+      label: string;
+      start: number;
+      end: number;
+      quotedTextHash: string;
+      preview: string;
+    }>;
+  }>;
+  generator: {
+    modelStudentId: string;
+    providerKind: string;
+    model: string;
+    promptVersion: "annotation_worksheet_v1";
+    inputHash: string;
+    outputHash: string;
+    generatedAt: string;
+  };
+}
+```
+
+生成器设置 `ModelInput.reasoning="disabled"`，不允许 Tool Call，不输出 verdict/score/ranking/winner。回答先由 Remote 切成编号原文单元，模型返回分段标签和单元边界建议；Remote 不信任模型自行计算字符偏移，并会按模型给出的段落顺序规范化跳号、重叠或越界边界，再换算字符 `start/end` 和原文 hash。模型返回的 lane 集合必须完整；最终持久化输出段由 Remote 强制从 0 开始、首尾相接、无重叠无遗漏。
+
+四维评分使用独立 scorecard 引用 experimentId；它保存三类人工 annotation facts、Runtime 执行分证据和派生结果：
 
 ```ts
 export type ScoreDimensionId =
@@ -625,9 +674,12 @@ export type ScoreDimensionId =
   | "execution";
 
 export interface UnderstandingAnnotationFacts {
-  selectedRequirementIds: string[];
-  hasOtherRequirement: boolean;
-  listedRequirementsWeight: number;
+  requirements: Array<{ requirementId: string; label: string; weight: number }>;
+  marks: Array<{
+    variantId: string;
+    requirementId: string;
+    verdict: "met" | "missed";
+  }>;
   completedAt?: string;
 }
 
@@ -635,7 +687,7 @@ export interface PlanningAnnotationFacts {
   marks: Array<{
     variantId: string;
     stepId: string;
-    color: "red" | "blue";
+    verdict: "effective" | "partial" | "none";
   }>;
   completedAt?: string;
 }
@@ -646,7 +698,7 @@ export interface OutputAnnotationFacts {
     answerSectionId: string;
     start: number;
     end: number;
-    color: "red" | "blue";
+    verdict: "effective" | "partial" | "none";
     quotedTextHash: string;
   }>;
   completedAt?: string;
@@ -739,12 +791,12 @@ export interface ExperimentScorecard {
 
 四维规则：
 
-1. 理解、规划、输出分由服务端根据三类 annotation facts 和 rubricVersion 计算；不能直接信任浏览器提交的维度分。v1 的人工语义固定为：理解维由人工维护“真实需求列表”，并逐 lane 标记命中/未命中；规划维对每个计划步骤标记“有效/部分有效/不计分”；输出维对回答文本标记“有效/部分有效”，以去空白字符覆盖率计分。UI 可以继续使用 Demo 红/蓝标记，但必须同时显示文字含义，不能只靠颜色。
+1. 理解、规划、输出分由服务端根据三类 annotation facts 和 rubricVersion 计算；不能直接信任浏览器提交的维度分。v1 由模型生成题目、人做判断：理解维逐 lane 标记公共需求“命中/未命中”；规划维对工作表中的每个步骤标记“有效/部分有效/不计分”；输出维对工作表中的每个完整结果段标记“有效/部分有效/不计分”，以去空白字符覆盖率计分。Remote 校验题目 ID、字符范围和 hash 必须来自当前工作表，不能只靠浏览器提交。
 2. 执行分由同一 Experiment 各 lane 的 `ExecutionMetricsSnapshot` 和 `runtime_execution_v1` 计算：正常完成 30 分；Tool 成功率最多 25 分（无 Tool 且本次实验策略没有要求使用 Tool 时按满分）；无错误 15 分；无权限违规 15 分；无重复 Tool 5 分；相同模型、相同环境下的首 Token 延迟和总耗时相对表现合计最多 10 分。`toolUseWasExpected` 由 Experiment policy/fixture 在运行前确定，不能根据回答文本事后猜测。未正常完成时最终执行分取 `min(rawScore, 59)`。
 3. `modelRoundCount`、`toolCallCount`、Context/Output Tokens 作为解释证据保存，但 v1 没有可靠单调方向，不直接加减分。
 4. 三个人工维度任一未完成时 status=`draft`，不生成 totalScore、ranking 或 winner，也不得默认 100 分。
 5. 完整时每个 lane 的 `totalScore = round((understanding + planning + output + execution) / 4)`。ranking 和 winner 由服务端派生；并列第一时 `winnerVariantIds` 可有多个，UI 显示“并列”。
-6. 雷达图只读取四个 dimensionScores，不保存图表专用假数据。合同中没有 Judge、LLM 评分请求或 `source="automatic"`。
+6. 雷达图只读取四个 dimensionScores，不保存图表专用假数据。合同中没有 Judge、LLM 评分请求或 `source="automatic"`；`POST /experiments/{id}/annotation-worksheet` 是模型出题请求，不返回分数。
 
 `runtime_execution_v1` 的确定性公式：
 

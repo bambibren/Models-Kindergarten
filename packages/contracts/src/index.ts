@@ -1,4 +1,13 @@
-export const META_KEY = "modelKindergarten" as const;
+import { META_KEY } from "./common.js";
+import type { FileReferencesMeta, OperationProjectionMeta } from "./control-api.js";
+import type { ExperimentRunRefMeta, SessionBindingMeta } from "./session-binding.js";
+import type { SessionResumeMeta } from "./session-resume.js";
+
+export * from "./reasoning.js";
+export * from "./model-admission.js";
+export * from "./session-resume.js";
+
+export { META_KEY } from "./common.js";
 export const CONTEXT_SUMMARY_NOTIFICATION =
   "model-kindergarten/session/context-summary" as const;
 export const TOKEN_USAGE_NOTIFICATION =
@@ -101,6 +110,11 @@ export interface PromptMeta {
 export interface KindergartenMeta {
   message?: MessageMeta;
   prompt?: PromptMeta;
+  sessionBinding?: SessionBindingMeta;
+  sessionResume?: SessionResumeMeta;
+  experimentRunRef?: ExperimentRunRefMeta;
+  operation?: OperationProjectionMeta;
+  fileReferences?: FileReferencesMeta;
 }
 
 export interface AcpMeta extends Record<string, unknown> {
@@ -332,3 +346,13 @@ function isContextTrust(value: unknown): value is NonNullable<ContextSummaryItem
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+export * from "./agent-management.js";
+export * from "./common.js";
+export * from "./control-api.js";
+export * from "./experiments.js";
+export * from "./file-references.js";
+export * from "./mcp-management.js";
+export * from "./session-binding.js";
+export * from "./skill-management.js";
+export * from "./turn-state.js";

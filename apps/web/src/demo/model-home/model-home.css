@@ -51,6 +51,7 @@
 .mk-model-home-composer textarea::placeholder { color: #aaa9a3; }
 .mk-model-composer-footer { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .mk-model-composer-footer > span { overflow: hidden; color: var(--demo-faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.mk-demo-home-reasoning { min-height: 28px; border-radius: 7px; background: var(--demo-surface-muted); }
 .mk-agent-picker { position: relative; flex: 0 0 auto; }
 .mk-agent-picker > summary { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 7px; border-radius: 7px; color: var(--demo-ink-2); background: var(--demo-surface-muted); cursor: pointer; list-style: none; }
 .mk-agent-picker > summary:hover { background: #e8e8e3; }

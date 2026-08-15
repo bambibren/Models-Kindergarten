@@ -3,11 +3,18 @@ import { createWebSocketStream } from "@agentclientprotocol/sdk/experimental/ws-
 import {
   CONTEXT_SUMMARY_NOTIFICATION,
   TOKEN_USAGE_NOTIFICATION,
+  TURN_STATE_NOTIFICATION,
+  makeExperimentRunRefMeta,
   makePromptMeta,
+  makeSessionResumeMeta,
+  makeSessionBindingMeta,
   readContextSummaryNotification,
   readTokenUsageNotification,
+  readTurnStateNotification,
   type ContextSummaryNotification,
   type TokenUsageNotification,
+  type TurnStateNotification,
+  type SessionResumeMeta,
 } from "@kindergarten/contracts";
 import type { PendingInteractionState } from "../prompt-turn/prompt-turn-types.js";
 
@@ -19,6 +26,7 @@ export interface ClientHandlers {
   onUpdate: (value: acp.SessionNotification) => void;
   onContextSummary: (value: ContextSummaryNotification) => void;
   onTokenUsage: (value: TokenUsageNotification) => void;
+  onTurnState: (value: TurnStateNotification) => void;
   onInteraction: (value: PendingInteractionState) => void;
   onInteractionResolved: (id: string) => void;
   onClose: () => void;
@@ -46,13 +54,18 @@ export class AcpWebClient {
       })
       .onNotification(
         CONTEXT_SUMMARY_NOTIFICATION,
-        readContextSummaryNotification,
+        { parse: readContextSummaryNotification },
         ({ params }) => handlers.onContextSummary(params),
       )
       .onNotification(
         TOKEN_USAGE_NOTIFICATION,
-        readTokenUsageNotification,
+        { parse: readTokenUsageNotification },
         ({ params }) => handlers.onTokenUsage(params),
+      )
+      .onNotification(
+        TURN_STATE_NOTIFICATION,
+        { parse: readTurnStateNotification },
+        ({ params }) => handlers.onTurnState(params),
       )
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) =>
         interactions.requestPermission(params),
@@ -70,6 +83,7 @@ export class AcpWebClient {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: {
           elicitation: { form: {} },
+          session: { configOptions: {} },
         },
         clientInfo: {
           name: "models-kindergarten-web",
@@ -93,10 +107,19 @@ export class AcpWebClient {
     return this.connection.agent.request(acp.methods.agent.session.list, { cwd });
   }
 
-  create(cwd: string): Promise<acp.NewSessionResponse> {
+  create(cwd: string, binding: { modelStudentId: string; agentId: string }): Promise<acp.NewSessionResponse> {
     return this.connection.agent.request(acp.methods.agent.session.new, {
       cwd,
       mcpServers: [],
+      _meta: makeSessionBindingMeta({ schemaVersion: 1, ...binding }),
+    });
+  }
+
+  createExperiment(cwd: string, experimentId: string, variantId: string): Promise<acp.NewSessionResponse> {
+    return this.connection.agent.request(acp.methods.agent.session.new, {
+      cwd,
+      mcpServers: [],
+      _meta: makeExperimentRunRefMeta(experimentId, variantId),
     });
   }
 
@@ -112,11 +135,32 @@ export class AcpWebClient {
    * 只供“页面状态仍在、网络短暂重连”的场景使用。
    * resume 绝不承担历史加载。
    */
-  resume(sessionId: string, cwd: string): Promise<acp.ResumeSessionResponse> {
+  resume(
+    sessionId: string,
+    cwd: string,
+    cursor?: SessionResumeMeta,
+  ): Promise<acp.ResumeSessionResponse> {
     return this.connection.agent.request(acp.methods.agent.session.resume, {
       sessionId,
       cwd,
       mcpServers: [],
+      ...(cursor ? { _meta: makeSessionResumeMeta(cursor) } : {}),
+    });
+  }
+
+  closeSession(sessionId: string): Promise<acp.CloseSessionResponse> {
+    return this.connection.agent.request(acp.methods.agent.session.close, { sessionId });
+  }
+
+  setConfigOption(
+    sessionId: string,
+    configId: string,
+    value: string,
+  ): Promise<acp.SetSessionConfigOptionResponse> {
+    return this.connection.agent.request(acp.methods.agent.session.setConfigOption, {
+      sessionId,
+      configId,
+      value,
     });
   }
 

@@ -219,7 +219,16 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid #343431; outli
 .composer textarea { width: 100%; min-height: 28px; max-height: 180px; padding: 1px 2px 7px; resize: none; overflow-y: auto; border: 0; outline: 0; color: #30312e; background: transparent; font-size: 14px; line-height: 1.5; }
 .composer textarea::placeholder { color: #aaa9a3; }
 .composer-meta { display: flex; align-items: flex-end; justify-content: space-between; min-height: 30px; }
-.composer-meta > span { padding: 0 2px 5px; color: #aaa9a3; font-size: 9px; }
+.composer-settings { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.composer-settings > span { padding: 0 2px; color: #aaa9a3; font-size: 9px; }
+.reasoning-profile-select { position: relative; display: inline-flex; align-items: center; flex: 0 0 auto; gap: 5px; min-height: 28px; padding: 0 7px; border-radius: 8px; color: #62645e; background: #f1f1ee; }
+.reasoning-profile-select:hover { color: #383936; background: #e9e9e5; }
+.reasoning-profile-select:focus-within { outline: 2px solid #c7c8c1; outline-offset: 1px; }
+.reasoning-profile-select select { max-width: 148px; padding: 0 16px 0 0; appearance: none; border: 0; outline: 0; color: inherit; background: transparent; font-size: 10px; font-weight: 590; cursor: pointer; }
+.reasoning-profile-select select:disabled { cursor: not-allowed; }
+.reasoning-profile-select > svg:last-child { position: absolute; right: 6px; pointer-events: none; }
+.reasoning-profile-spinner { animation: reasoning-profile-spin .8s linear infinite; }
+@keyframes reasoning-profile-spin { to { transform: rotate(360deg); } }
 .composer-action { display: grid; place-items: center; width: 31px; height: 31px; border: 0; border-radius: 9px; color: #fff; background: #292a27; }
 .composer-action:hover:not(:disabled) { background: #11120f; }
 .composer-action.stop { background: #555750; }
@@ -246,6 +255,7 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid #343431; outli
 .prompt-turn-status button, .composer-availability-notice button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 0; border-radius: 6px; color: inherit; background: transparent; font-size: 10px; font-weight: 600; }
 .prompt-turn-status button:hover, .composer-availability-notice button:hover { background: rgb(30 30 28 / .06); }
 .composer-availability-notice { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 7px; margin-bottom: 9px; padding: 9px 11px; border-left: 3px solid #a4514a; color: #8f4943; background: #fff5f3; font-size: 11px; }
+.composer-availability-notice.agent-missing { grid-template-columns: 18px minmax(0, 1fr); }
 .entry-render-fallback { margin: 5px 0 20px; padding: 9px 11px; border: 1px dashed #c9c9c3; border-radius: 8px; color: #6f716b; background: #f7f7f4; font-size: 11px; }
 .app-render-fallback { display: grid; place-content: center; min-width: 320px; min-height: 100dvh; padding: 32px; color: #30312e; background: #f7f7f5; text-align: center; }
 .app-render-fallback strong { font-size: 16px; }
@@ -271,7 +281,8 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid #343431; outli
   .sidebar-brand > span { width: 30px; height: 30px; }
   .sidebar-close { display: none; }
   .connection-state { display: none; }
-  .composer-meta > span { display: none; }
+  .composer-settings > span { display: none; }
+  .reasoning-profile-select select { max-width: 118px; }
 }
 
 @media (max-width: 420px) {

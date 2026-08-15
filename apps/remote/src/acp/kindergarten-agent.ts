@@ -1,17 +1,33 @@
 import { randomUUID } from "node:crypto";
 import * as acp from "@agentclientprotocol/sdk";
 import {
+  META_KEY,
+  makeFileReferenceUri,
   readPromptMeta,
+  readSessionResumeMeta,
+  type SessionResumeMeta,
+  type FileReference,
   type ContextSummary,
   type TokenUsageComponent,
   type TurnTokenUsage,
+  isReasoningProfile,
+  type ConcreteReasoningProfile,
+  type ModelReasoningCapability,
+  type TurnActivePhase,
+  type TurnWaitingState,
 } from "@kindergarten/contracts";
 import { AcpOutput } from "./acp-output.js";
 import type {
   AgentRuntime,
   RunObserver,
+  RuntimeModelRoundSnapshot,
+  RuntimeTurnSnapshot,
   TurnModelUsage,
 } from "../runtime/agent-runtime.js";
+import {
+  withProviderContinuationCorrelation,
+  type ProviderOpaqueContinuation,
+} from "../model/provider-continuation.js";
 import type { SessionRepository } from "../repository/session-repository.js";
 import type {
   SessionEntry,
@@ -24,14 +40,56 @@ import type {
 } from "../repository/session-types.js";
 import type { PreparedToolCall, ToolOutcome } from "../tools/tool-registry.js";
 import { RunFailure } from "../runtime/run-failure.js";
+import type { SessionBindingService } from "../session/session-binding-service.js";
+import { turnScope } from "../runtime/turn-scope.js";
+import type { FileReferenceService } from "../files/file-reference-service.js";
+import type { ExperimentService } from "../experiments/experiment-service.js";
+import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.js";
+import type { ModelStudentCatalog } from "../model/model-student-catalog.js";
+import { SessionAcpChannel } from "./session-acp-channel.js";
+
+const REASONING_CONFIG_ID = "reasoning_profile";
+
+function reasoningConfigOptions(
+  capability: ModelReasoningCapability | undefined,
+  current: ConcreteReasoningProfile | undefined,
+): acp.SessionConfigOption[] {
+  if (!capability?.adjustable) return [];
+  const labels: Record<ConcreteReasoningProfile, string> = {
+    fast: capability.control === "toggle" ? "关闭思考" : "快速",
+    balanced: capability.control === "toggle" ? "开启思考" : "均衡",
+    deep: "深入",
+    max: "极致",
+  };
+  return [{
+    type: "select",
+    id: REASONING_CONFIG_ID,
+    name: capability.control === "toggle" ? "思考开关" : "思考强度",
+    description: "当前会话的思考控制；自动表示跟随 ModelStudent 默认设置",
+    category: "thought_level",
+    currentValue: current ?? "auto",
+    options: [
+      { value: "auto", name: `跟随模型默认 · ${labels[capability.defaultProfile]}` },
+      ...capability.supportedProfiles.map((profile) => ({ value: profile, name: labels[profile] })),
+    ],
+  }];
+}
 
 /** ACP Adapter 负责会话、双向用户交互和 ChatEntry 输出，不实现模型或文件逻辑。 */
 export class KindergartenAgent {
   private readonly active = new Map<string, AbortController>();
+  private readonly pendingPrompts = new Map<string, AbortController>();
+  private readonly sessionStateOperations = new Map<string, Promise<unknown>>();
+  private readonly channels = new Map<string, SessionAcpChannel>();
+  private readonly projections = new Map<string, TurnProjection>();
 
   constructor(
     private readonly sessions: SessionRepository,
     private readonly runtime: AgentRuntime,
+    private readonly bindings: SessionBindingService,
+    private readonly files?: FileReferenceService,
+    private readonly experiments?: ExperimentService,
+    private readonly models?: ModelStudentCatalog,
   ) {}
 
   createApp(): acp.AgentApp {
@@ -43,11 +101,14 @@ export class KindergartenAgent {
       .onRequest(acp.methods.agent.session.load, ({ params, client }) =>
         this.loadSession(params, client),
       )
-      .onRequest(acp.methods.agent.session.resume, ({ params }) =>
-        this.resumeSession(params),
+      .onRequest(acp.methods.agent.session.resume, ({ params, client }) =>
+        this.resumeSession(params, client),
       )
       .onRequest(acp.methods.agent.session.close, ({ params }) =>
         this.closeSession(params),
+      )
+      .onRequest(acp.methods.agent.session.setConfigOption, ({ params }) =>
+        this.setSessionConfigOption(params),
       )
       .onRequest(acp.methods.agent.session.prompt, ({ params, client, signal }) =>
         this.prompt(params, client, signal),
@@ -77,8 +138,16 @@ export class KindergartenAgent {
   }
 
   private async newSession(params: acp.NewSessionRequest): Promise<acp.NewSessionResponse> {
-    const session = await this.sessions.create(params.cwd);
-    return { sessionId: session.id };
+    const session = await this.sessions.create(await this.bindings.resolve({
+      cwd: params.cwd,
+      ...(params.additionalDirectories === undefined ? {} : { additionalDirectories: params.additionalDirectories }),
+      mcpServers: params.mcpServers,
+      ...(params._meta === null || params._meta === undefined ? {} : { _meta: params._meta }),
+    }));
+    if (session.experimentRef && this.experiments) {
+      await this.experiments.markSessionCreated(session.experimentRef.experimentId, session.experimentRef.variantId, session.id);
+    }
+    return { sessionId: session.id, configOptions: reasoningConfigOptions(this.reasoningCapability(session), session.reasoningOverride) };
   }
 
   private async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
@@ -90,18 +159,78 @@ export class KindergartenAgent {
     client: acp.AgentContext,
   ): Promise<acp.LoadSessionResponse> {
     const session = await this.requireSession(params.sessionId, params.cwd);
-    const output = new AcpOutput(session.id, client);
-    for (const entry of session.sessionEntries) await replayEntry(output, entry);
-    return {};
+    const activeChannel = this.channels.get(session.id);
+    activeChannel?.beginResume();
+    const output = new AcpOutput(session.id, new SessionAcpChannel(client));
+    try {
+      for (const entry of sessionEntriesWithActiveProjection(session, this.projections.get(session.id))) {
+        await replayEntry(output, entry);
+      }
+    } finally {
+      await activeChannel?.finishResume(client);
+    }
+    return { configOptions: reasoningConfigOptions(this.reasoningCapability(session), session.reasoningOverride) };
   }
 
-  private async resumeSession(params: acp.ResumeSessionRequest): Promise<acp.ResumeSessionResponse> {
-    await this.requireSession(params.sessionId, params.cwd);
-    return {};
+  private async resumeSession(
+    params: acp.ResumeSessionRequest,
+    client: acp.AgentContext,
+  ): Promise<acp.ResumeSessionResponse> {
+    const session = await this.requireSession(params.sessionId, params.cwd);
+    const activeChannel = this.channels.get(session.id);
+    activeChannel?.beginResume();
+    try {
+      const cursor = readSessionResumeMeta(params._meta);
+      if (cursor) {
+        const turn = session.turns.find((item) => item.turnId === cursor.turnId);
+        if (!turn) throw new acp.RequestError(-32602, `恢复的 Turn 不存在: ${cursor.turnId}`);
+        const entries = sessionEntriesWithActiveProjection(session, this.projections.get(session.id))
+          .filter((entry) => entry.turnId === cursor.turnId);
+        const output = new AcpOutput(session.id, new SessionAcpChannel(client));
+        for (const entry of entries) await replayEntryDelta(output, entry, cursor, turn.state.status !== "active");
+        await output.turnState(turn.state);
+      }
+    } finally {
+      await activeChannel?.finishResume(client);
+    }
+    return { configOptions: reasoningConfigOptions(this.reasoningCapability(session), session.reasoningOverride) };
   }
 
   private async closeSession(params: acp.CloseSessionRequest): Promise<void> {
     this.cancel(params.sessionId);
+    this.channels.get(params.sessionId)?.close();
+  }
+
+  private async setSessionConfigOption(
+    params: acp.SetSessionConfigOptionRequest,
+  ): Promise<acp.SetSessionConfigOptionResponse> {
+    if (params.configId !== REASONING_CONFIG_ID || typeof params.value !== "string" || !isReasoningProfile(params.value)) {
+      throw new acp.RequestError(-32602, "不支持的 Session Config Option");
+    }
+    const value = params.value;
+    return this.serializeSessionState(params.sessionId, async () => {
+      if (this.active.has(params.sessionId)) {
+        throw new acp.RequestError(-32000, "回答生成期间不能修改思考强度");
+      }
+      const current = await this.sessions.get(params.sessionId);
+      const capability = this.reasoningCapability(current);
+      if (!capability?.adjustable || (value !== "auto" && !capability.supportedProfiles.includes(value))) {
+        throw new acp.RequestError(-32602, "当前 ModelStudent 不支持该思考强度");
+      }
+      const session = await this.sessions.setReasoningOverride(
+        params.sessionId,
+        value === "auto" ? undefined : value,
+      );
+      return { configOptions: reasoningConfigOptions(capability, session.reasoningOverride) };
+    });
+  }
+
+  private reasoningCapability(session: SessionRecord): ModelReasoningCapability | undefined {
+    const selected = this.models?.get(session.modelStudentId);
+    if (selected) return selected.supports.reasoning;
+    return session.modelStudentId === this.runtime.model.student.id
+      ? effectiveReasoningCapability(this.runtime.model)
+      : undefined;
   }
 
   private async prompt(
@@ -109,59 +238,163 @@ export class KindergartenAgent {
     client: acp.AgentContext,
     requestSignal: AbortSignal,
   ): Promise<acp.PromptResponse> {
-    if (this.active.has(params.sessionId)) {
+    if (this.active.has(params.sessionId) || this.pendingPrompts.has(params.sessionId)) {
       throw new acp.RequestError(-32000, "这个会话已有一轮回答正在生成");
     }
-
     const text = promptText(params.prompt);
     if (!text) throw new Error("初版只接受非空文本消息");
 
-    const session = await this.sessions.get(params.sessionId);
-    const turnId = readPromptMeta(params._meta)?.turnId ?? randomUUID();
-    const output = new AcpOutput(session.id, client);
     const controller = new AbortController();
-    const unlink = linkAbort(requestSignal, controller);
-    this.active.set(session.id, controller);
+    this.pendingPrompts.set(params.sessionId, controller);
+    let session: SessionRecord;
+    try {
+      session = await this.serializeSessionState(params.sessionId, async () => {
+        if (this.active.has(params.sessionId)) {
+          throw new acp.RequestError(-32000, "这个会话已有一轮回答正在生成");
+        }
+        const current = await this.sessions.get(params.sessionId);
+        if (!await this.bindings.agentExists(current.agentId)) {
+          throw new acp.RequestError(
+            -32002,
+            "该会话绑定的 Agent 已删除，不能继续对话",
+            { code: "SESSION_AGENT_DELETED", retryable: false },
+          );
+        }
+        this.active.set(current.id, controller);
+        this.pendingPrompts.delete(params.sessionId);
+        return current;
+      });
+    } catch (error) {
+      this.pendingPrompts.delete(params.sessionId);
+      throw error;
+    }
+
+    const turnId = readPromptMeta(params._meta)?.turnId ?? randomUUID();
+    const channel = new SessionAcpChannel(client);
+    const detachClient = () => channel.detach(client);
+    if (requestSignal.aborted) detachClient();
+    else requestSignal.addEventListener("abort", detachClient, { once: true });
+    this.channels.set(session.id, channel);
+    const output = new AcpOutput(session.id, channel);
 
     const user = makeMessage("user", text, turnId, randomUUID());
-    await output.message("user", user.messageId, text, {
-      schemaVersion: 1,
-      turnId,
-      chunkIndex: 0,
-      final: true,
-    });
-
-    const projection = new TurnProjection(
-      session.id,
-      turnId,
-      output,
-      client,
-    );
-    projection.streamingSessionEntries.push(user);
+    const projection = new TurnProjection(session.id, turnId, user, output, channel, this.sessions, controller.signal);
+    this.projections.set(session.id, projection);
     let failure: unknown = null;
     let reason: acp.StopReason = "end_turn";
+    let fileReferenceIds: string[] = [];
+    let turnStarted = false;
+    try {
+      await this.sessions.startTurnWithPrompt(session.id, turnId, user, {
+        modelStudentId: session.modelStudentId,
+        agentId: session.agentId,
+      });
+      turnStarted = true;
+      await output.turnState({ schemaVersion: 1, turnId, status: "active", phase: "accepted", waitingFor: { permission: 0, input: 0 } });
+      await output.message("user", user.messageId, text, {
+        schemaVersion: 1,
+        turnId,
+        chunkIndex: 0,
+        final: true,
+      });
+      if (session.experimentRef && this.experiments) {
+        await this.experiments.markRunStarted(session.experimentRef.experimentId, session.experimentRef.variantId, session.id, turnId);
+      }
+    } catch (error) {
+      if (turnStarted) {
+        await this.sessions.transitionTurn(session.id, turnId, "finalizing").catch(() => undefined);
+        await this.sessions.finishTurn(session.id, turnId, "failed", {
+          entryIds: [entryIdentity(user)],
+          error: { code: "TURN_START_FAILED", message: "该 Turn 启动失败", retryable: true },
+        }).catch(() => undefined);
+      }
+      requestSignal.removeEventListener("abort", detachClient);
+      channel.close();
+      this.channels.delete(session.id);
+      this.projections.delete(session.id);
+      this.active.delete(session.id);
+      throw error;
+    }
 
     try {
+      const runtimeHistory = session.experimentRef && this.experiments
+        ? await this.experiments.runtimeHistory(session.experimentRef.experimentId, session.ownerId)
+        : session.sessionEntries;
       const result = await this.runtime.run(
         {
           text,
-          sessionEntries: session.sessionEntries,
+          sessionEntries: runtimeHistory,
           sessionId: session.id,
           turnId,
+          scope: turnScope(session, turnId),
         },
         projection,
         controller.signal,
       );
       await projection.usage(result.usage);
+      if (this.files && result.fileRelativePaths.length > 0) {
+        const references = await this.files.createFromPaths(
+          session.ownerId,
+          session.id,
+          turnId,
+          result.fileRelativePaths,
+        );
+        await projection.attachFileReferences(references);
+        fileReferenceIds = references.map((item) => item.fileReferenceId);
+      }
       if (result.reason === "cancelled") reason = "cancelled";
       else if (result.reason === "length") reason = "max_tokens";
     } catch (error) {
       failure = error;
     } finally {
-      await projection.finalizeOpenRounds();
-      await this.sessions.appendMany(session.id, projection.streamingSessionEntries);
-      unlink();
-      this.active.delete(session.id);
+      try {
+        try {
+          await projection.finalizeOpenRounds();
+        } catch (error) {
+          failure ??= error;
+        }
+        await projection.phase("finalizing");
+        const terminalStatus = controller.signal.aborted || reason === "cancelled" ? "cancelled" : failure ? "failed" : "completed";
+        const completed = await this.sessions.finishTurnWithEntries(
+          session.id,
+          turnId,
+          terminalStatus,
+          projection.streamingSessionEntries,
+          {
+            ...projection.executionFacts(),
+            fileReferenceIds,
+            entryIds: [entryIdentity(user), ...projection.streamingSessionEntries.map(entryIdentity)],
+            stopReason: reason,
+            ...(failure ? { error: turnFailureFacts(failure) } : {}),
+          },
+        );
+        await output.turnState(completed.state);
+        if (session.experimentRef && this.experiments) {
+          try {
+            await this.experiments.markRunFinished(
+              session.experimentRef.experimentId,
+              session.experimentRef.variantId,
+              session.id,
+              turnId,
+              terminalStatus,
+              projection.streamingSessionEntries.flatMap((entry) => entry.type === "message" && entry.role === "assistant" ? [entry.text] : []),
+              failure,
+            );
+          } catch (experimentError) {
+            // 实验索引是 Turn 终态之后的派生记录，失败不能篡改已经提交的 Turn 事实。
+            console.error("Experiment lane 终态索引失败", experimentError);
+          }
+        }
+      } catch (finalizationError) {
+        console.error("Prompt Turn 终态保存失败", finalizationError);
+        failure ??= finalizationError;
+      } finally {
+        requestSignal.removeEventListener("abort", detachClient);
+        channel.close();
+        if (this.channels.get(session.id) === channel) this.channels.delete(session.id);
+        if (this.projections.get(session.id) === projection) this.projections.delete(session.id);
+        this.active.delete(session.id);
+      }
     }
 
     if (failure instanceof RunFailure) {
@@ -174,7 +407,27 @@ export class KindergartenAgent {
   }
 
   private cancel(sessionId: string): void {
+    this.pendingPrompts.get(sessionId)?.abort();
     this.active.get(sessionId)?.abort();
+  }
+
+  /**
+   * ACP handlers are asynchronous and may interleave even on one connection.
+   * Serialize only the short state transition that either reserves a Turn or
+   * changes its Session-scoped configuration; the model run remains concurrent
+   * across different Sessions.
+   */
+  private async serializeSessionState<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.sessionStateOperations.get(sessionId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    this.sessionStateOperations.set(sessionId, current);
+    try {
+      return await current;
+    } finally {
+      if (this.sessionStateOperations.get(sessionId) === current) {
+        this.sessionStateOperations.delete(sessionId);
+      }
+    }
   }
 
   private async requireSession(id: string, cwd: string): Promise<SessionRecord> {
@@ -184,6 +437,14 @@ export class KindergartenAgent {
   }
 }
 
+function effectiveReasoningCapability(model: import("../model/model-provider.js").ModelProvider): ModelReasoningCapability | undefined {
+  if (!model.reasoningCapability) return undefined;
+  const capability = structuredClone(model.reasoningCapability);
+  const configuredDefault = model.student.generationDefaults.reasoningProfile;
+  if (configuredDefault) capability.defaultProfile = configuredDefault;
+  return capability;
+}
+
 class TurnProjection implements RunObserver {
   readonly streamingSessionEntries: SessionEntry[] = [];
   private readonly messages = new Map<number, SessionMessageEntry>();
@@ -191,13 +452,24 @@ class TurnProjection implements RunObserver {
   private readonly messageChunks = new Map<number, number>();
   private readonly thoughtChunks = new Map<number, number>();
   private readonly closedRounds = new Set<number>();
+  private runtimeFacts: RuntimeTurnSnapshot | undefined;
+  private readonly capabilityFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["capabilitySnapshots"]> = [];
+  private readonly roundFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["modelRounds"]> = [];
+  private usageFacts: TurnTokenUsage | undefined;
 
   constructor(
     private readonly sessionId: string,
     private readonly turnId: string,
+    private readonly promptEntry: SessionMessageEntry,
     private readonly output: AcpOutput,
-    private readonly client: acp.AgentContext,
+    private readonly channel: SessionAcpChannel,
+    private readonly sessions: SessionRepository,
+    private readonly signal: AbortSignal,
   ) {}
+
+  matchesTurn(turnId: string): boolean { return this.turnId === turnId; }
+
+  entriesSnapshot(): SessionEntry[] { return structuredClone(this.streamingSessionEntries); }
 
   async context(summary: ContextSummary): Promise<void> {
     const entry: SessionContextSummaryEntry = {
@@ -207,7 +479,42 @@ class TurnProjection implements RunObserver {
       createdAt: new Date().toISOString(),
     };
     this.streamingSessionEntries.push(entry);
+    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
     await this.output.contextSummary(summary);
+  }
+
+  async phase(phase: TurnActivePhase, waitingFor?: TurnWaitingState): Promise<void> {
+    const turn = await this.sessions.transitionTurn(this.sessionId, this.turnId, phase, waitingFor);
+    await this.output.turnState(turn.state);
+  }
+
+  async turnSnapshot(facts: RuntimeTurnSnapshot): Promise<void> {
+    this.runtimeFacts = structuredClone(facts);
+    await this.sessions.checkpointTurn(this.sessionId, this.turnId, runtimeTurnFacts(facts));
+  }
+
+  async capabilitySnapshot(generation: number, hash: string, snapshot: RuntimeCapabilitySnapshot): Promise<void> {
+    if (this.capabilityFacts.some((item) => item.generation === generation)) return;
+    this.capabilityFacts.push({ generation, hash, snapshot: structuredClone(snapshot) });
+    await this.sessions.checkpointTurn(this.sessionId, this.turnId, {
+      capabilitySnapshots: structuredClone(this.capabilityFacts),
+    });
+  }
+
+  async modelRoundStarted(facts: RuntimeModelRoundSnapshot): Promise<void> {
+    this.roundFacts.push(structuredClone(facts));
+    await this.sessions.checkpointTurn(this.sessionId, this.turnId, {
+      modelRounds: structuredClone(this.roundFacts),
+    });
+  }
+
+  async modelRoundCompleted(round: number, completedAt: string): Promise<void> {
+    const current = this.roundFacts.find((item) => item.roundIndex === round);
+    if (!current) return;
+    current.completedAt = completedAt;
+    await this.sessions.checkpointTurn(this.sessionId, this.turnId, {
+      modelRounds: structuredClone(this.roundFacts),
+    });
   }
 
   async usage(modelUsage: TurnModelUsage): Promise<void> {
@@ -215,7 +522,7 @@ class TurnProjection implements RunObserver {
       schemaVersion: 1,
       turnId: this.turnId,
       modelRequests: modelUsage.modelRequests,
-      components: tokenComponents(this.streamingSessionEntries),
+      components: tokenComponents([this.promptEntry, ...this.streamingSessionEntries]),
       ...(modelUsage.inputTokens !== undefined
         ? { inputTokens: modelUsage.inputTokens }
         : {}),
@@ -235,8 +542,19 @@ class TurnProjection implements RunObserver {
       usage: structuredClone(usage),
       createdAt: new Date().toISOString(),
     };
+    this.usageFacts = structuredClone(usage);
     this.streamingSessionEntries.push(entry);
+    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
     await this.output.tokenUsage(usage);
+  }
+
+  executionFacts(): Partial<import("../repository/session-types.js").TurnExecutionRecord> {
+    return {
+      ...(this.runtimeFacts ? runtimeTurnFacts(this.runtimeFacts) : {}),
+      capabilitySnapshots: structuredClone(this.capabilityFacts),
+      modelRounds: structuredClone(this.roundFacts),
+      ...(this.usageFacts ? { usage: structuredClone(this.usageFacts) } : {}),
+    };
   }
 
   async text(round: number, value: string): Promise<void> {
@@ -266,6 +584,8 @@ class TurnProjection implements RunObserver {
   async roundComplete(round: number): Promise<void> {
     if (this.closedRounds.has(round)) return;
     this.closedRounds.add(round);
+    // 最终 chunk 只是投影；先保存本轮完整内容，断线或进程中断后仍可回放。
+    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, this.streamingSessionEntries);
     const message = this.messages.get(round);
     if (message) {
       await this.output.message("assistant", message.messageId, "", {
@@ -286,9 +606,59 @@ class TurnProjection implements RunObserver {
     }
   }
 
+  async providerContinuation(
+    round: number,
+    continuation: ProviderOpaqueContinuation,
+    calls: import("../model/model-provider.js").ModelToolCall[],
+  ): Promise<void> {
+    const visibleEntryIds = [this.messages.get(round), this.thoughts.get(round)]
+      .flatMap((entry) => entry ? [entry.messageId] : []);
+    this.streamingSessionEntries.push({
+      type: "provider_continuation",
+      turnId: this.turnId,
+      roundIndex: round,
+      continuation: withProviderContinuationCorrelation(continuation, {
+        messageIds: visibleEntryIds,
+        toolCallIds: calls.flatMap((call) => call.id ? [call.id] : []),
+      }),
+      createdAt: new Date().toISOString(),
+    });
+  }
+
   async finalizeOpenRounds(): Promise<void> {
     const rounds = new Set([...this.messages.keys(), ...this.thoughts.keys()]);
     for (const round of rounds) await this.roundComplete(round);
+  }
+
+  async attachFileReferences(files: FileReference[]): Promise<void> {
+    for (const file of files) {
+      const pathSuffix = file.relativePath.replaceAll("\\", "/");
+      const entry = this.streamingSessionEntries.findLast((item): item is SessionToolCallEntry => {
+        if (item.type !== "tool_call" || item.name !== "write_file") return false;
+        if (!isRecord(item.rawOutput) || typeof item.rawOutput.path !== "string") return true;
+        return item.rawOutput.path.replaceAll("\\", "/").endsWith(pathSuffix);
+      });
+      if (!entry) continue;
+      entry.content.push({
+        type: "content",
+        content: {
+          type: "resource_link",
+          name: file.displayName,
+          title: file.displayName,
+          uri: makeFileReferenceUri(file.fileReferenceId),
+          mimeType: file.mimeType,
+          size: file.byteLength,
+          _meta: { [META_KEY]: { fileReferences: { schemaVersion: 1, fileReferenceIds: [file.fileReferenceId] } } },
+        },
+      });
+      await this.output.toolUpdate({
+        toolCallId: entry.toolCallId,
+        status: entry.status,
+        rawOutput: entry.rawOutput,
+        content: entry.content,
+        locations: [],
+      });
+    }
   }
 
   async toolStart(call: PreparedToolCall): Promise<void> {
@@ -306,6 +676,7 @@ class TurnProjection implements RunObserver {
       createdAt: new Date().toISOString(),
     };
     this.streamingSessionEntries.push(entry);
+    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
     await this.output.toolCall({
       toolCallId: call.id,
       title: call.title,
@@ -335,6 +706,7 @@ class TurnProjection implements RunObserver {
       entry.outcomeStatus = result.status;
       entry.content = content;
       entry.locations = locations;
+      await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
     }
     await this.output.toolUpdate({
       toolCallId: call.id,
@@ -346,9 +718,8 @@ class TurnProjection implements RunObserver {
   }
 
   async requestPermission(call: PreparedToolCall): Promise<boolean> {
-    const response = await this.client.request(
-      acp.methods.client.session.requestPermission,
-      {
+    const response = await this.channel.request(this.signal, (client) => client.request(
+      acp.methods.client.session.requestPermission, {
         sessionId: this.sessionId,
         toolCall: {
           toolCallId: call.id,
@@ -363,7 +734,7 @@ class TurnProjection implements RunObserver {
           { optionId: "allow-once", name: "允许本次执行", kind: "allow_once" },
           { optionId: "reject-once", name: "拒绝本次执行", kind: "reject_once" },
         ],
-      },
+      }),
     );
     return (
       response.outcome.outcome === "selected" &&
@@ -372,9 +743,8 @@ class TurnProjection implements RunObserver {
   }
 
   async askUser(question: string, toolCallId: string): Promise<string> {
-    const response = await this.client.request(
-      acp.methods.client.elicitation.create,
-      {
+    const response = await this.channel.request(this.signal, (client) => client.request(
+      acp.methods.client.elicitation.create, {
         sessionId: this.sessionId,
         toolCallId,
         mode: "form",
@@ -391,7 +761,7 @@ class TurnProjection implements RunObserver {
           },
           required: ["answer"],
         },
-      },
+      }),
     );
     if (response.action !== "accept") {
       // AskUser 的取消语义是停止当前 Turn，不应伪装成一次 Tool 执行失败。
@@ -429,7 +799,28 @@ class TurnProjection implements RunObserver {
   }
 }
 
+function runtimeTurnFacts(
+  facts: RuntimeTurnSnapshot,
+): Partial<import("../repository/session-types.js").TurnExecutionRecord> {
+  return {
+    modelStudentId: facts.modelStudentId,
+    providerKind: facts.providerKind,
+    model: facts.model,
+    agentId: facts.agentId,
+    agentSnapshotHash: facts.agentSnapshotHash,
+    agentSnapshot: structuredClone(facts.agentSnapshot),
+    resolvedReasoning: structuredClone(facts.resolvedReasoning),
+  };
+}
+
+function turnFailureFacts(failure: unknown): { code: string; message: string; retryable: boolean } {
+  return failure instanceof RunFailure
+    ? { code: failure.code, message: failure.message, retryable: failure.retryable }
+    : { code: "INTERNAL_ERROR", message: "该 Turn 执行失败", retryable: true };
+}
+
 async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void> {
+  if (entry.type === "provider_continuation") return;
   if (entry.type === "message") {
     await output.message(entry.role, entry.messageId, entry.text, {
       schemaVersion: 1,
@@ -461,6 +852,64 @@ async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void
       locations: entry.locations,
     });
   }
+}
+
+function sessionEntriesWithActiveProjection(
+  session: SessionRecord,
+  projection: TurnProjection | undefined,
+): SessionEntry[] {
+  const entries = structuredClone(session.sessionEntries);
+  if (!projection) return entries;
+  const indexes = new Map(entries.map((entry, index) => [entryIdentity(entry), index]));
+  for (const entry of projection.entriesSnapshot()) {
+    const id = entryIdentity(entry);
+    const index = indexes.get(id);
+    if (index === undefined) {
+      indexes.set(id, entries.length);
+      entries.push(entry);
+    } else {
+      entries[index] = entry;
+    }
+  }
+  return entries;
+}
+
+async function replayEntryDelta(
+  output: AcpOutput,
+  entry: SessionEntry,
+  cursor: SessionResumeMeta,
+  turnCompleted: boolean,
+): Promise<void> {
+  if (entry.type === "message") {
+    const current = cursor.messages[entry.messageId];
+    const textLength = current?.textLength ?? 0;
+    if (textLength > entry.text.length) throw new acp.RequestError(-32602, `消息恢复游标越界: ${entry.messageId}`);
+    const text = entry.text.slice(textLength);
+    const final = entry.role === "user" || turnCompleted;
+    if (text.length === 0) return;
+    await output.message(entry.role, entry.messageId, text, {
+      schemaVersion: 1,
+      turnId: entry.turnId,
+      chunkIndex: current?.nextChunkIndex ?? 0,
+      ...(final ? { final: true } : {}),
+    });
+    return;
+  }
+  if (entry.type === "thought") {
+    const current = cursor.thoughts[entry.messageId];
+    const textLength = current?.textLength ?? 0;
+    if (textLength > entry.text.length) throw new acp.RequestError(-32602, `思考恢复游标越界: ${entry.messageId}`);
+    const text = entry.text.slice(textLength);
+    if (text.length === 0) return;
+    await output.thought(entry.messageId, text, {
+      schemaVersion: 1,
+      turnId: entry.turnId,
+      chunkIndex: current?.nextChunkIndex ?? 0,
+      ...(turnCompleted ? { final: true } : {}),
+    });
+    return;
+  }
+  await replayEntry(output, entry);
 }
 
 function tokenComponents(entries: SessionEntry[]): TokenUsageComponent[] {
@@ -538,11 +987,11 @@ function makeMessage(
   };
 }
 
-function linkAbort(source: AbortSignal, target: AbortController): () => void {
-  const abort = () => target.abort();
-  if (source.aborted) abort();
-  else source.addEventListener("abort", abort, { once: true });
-  return () => source.removeEventListener("abort", abort);
+function entryIdentity(entry: SessionEntry): string {
+  if (entry.type === "message" || entry.type === "thought") return `${entry.type}:${entry.messageId}`;
+  if (entry.type === "tool_call") return `tool:${entry.toolCallId}`;
+  if (entry.type === "provider_continuation") return `provider:${entry.turnId}:${entry.roundIndex}`;
+  return `${entry.type}:${entry.turnId}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

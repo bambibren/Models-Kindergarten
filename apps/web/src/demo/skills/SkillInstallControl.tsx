@@ -29,10 +29,10 @@ export function SkillInstallControl({ variant, onInstalled }: {
   return <section className={`mk-skill-install-control ${variant}`}>
     <div className="mk-skill-install-copy">
       <strong>{variant === "panel" ? "从网络添加 Skill" : "安装并加入可选 Skills"}</strong>
-      <small>粘贴公开 GitHub Skill 目录地址；安装成功后才可在 Agent 中选择。</small>
+      <small>粘贴公开 GitHub 仓库或目录地址；真实安装按层查找，只安装第一次出现 SKILL.md 的深度。</small>
     </div>
     <div className="mk-skill-install-fields">
-      <input aria-label="Skill 安装地址" disabled={installing} onChange={(event) => setSourceUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); install(); } }} placeholder="https://github.com/…/tree/…/skill-name" value={sourceUrl} />
+      <input aria-label="Skill 安装地址" disabled={installing} onChange={(event) => setSourceUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); install(); } }} placeholder="GitHub 中直接包含 SKILL.md 的目录地址" value={sourceUrl} />
       <button disabled={!sourceUrl.trim() || installing} type="button" onClick={install}>{installing ? <LoaderCircle className="mk-demo-spin" size={13} /> : <Download size={13} />}安装</button>
     </div>
     {error && <p className="mk-skill-install-error" role="alert">{error}</p>}

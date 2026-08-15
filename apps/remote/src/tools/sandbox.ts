@@ -59,6 +59,16 @@ export class FileSandbox {
     return { path: target, content: await readFile(target, "utf8") };
   }
 
+  async readBytes(input: string): Promise<{ path: string; content: Buffer }> {
+    await this.ensureReady();
+    const target = this.preview(input);
+    await this.assertSafeComponents(target, false);
+    const info = await stat(target);
+    if (!info.isFile()) throw new Error("目标不是普通文件");
+    if (info.size > MAX_FILE_BYTES) throw new Error(`文件超过 ${MAX_FILE_BYTES} 字节限制`);
+    return { path: target, content: await readFile(target) };
+  }
+
   async list(input = ".", maxItems = 200): Promise<SandboxListItem[]> {
     await this.ensureReady();
     const target = input === "." ? this.root : this.preview(input);

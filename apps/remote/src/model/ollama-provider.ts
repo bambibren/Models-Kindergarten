@@ -1,4 +1,8 @@
 import type {
+  ConcreteReasoningProfile,
+  ModelReasoningCapability,
+} from "@kindergarten/contracts";
+import type {
   ModelContextFragment,
   ModelContextSerialization,
   ModelEvent,
@@ -10,14 +14,33 @@ import type {
 import { CircuitBreaker } from "../resilience/circuit-breaker.js";
 import { withRetry } from "../resilience/retry.js";
 import { ModelProviderError } from "./model-error.js";
+import {
+  assertContinuationTargetsStudent,
+  readProviderOpaqueContinuation,
+} from "./provider-continuation.js";
 
 /** Ollama 是 V1 唯一面向用户的真实 Provider。 */
 export class OllamaProvider implements ModelProvider {
   private readonly circuit = new CircuitBreaker("ollama");
+  readonly reasoningCapability: ModelReasoningCapability = {
+    schemaVersion: 1,
+    control: "toggle",
+    adjustable: true,
+    supportedProfiles: ["fast", "balanced"],
+    defaultProfile: "balanced",
+    native: { parameter: "think", values: [false, true] },
+  };
   constructor(readonly student: ModelStudent) {
     if (student.provider.kind !== "ollama") {
       throw new Error("OllamaProvider 只能接收 ollama ModelStudent");
     }
+  }
+
+  nativeReasoning(profile: ConcreteReasoningProfile): Record<string, boolean> {
+    if (profile !== "fast" && profile !== "balanced") {
+      throw new Error(`当前 Ollama ModelStudent 不支持推理档位: ${profile}`);
+    }
+    return { think: profile === "balanced" };
   }
 
   async verify(): Promise<void> {
@@ -57,7 +80,7 @@ export class OllamaProvider implements ModelProvider {
         value = fragment.tools;
         break;
       case "messages":
-        value = fragment.messages.map(toOllamaMessage);
+        value = fragment.messages.map((message) => toOllamaMessage(this.student, message));
         break;
       case "omitted":
         value = { sent: false, sourceIds: fragment.sourceIds };
@@ -68,6 +91,15 @@ export class OllamaProvider implements ModelProvider {
       model: this.student.provider.model,
       format: "json",
       value: JSON.stringify(value, null, 2),
+    };
+  }
+
+  serializeInput(input: ModelInput): ModelContextSerialization {
+    return {
+      provider: "ollama",
+      model: this.student.provider.model,
+      format: "json",
+      value: JSON.stringify(toOllamaRequest(this.student, input), null, 2),
     };
   }
 
@@ -124,7 +156,10 @@ export class OllamaProvider implements ModelProvider {
               : {}),
           };
         }
-        yield { type: "finish", reason: "stop" };
+        yield {
+          type: "finish",
+          reason: chunk.doneReason === "length" ? "length" : "stop",
+        };
       }
     }
   }
@@ -151,26 +186,71 @@ export class OllamaProvider implements ModelProvider {
 }
 
 function toOllamaRequest(student: ModelStudent, input: ModelInput): Record<string, unknown> {
+  const think = ollamaThink(student, input);
   return {
     model: student.provider.model,
     stream: true,
-    think: true,
+    think,
     tools: input.tools,
     options: {
-      temperature: student.agentConfig.temperature ?? 0.4,
+      ...(student.generationDefaults.temperature === undefined
+        ? {}
+        : { temperature: student.generationDefaults.temperature }),
     },
     messages: [
-      toOllamaSystemMessage(student.agentConfig.systemPrompt),
-      ...input.messages.map(toOllamaMessage),
+      toOllamaSystemMessage(input.systemPrompt),
+      ...input.messages.map((message) => toOllamaMessage(student, message)),
     ],
   };
+}
+
+function ollamaThink(student: ModelStudent, input: ModelInput): boolean {
+  if (input.reasoning === "disabled" || input.reasoning === undefined) {
+    return input.reasoning !== "disabled";
+  }
+  if (
+    input.reasoning.providerKind !== student.provider.kind ||
+    input.reasoning.model !== student.provider.model
+  ) {
+    throw new ModelProviderError(
+      "model_request_failed",
+      "推理快照与当前 Ollama ModelStudent 不匹配",
+      false,
+    );
+  }
+  if (typeof input.reasoning.native.think !== "boolean") {
+    throw new ModelProviderError(
+      "model_request_failed",
+      "Ollama 推理快照缺少 native.think",
+      false,
+    );
+  }
+  return input.reasoning.native.think;
 }
 
 function toOllamaSystemMessage(content: string): Record<string, unknown> {
   return { role: "system", content };
 }
 
-function toOllamaMessage(message: ModelInput["messages"][number]): Record<string, unknown> {
+function toOllamaMessage(student: ModelStudent, message: ModelInput["messages"][number]): Record<string, unknown> {
+  if (message.providerOpaqueContinuation) {
+    try {
+      const continuation = readProviderOpaqueContinuation(message.providerOpaqueContinuation);
+      assertContinuationTargetsStudent(continuation, student, "ollama");
+    } catch (error) {
+      throw new ModelProviderError(
+        "invalid_model_response",
+        "Provider continuation 与当前 Ollama ModelStudent 不匹配",
+        false,
+        { cause: error },
+      );
+    }
+    throw new ModelProviderError(
+      "invalid_model_response",
+      "Ollama 不支持消费 Provider opaque continuation",
+      false,
+    );
+  }
   if (message.role === "assistant" && message.toolCalls?.length) {
     return {
       role: "assistant",
@@ -228,6 +308,7 @@ interface ParsedChunk {
   thinking: string;
   toolCalls: ModelToolCall[];
   done: boolean;
+  doneReason?: string;
   error?: string;
   inputTokens?: number;
   outputTokens?: number;
@@ -256,6 +337,9 @@ function parseChunk(line: string): ParsedChunk {
         : "",
     toolCalls: isRecord(message) ? readToolCalls(message.tool_calls) : [],
     done: value.done === true,
+    ...(typeof value.done_reason === "string"
+      ? { doneReason: value.done_reason }
+      : {}),
     ...(typeof value.error === "string" ? { error: value.error } : {}),
     ...(typeof value.prompt_eval_count === "number"
       ? { inputTokens: value.prompt_eval_count }

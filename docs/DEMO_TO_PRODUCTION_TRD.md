@@ -1,8 +1,8 @@
 # Model Kindergarten Demo 到真实产品实施 TRD
 
-> 方案代号：D2P-1.2（Demo to Product）  
-> 状态：可进入实施评审  
-> 日期：2026-08-12  
+> 方案代号：D2P-1.3（Demo to Product）
+> 状态：已实现并完成首轮端到端验证
+> 日期：2026-08-13
 > 适用仓库：`/Users/bones/develop/Models-Kindergarten`
 
 ## 文档关系与裁决顺序
@@ -10,8 +10,10 @@
 本文件是从现有 Demo 反推真实产品后的主技术方案。详细内容拆分为：
 
 1. [完整需求与差距矩阵](./DEMO_TO_PRODUCTION_REQUIREMENTS_AND_GAPS.md)：逐页交互、状态、验收标准、Demo 与真实实现差距。
-2. [领域模型、数据与接口合同](./DEMO_TO_PRODUCTION_CONTRACTS.md)：前后端数据结构、ACP 扩展、Control API、状态机与错误码。
-3. [分阶段实施计划](./superpowers/plans/2026-08-11-demo-to-production-implementation.md)：按文件、测试和依赖顺序拆分的开发任务。
+2. [全仓库校验与兜底逻辑审计](./VALIDATION_AND_FALLBACK_AUDIT.md)：区分明确需求、必要安全边界与实现自行添加的限制或静默修正。
+3. [领域模型、数据与接口合同](./DEMO_TO_PRODUCTION_CONTRACTS.md)：前后端数据结构、ACP 扩展、Control API、状态机与错误码。
+4. [分阶段实施计划](./superpowers/plans/2026-08-11-demo-to-production-implementation.md)：按文件、测试和依赖顺序拆分的开发任务。
+5. [实现状态与验证记录](./DEMO_TO_PRODUCTION_IMPLEMENTATION_STATUS.md)：实际落地范围、关键程序路径、自动化结果和真实浏览器验证证据。
 
 本方案吸收并统一以下既有设计：
 
@@ -140,7 +142,7 @@ Demo 中的 Memory 模块本轮仅允许保存 `mode: "off"`。UI 应禁用并�
 | --- | --- | --- | --- |
 | Web | React/Vite/Zustand、ACP Web Client | 稳定聊天 reducer、权限与 elicitation、上下文摘要 UI | 无产品路由、无管理客户端、无真实 Demo 页面状态 |
 | Remote ACP | `KindergartenAgent`、SessionRepository、AgentRunner | new/list/load/resume/close/prompt/cancel、一会话一 Turn | Session 无 Agent/模型绑定；能力是全局静态 |
-| Model Runtime | Ollama Provider、Responses API Provider 雏形 | 流式文本、思考、工具调用、usage、重试与熔断 | index 只接 Ollama；模型入园与 resolver 调研中；Responses Provider 启用前还需通过终态、并行调用顺序和错误脱敏门禁 |
+| Model Runtime | Ollama Provider、Responses API Provider | 流式文本、思考、工具调用、usage、重试与熔断 | 自定义 Responses 已完成真实端点体检、受管 Catalog、Secret 与按 Session resolver；硅基流动和 Ollama 管理入园仍留白 |
 | Tool Runtime | ToolRegistry、ToolRuntime、Permission、Elicitation | 内置工具、重复调用防护、错误投影 | 缺 Turn scope、动态能力刷新、文件引用 |
 | MCP | ConfigStore、ClientManager、ToolProvider | Streamable HTTP、发现、工具/资源、网络策略 | 单次初始化、全局 allowlist、无管理状态机 |
 | Skill | Installer、Registry、Validator、ToolProvider | 校验、隔离安装、资源读取 | 无服务端安装 Job、无动态刷新、无 Agent 持久绑定 |
@@ -377,7 +379,7 @@ AgentRunner 首轮解析一次。工具结果可返回结构化 `effects.capabil
 ### 8.5 Skill
 
 - 手动安装与 `ensure_agent_skills` 复用一个 `SkillInstallationService`。
-- 安装来源首版只接用户在当前消息中明确给出的 GitHub tree URL，或用户在管理页主动选择的批准本地来源；解析到不可变 commit 后再安装。模型不得自行搜索、补全或猜测来源地址。
+- 安装来源首版只接用户在当前消息中明确给出的 GitHub 仓库根目录或仓库内目录 URL，或用户在管理页主动选择的批准本地来源。服务端从 URL 指向目录开始按层查找，只安装第一次出现 `SKILL.md` 的深度；一旦该层有结果便不进入更深目录。解析到不可变 commit 后再安装。模型不得自行搜索、补全或猜测来源地址。
 - 复用键以规范化来源（repository + subdirectory + requested ref）和内容 commit/hash 为准，不以 Skill 名称单独判重。相同来源、相同 commit 直接返回 `reused`；相同来源已有旧版本时默认继续复用，不静默联网更新。只有用户明确点击/说“更新”时才解析新 commit，校验成功后切换 Agent 绑定；同名不同来源按不同 Skill 处理并提示来源冲突。
 - Job 和 Batch 持久化，重启时将未完成任务投影为 interrupted/failed，可重试。
 - 只有 `ready` Installation 可绑定；批量对话安装必须全批成功后原子并入 Agent。
@@ -404,7 +406,9 @@ Context Lab 只编辑服务端 ExperimentDraft：
 
 运行时，Web 为 B/C lane 创建带 namespaced experiment reference 的 ACP Session，再调用标准 `session/prompt`。这些是真实的 ACP Session/Turn，但 `purpose="experiment"`，只关联在实验记录中，普通聊天列表不展示。Remote 从 ExperimentRepository 读取并校验变体，不相信浏览器传入完整能力定义。A 的 `reuse_snapshot` 不请求模型。全部完成后跳到 evaluation-web 对比页。
 
-结果页显示回答、上下文差异、工具/usage/停止原因、状态与保存标记，并实现 Demo 表达的四维评分：理解、规划、输出三维由人工注释量表产生，执行维由同一 Run 的 Runtime Trace 按版本化确定性规则生成。四维均为 0～100、默认等权 25%，`totalScore = round((理解 + 规划 + 输出 + 执行) / 4)`；四维共同进入雷达图、排名和 winner。任一人工维度未完成时 Scorecard 仍是 draft，不生成总分、排名或 winner，不能像 Demo 假数据那样把未标注项默认为 100。
+结果页显示回答、上下文差异、工具/usage/停止原因、状态与保存标记，并实现 Demo 表达的四维评分。全部 lane 完成后，Remote 每次实验调用当前 ModelStudent 生成并持久化一份标注工作表：从原任务和各 lane 信息合并公共需求项，从回答和 Tool 过程提取各 lane Workflow，并给出各回答的结果段语义与文本单元边界建议。该结构化整理调用关闭 Provider 推理模式；模型输出不含 verdict 或分数。Remote 按模型给出的段落顺序规范化可能的边界跳号/重叠/越界，自行生成首尾相接、无重叠无遗漏的字符区间与 hash。用户显式重新生成时旧 Scorecard 失效。
+
+理解、规划、输出三维由人对该工作表的选择产生，执行维由同一 Run 的 Runtime Trace 按版本化确定性规则生成。四维均为 0～100、默认等权 25%，`totalScore = round((理解 + 规划 + 输出 + 执行) / 4)`；四维共同进入雷达图、排名和 winner。任一人工维度未完成时 Scorecard 仍是 draft，不生成总分、排名或 winner，不能像 Demo 假数据那样把未标注项默认为 100。
 
 Runtime 的完成状态、Tool 成功率、错误/权限违规/重复调用、首 Token 延迟和总耗时用于合成“执行分”；Rounds、Tool Calls、Context/Output Tokens 等方向不天然代表好坏的指标继续作为解释事实展示，不随意按“越少越好”扣分。整个过程只做本地确定性计算，不发起任何裁判模型或自动评分 API 调用。
 
@@ -659,6 +663,7 @@ Flag 必须是服务端和前端共同可见的 capability，不允许只在前�
 
 | 日期 | 版本 | 变更 |
 | --- | --- | --- |
+| 2026-08-13 | 1.3 | 完成 D2P-1 首轮实现；明确每个实验的标注工作表必须由该实验绑定的 ModelStudent 实时生成需求合并项、Workflow 与结果分段语义，生成结果持久化后由人作答；补充失败重试、边界规范化、强制重新生成使旧 Scorecard 失效和端到端验证记录。 |
 | 2026-08-12 | 1.2 | 恢复不可点击的小说创作调研卡片；固定理解/规划/输出三维人工注释 + Runtime 执行分的四维评分，四维共同参与等权总分、雷达图、排名和 winner；明确无自动评分调用。 |
 | 2026-08-12 | 1.1 | 按评审反馈简化为本地单用户最后写入；移除模型入园路由、Agent 归档/迁移和会话内身份切换；限定 Skill 显式来源与更新规则；纳入人工评分、总分、雷达图、排名和 winner；澄清 ACP、MCP、文件预览、evaluation-web 与三层状态。 |
 | 2026-08-11 | 1.0 | 依据实际 Demo 路由、非 Demo 代码和现有设计文档，形成统一产品化方案；明确四项调研留白。 |

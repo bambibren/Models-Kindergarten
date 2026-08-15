@@ -13,7 +13,7 @@ const EMPTY_CONFIG: McpConfigDocument = {
   version: 1,
   servers: [],
   authProfiles: [],
-  agentCapabilities: { mcpTools: [], skills: ["skill:sandbox-notes"], resources: [] },
+  agentCapabilities: { mcpTools: [], skills: ["sandbox-notes"], resources: [] },
 };
 
 /** 配置只保存公开元数据与 Secret 引用；连接状态从不回写这里。 */
@@ -70,8 +70,8 @@ function parseDocument(value: unknown): McpConfigDocument {
     }
   }
   for (const skill of agentCapabilities.skills) {
-    if (!/^skill:[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill)) {
-      throw new Error(`Agent Skill id 格式无效: ${skill}`);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill)) {
+      throw new Error(`Agent Skill name 格式无效: ${skill}`);
     }
   }
   for (const resource of agentCapabilities.resources) {

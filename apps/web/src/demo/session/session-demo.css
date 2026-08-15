@@ -107,9 +107,10 @@
 .mk-demo-artifact-links strong { font-size: 10px; }
 .mk-demo-artifact-links small { color: var(--demo-faint); font-size: 8px; }
 .mk-session-composer-stack { display: grid; gap: 7px; min-width: 0; padding-top: 4px; }
-.mk-session-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: 0 18px 16px; padding: 9px 9px 9px 13px; border: 1px solid var(--demo-line); border-radius: 13px; background: var(--demo-surface); box-shadow: 0 9px 28px rgb(32 34 30 / .09); }
+.mk-session-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 8px; margin: 0 18px 16px; padding: 9px 9px 9px 13px; border: 1px solid var(--demo-line); border-radius: 13px; background: var(--demo-surface); box-shadow: 0 9px 28px rgb(32 34 30 / .09); }
 .mk-session-composer textarea { resize: none; min-height: 28px; padding: 3px 0; border: 0; outline: 0; color: var(--demo-ink); background: transparent; font-size: 12px; line-height: 1.6; }
 .mk-session-composer button { align-self: end; min-height: 30px; padding: 0 10px; border: 0; border-radius: 8px; color: var(--demo-action-ink); background: var(--demo-action); font-size: 10px; }
+.mk-demo-reasoning-select { min-height: 30px; background: var(--demo-surface-muted); }
 .mk-skill-install-banner { width: min(724px, calc(100% - 36px)); margin: 0 auto; overflow: hidden; border: 1px solid #d4d5ce; border-radius: 10px; color: var(--demo-ink-2); background: #f4f4f0; box-shadow: 0 6px 18px rgb(32 34 30 / .06); }
 .mk-skill-install-banner.ready { border-color: #ced7cc; background: #f2f5f0; }
 .mk-skill-install-banner > summary { display: grid; grid-template-columns: 28px minmax(0, 1fr) 16px 14px; align-items: center; gap: 8px; min-height: 48px; padding: 7px 10px; cursor: pointer; list-style: none; }

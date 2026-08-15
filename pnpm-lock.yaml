@@ -33,6 +33,12 @@ importers:
 
   apps/evaluation-web:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.3.0
+        version: 1.3.0(zod@4.4.3)
+      '@kindergarten/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@kindergarten/evaluation-contract':
         specifier: workspace:*
         version: link:../../packages/evaluation-contract

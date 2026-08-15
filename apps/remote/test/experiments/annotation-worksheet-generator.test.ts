@@ -1,0 +1,63 @@
+import { describe, expect, it } from "vitest";
+import type { ExperimentRecord } from "@kindergarten/contracts";
+import { AnnotationWorksheetGenerator } from "../../src/experiments/annotation-worksheet-generator.js";
+import { FixtureProvider } from "../../src/model/fixture-provider.js";
+import type { ModelEvent, ModelInput } from "../../src/model/model-provider.js";
+
+class BoundaryDriftProvider extends FixtureProvider {
+  override async *stream(_input: ModelInput, _signal: AbortSignal): AsyncIterable<ModelEvent> {
+    yield { type: "text_delta", text: JSON.stringify({
+      requirements: [{ label: "完整回答任务", weight: 1 }],
+      workflows: [
+        { variantId: "variant-a", steps: ["形成两点回答"] },
+        { variantId: "variant-b", steps: ["形成两点回答"] },
+      ],
+      outputSections: [
+        { variantId: "variant-a", sections: [
+          { label: "第一点", startUnit: 0, endUnit: 1 },
+          { label: "第二点", startUnit: 2, endUnit: 999 },
+        ] },
+        { variantId: "variant-b", sections: [{ label: "完整回答", startUnit: 1, endUnit: 1 }] },
+      ],
+    }) };
+    yield { type: "finish", reason: "stop" };
+  }
+}
+
+describe("AnnotationWorksheetGenerator", () => {
+  it("保留模型分段语义并把小模型漂移的编号规范化为完整连续原文", async () => {
+    const generator = new AnnotationWorksheetGenerator(new BoundaryDriftProvider());
+    const answers = ["第一点。\n\n第二点。", "甲。\n乙。"];
+    const worksheet = await generator.generate(experiment(), [
+      { variantId: "variant-a", label: "A", answer: answers[0]!, toolEvents: [] },
+      { variantId: "variant-b", label: "B", answer: answers[1]!, toolEvents: [] },
+    ]);
+
+    for (const [index, output] of worksheet.outputSections.entries()) {
+      expect(output.sections[0]?.start).toBe(0);
+      expect(output.sections.at(-1)?.end).toBe(answers[index]!.length);
+      for (let sectionIndex = 1; sectionIndex < output.sections.length; sectionIndex += 1) {
+        expect(output.sections[sectionIndex - 1]?.end).toBe(output.sections[sectionIndex]?.start);
+      }
+    }
+    expect(worksheet.outputSections[0]?.sections.map((item) => item.label)).toEqual(["第一点", "第二点"]);
+  });
+});
+
+function experiment(): ExperimentRecord {
+  const now = new Date().toISOString();
+  const policy = {
+    systemPrompt: "test", builtinTools: [], skillInstallationIds: [], mcps: [],
+    historyPolicy: { mode: "none" as const, maxTurns: 0 }, memoryPolicy: { mode: "off" as const },
+  };
+  return {
+    schemaVersion: 1, experimentId: "experiment", ownerId: "local-admin", name: "test",
+    mode: "fresh_prompt", status: "completed", modelStudentId: "fixture-student", sourceAgentId: "agent",
+    promptText: "回答两点", toolUseWasExpected: false,
+    variants: [
+      { variantId: "variant-a", label: "A", mode: "rerun", policy },
+      { variantId: "variant-b", label: "B", mode: "rerun", policy },
+    ],
+    runs: [], createdAt: now, updatedAt: now,
+  };
+}

@@ -32,6 +32,24 @@ export class SkillLockStore {
     await writeFile(temp, `${JSON.stringify({ version: 1, records }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     await rename(temp, this.file);
   }
+
+  async upsert(record: SkillInstallRecord): Promise<void> {
+    const records = await this.load();
+    const next = records.filter((item) => item.name !== record.name);
+    next.push(structuredClone(record));
+    await this.write(next);
+  }
+
+  async remove(name: string): Promise<void> {
+    await this.write((await this.load()).filter((item) => item.name !== name));
+  }
+
+  private async write(records: SkillInstallRecord[]): Promise<void> {
+    await mkdir(dirname(this.file), { recursive: true });
+    const temp = `${this.file}.tmp`;
+    await writeFile(temp, `${JSON.stringify({ version: 1, records }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(temp, this.file);
+  }
 }
 
 function isMissing(error: unknown): boolean {

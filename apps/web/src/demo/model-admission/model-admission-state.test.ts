@@ -74,7 +74,13 @@ describe("model admission state", () => {
     const siliconflow = simulateAdmissionTest(updateAdmissionDraft(createAdmissionDraft("siliconflow"), { apiKey: "sk-demo-12345678" }));
     expect(siliconflow.ok && siliconflow.models[0]).toMatchObject({
       id: "Qwen/Qwen3-8B",
-      capabilities: { streaming: "supported", toolCalls: "supported", reasoning: "supported", usage: "supported" },
+      capabilities: {
+        streaming: "supported",
+        toolCalls: "supported",
+        reasoning: "unverified",
+        usage: "supported",
+        reasoningControl: expect.objectContaining({ control: "fixed", adjustable: false }),
+      },
     });
 
     const responses = simulateAdmissionTest(updateAdmissionDraft(createAdmissionDraft("custom_responses"), {
@@ -138,6 +144,22 @@ describe("model admission state", () => {
 
     storage.setItem(demoModelStudentStorageKey, JSON.stringify([{ id: "unsafe", apiKey: "raw-secret" }]));
     expect(loadSavedModelStudents(storage)).toEqual([]);
+  });
+
+  it("keeps legacy students and normalizes missing reasoning control to a fixed profile", () => {
+    const storage = memoryStorage();
+    const { student } = successfulStudent("legacy-student");
+    const legacyCapabilities: Partial<DemoModelStudent["capabilities"]> = { ...student.capabilities };
+    delete legacyCapabilities.reasoningControl;
+    storage.setItem(demoModelStudentStorageKey, JSON.stringify([{ ...student, capabilities: legacyCapabilities }]));
+
+    expect(loadSavedModelStudents(storage)[0]?.capabilities.reasoningControl).toEqual({
+      schemaVersion: 1,
+      control: "fixed",
+      adjustable: false,
+      supportedProfiles: ["balanced"],
+      defaultProfile: "balanced",
+    });
   });
 
   it("merges saved students ahead of built-ins and replaces matching IDs", () => {

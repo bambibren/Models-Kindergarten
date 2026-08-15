@@ -23,7 +23,8 @@
 ## 不变量
 
 - Agent 生成 `messageId` 和 `toolCallId`；Web 只按不透明 ID 聚合；
-- Tool status 可以独立完成，但只有 PromptResponse 提交整个 `streamingChatEntries`；
+- Tool status 可以独立完成；正常连接由 PromptResponse 提交流，断线恢复后由权威 Turn 终态提交；
 - Permission 是安全决策，Elicitation 是补充信息，二者不混用；
-- `load` 完整回放，`resume` 零回放；
+- `load` 完整回放；`resume` 默认零回放，携带当前 Turn 游标时只补齐断线增量；
 - 每次 Handler 只向当前 `AgentContext` 输出，不跨 Connection 广播。
+- WebSocket 意外断开不取消 Runtime；Web 只显示既有手动重连按钮，不自动重试。停止按钮发送 `session/cancel`，正常离开会话页发送 `session/close`。

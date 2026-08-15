@@ -20,6 +20,7 @@ import type {
   McpToolDescriptor,
 } from "./mcp-types.js";
 import { mcpToolCapabilityId } from "./mcp-types.js";
+import type { McpBinding } from "@kindergarten/contracts";
 
 const RESOURCE_TOOL = "read_mcp_resource";
 
@@ -30,10 +31,14 @@ export class McpToolProvider implements RuntimeToolProvider {
   private readonly validators = new Map<string, ValidateFunction>();
   private readonly resourceIds: Set<string>;
 
-  constructor(private readonly manager: McpClientManager) {
+  constructor(private readonly manager: McpClientManager, agentBindings?: McpBinding[]) {
     const config = manager.config();
     const snapshots = manager.capabilitySnapshots();
-    const configured = new Map(config.agentCapabilities.mcpTools.map((item) => [item.id, item.permission]));
+    const configured = agentBindings === undefined
+      ? new Map(config.agentCapabilities.mcpTools.map((item) => [item.id, item.permission]))
+      : new Map(agentBindings.filter((item) => item.enabled).flatMap((item) => item.tools
+        .filter((tool) => tool.enabled)
+        .map((tool) => [mcpToolCapabilityId(item.mcpInstallationId, tool.remoteName), tool.permission] as const)));
     const ajv = new Ajv({ strict: false, allErrors: true, allowUnionTypes: true });
     for (const snapshot of snapshots) {
       for (const descriptor of snapshot.tools) {
@@ -66,7 +71,11 @@ export class McpToolProvider implements RuntimeToolProvider {
         console.warn(`已配置的 MCP Tool 当前不可用：${capabilityId}`);
       }
     }
-    this.resourceIds = new Set(config.agentCapabilities.resources.map((item) => resourceKey(item.serverId, item.uri)));
+    this.resourceIds = new Set(agentBindings === undefined
+      ? config.agentCapabilities.resources.map((item) => resourceKey(item.serverId, item.uri))
+      : agentBindings.filter((item) => item.enabled).flatMap((item) => item.resources
+        .filter((resource) => resource.enabled)
+        .map((resource) => resourceKey(item.mcpInstallationId, resource.uri))));
     this.definitions = [
       ...[...this.bindings.values()].map(toDefinition),
       ...(this.resourceIds.size > 0 ? [resourceDefinition()] : []),

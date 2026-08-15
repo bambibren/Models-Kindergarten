@@ -1,21 +1,21 @@
 # ModelStudent 入园设计
 
-> 状态：产品与 Demo 方案已确认；真实 Remote、SecretStore 写入和云端 Provider Adapter 尚未实现。  
-> 更新：2026-08-11  
-> 适用：Models Kindergarten 最新 Demo，以及后续真实模型接入开发。  
+> 状态：正式入园链已支持 OpenAI 官方、自定义 Responses 与硅基流动；Ollama 仍由启动配置提供，Anthropic Messages 只保留扩展合同且不显示为可用。
+> 更新：2026-08-15
+> 适用：Models Kindergarten 正式模型入园、相关 Demo 与后续 Provider 扩展。
 > 当前实现事实仍以 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [TECHNICAL_PLAN.md](TECHNICAL_PLAN.md) 为准。
 
 ## 1. 决策摘要
 
-“新模型入园”只支持三个用户入口：
+正式“新模型入园”当前提供三个可用入口：
 
 | 用户入口 | Provider Protocol | 当前状态 |
 |---|---|---|
-| 本地 Ollama | `ollama_native` | 真实 Runtime 已有单实例实现；管理页面未实现 |
-| 硅基流动 | `openai_chat_completions` | Demo 模拟；真实 Adapter 未实现 |
-| 自定义 Responses 接口 | `openai_responses` | Demo 模拟；真实 Adapter 未实现 |
+| OpenAI 官方 | `openai_responses` | 固定官方 API 根地址；复用 Responses Adapter 与主动能力体检 |
+| 自定义 Responses 接口 | `openai_responses` | 可编辑公网 HTTPS Base URL；真实端点体检、Keychain、Catalog、Session/ACP 动态解析 |
+| 硅基流动 | `openai_chat_completions` | 固定官方 API 根地址；独立 Chat Completions Adapter 与主动能力体检 |
 
-本期不展示、不承诺兼容 OpenAI 官方入口、Anthropic、Gemini、DeepSeek、OpenRouter、阿里云百炼、Azure、Bedrock 或 Vertex AI。其他服务即使协议相似，也不作为品牌级兼容范围。
+本地 Ollama 继续作为启动配置模型，不进入本期管理入园页。Anthropic、Gemini、OpenRouter、阿里云百炼、Azure、Bedrock 与 Vertex AI 不显示为可用；其中 Anthropic 只保留 `anthropic_messages` Preset/Adapter 扩展位，不能冒充已实现能力。
 
 模型供应商和协议适配必须分离：
 
@@ -26,13 +26,14 @@ ProviderConnection
               ↓ protocol
 ModelProviderAdapter
   ├─ OllamaNativeAdapter
+  ├─ ResponsesApiAdapter
   ├─ ChatCompletionsAdapter
-  └─ ResponsesApiAdapter
+  └─ AnthropicMessagesAdapter（未来）
               ↓
 ModelStudent
 ```
 
-不为硅基流动、自定义代理分别复制完整 Runtime；它们只提供不同的连接预设并复用对应协议 Adapter。
+OpenAI 官方与自定义 Responses 共享协议 Adapter，但使用不同 Endpoint 策略；硅基流动使用 Chat Completions Adapter。新增同协议服务时优先新增 Preset，只有 wire 语义确实不同才新增 Adapter。
 
 ## 2. 用户认知
 
@@ -50,6 +51,7 @@ ModelStudent
   → 配置并测试连接
   → 读取或填写模型 ID
   → 对选中模型做能力体检
+  → 选择模型默认推理档位
   → 命名并确认入园
 ```
 
@@ -63,7 +65,8 @@ ModelStudent
 type ProviderProtocol =
   | "ollama_native"
   | "openai_chat_completions"
-  | "openai_responses";
+  | "openai_responses"
+  | "anthropic_messages";
 
 type ConnectionState =
   | "unchecked"
@@ -78,7 +81,7 @@ type CapabilityState =
 
 interface ProviderConnection {
   id: string;
-  presetId: "ollama" | "siliconflow" | "custom_responses";
+  presetId: "openai" | "custom_responses" | "siliconflow" | "anthropic";
   name: string;
   protocol: ProviderProtocol;
   baseUrl: string;
@@ -97,7 +100,11 @@ interface ModelStudent {
     streaming: CapabilityState;
     toolCalls: CapabilityState;
     usage: CapabilityState;
-    reasoning: CapabilityState;
+    reasoning: ModelReasoningCapability;
+  };
+  generationDefaults: {
+    reasoningProfile: ConcreteReasoningProfile;
+    temperature?: number;
   };
   state: "checking" | "ready" | "unavailable";
   score: number | null;
@@ -106,20 +113,42 @@ interface ModelStudent {
 }
 ```
 
+正式公开体检结果使用协议中性的原生映射，不能继续把 Responses 的 `effort` 当成所有服务的共同字段：
+
+```ts
+interface ProviderCapabilitySnapshot {
+  protocol: ProviderProtocol;
+  adapterRevision: string;
+  probeVersion: number;
+  connectionFingerprint: string;
+  reasoning: {
+    capability: ModelReasoningCapability;
+    nativeByProfile: Partial<Record<ConcreteReasoningProfile,
+      Record<string, string | number | boolean>>>;
+    acceptedNativeValues: Array<Record<string, string | number | boolean>>;
+  };
+}
+```
+
+`connectionFingerprint` 只覆盖 Preset、协议、规范化 Endpoint 与 Model ID，不包含 Key。`toggle` 用于 `think` / `enable_thinking` 布尔控制，`effort_levels` 用于真正的离散 effort，`token_budget` 用于原生预算；UI 不再把三者都叫作“思考强度”。Capability 中的 `defaultProfile` 保留目标端点体检得到的原始默认事实，不能因用户选择而改写。
+
+推理不能继续使用单个 supported/unsupported 状态。Capability 必须保存控制方式、可用产品档位、体检原始默认和经确认的原生参数范围；用户从 `supportedProfiles` 中选择的有效模型默认值另存为 `ModelStudent.generationDefaults.reasoningProfile`。Session 覆盖与 Turn 快照由另一份领域契约负责，Agent 不保存推理强度。完整定义见 [Model Reasoning Policy](REASONING_POLICY.md)。
+
 ### 3.1 不变量
 
 - 一条 `ProviderConnection` 可以被多个 ModelStudent 引用。
 - Key 轮换只更新 Connection，不复制或重建所有 ModelStudent。
-- ModelStudent 不保存 System Prompt、Skills、MCP、Memory、History 或 Agent 配置。
+- ModelStudent 不保存 System Prompt、Skills、MCP、Memory、History 或 Agent 配置；`systemPrompt` 只能由 Agent 提供。
+- ModelStudent 的 `generationDefaults` 保存用户选择的推理默认档位和可选 `temperature`；Session 唯一允许覆盖的模型执行配置是推理强度，不能覆盖温度。
 - Agent 和 Session 语义不因模型入园而引入 AgentVersion/AgentRevision。
-- Session 后续真实接线通过 `modelStudentId` 解析确切模型连接；本 Demo 只模拟选择结果。
+- Session 通过 `modelStudentId` 解析确切模型连接；Turn 开始时冻结实际 Provider 与推理映射。
 - `credentialRef` 只由 Remote 返回为不透明引用；Web 永远拿不到 Secret 明文。
 
 ## 4. 页面结构
 
 ### 4.1 路由与入口
 
-- 路由：`/demo/model-admission`
+- 正式路由：`/models/new`；旧 Demo 路由只保留历史设计参考。
 - 主入口：模型主页“新模型入园”按钮。
 - 次入口：“我的 Models”中的“新模型入园”。
 - 完成：回到模型主页，并选中新入园的 ModelStudent。
@@ -148,53 +177,52 @@ interface ModelStudent {
 ```text
 ModelAdmissionPage
 ├── AdmissionHeading
-├── AdmissionStepper
 ├── ProviderCards
 ├── ConnectionForm
-│   ├── OllamaFields
+│   ├── OpenAIFields
 │   ├── SiliconFlowFields
 │   └── ResponsesFields
-├── ModelPicker
+├── ModelIdField
 ├── CapabilityProbePanel
+├── GenerationDefaultsFields
+│   ├── DefaultReasoningProfileSelect
+│   └── TemperatureField（协议支持时）
 └── AdmissionActions
 ```
 
-## 5. 三种入口
+ProviderCards 的数据来自 `GET /model-provider-presets`；Web 不维护第二份可用服务商列表。Remote 只返回同时拥有真实 Adapter 的 `ready` Preset，`planned` 项不会出现在页面。
 
-### 5.1 本地 Ollama
+## 5. 三种可用入口
 
-默认字段：
+### 5.1 OpenAI 官方
 
-- 服务地址：`http://127.0.0.1:11434`
-- 不显示 API Key。
-- 连接成功后通过 `/api/tags` 读取本地模型。
-- 必须提示：`localhost` 指 MK Remote 所在机器，不一定是浏览器所在机器。
+字段：
 
-Demo 固定模拟发现 `qwen3:8b` 和 `deepseek-r1:8b`，不发网络请求。
+- OpenAI API Key。
+- 模型 ID。
+- Base URL 由 Remote 固定为官方 API 根地址，浏览器不能提交或覆写。
+- 使用与自定义 Responses 相同的 Adapter 与 Probe，不另外复制 Runtime。
 
-### 5.2 硅基流动
+### 5.2 自定义 Responses 接口
+
+字段：
+
+- HTTPS Base URL。
+- API Key。
+- 模型 ID。
+
+协议固定为 `openai_responses`，不做任意协议自动识别。模型 ID 当前手填；模型列表发现是独立后续能力，页面不能用 `discoverable` 文案暗示已经实现。
+
+### 5.3 硅基流动
 
 默认字段：
 
 - API Key。
 - Base URL 固定为 `https://api.siliconflow.cn/v1`，默认不显示。
-- 测试连接后从 `/models?type=text&sub_type=chat` 读取候选模型。
+- 模型 ID 当前手填；后续可通过独立 discovery API 接入 `/models?type=text&sub_type=chat`。
 - 推理使用 `/chat/completions`；Tool Call 使用 Chat Completions `tools`/`tool_calls` 语义。
 
-Demo 固定模拟候选目录，不保存 Key 原文。
-
-### 5.3 自定义 Responses 接口
-
-字段：
-
-- 连接名称。
-- HTTPS Base URL。
-- API Key。
-- 模型 ID。
-
-协议固定为 `openai_responses`，不做任意协议自动识别。部分第三方接口可能不支持 `/models`，所以模型 ID 是必填字段，模型列表发现只作为可选增强。
-
-页面必须提示：Base URL 不是官方域名时，Key、Prompt、上下文和 Tool 输出都会发送给该第三方服务；用户应只使用信任且用途受限的凭据。
+页面只给出一般性安全说明：凭据与体检内容发送到当前选择的服务，自定义地址必须可信。产品文案不引用某个客户端、配置文件或单次代理地址作为反例。
 
 ## 6. 页面状态机
 
@@ -233,6 +261,8 @@ selecting_provider
 4. 流式输出可结束。
 5. Tool Call 能产生结构化调用。
 6. Usage 是否提供 input/output/cached/reasoning 细项。
+7. 推理控制属于 fixed、effort levels 还是 token budget；支持哪些档位，体检原始默认档位和原生参数分别是什么。
+8. 用户从经体检确认的档位中选择 `generationDefaults.reasoningProfile`；未主动修改时以体检原始默认值初始化。协议允许 temperature 时将其保存为 ModelStudent 默认值，而不是 Session 覆盖。
 
 Tool Call 体检使用无副作用的 `mk_capability_probe`，禁止调用文件、网络、MCP 或其他真实 Tool。协议支持强制 Tool Choice 时才做确定性验证；不能强制时显示“未验证”，不能误判“不支持”。
 
@@ -241,18 +271,21 @@ Tool Call 体检使用无副作用的 `mk_capability_probe`，禁止调用文件
 - 流式输出：支持 / 不支持 / 未验证。
 - Tool Calling：支持 / 不支持 / 未验证。
 - Token Usage：支持 / 不报告 / 未验证。
-- 推理输出：支持 / 未发现 / 未验证。
+- 推理控制：固定 / 可调 / 未验证；可调时列出经体检确认的产品档位。
+
+体检面板展示 Provider 原始默认事实；入园确认区展示用户将要保存的模型默认档位。二者含义不同，即使初始值相同也不能共用一个可变字段。入园后 Session 的 `auto` 文案按有效默认值显示，例如“跟随模型默认 · 均衡”。
 
 模型可在 Tool Call 不支持时入园，但必须显示“仅聊天”，并在选择需要 Tools 的 Agent 时阻止误用或给出明确警告。
 
 ## 8. 协议 Adapter 边界
 
-只维护三个协议 Adapter：
+协议 Adapter 与 Preset 分离：
 
 ```text
 OllamaNativeAdapter
 ChatCompletionsAdapter
 ResponsesApiAdapter
+AnthropicMessagesAdapter（未来）
 ```
 
 ### 8.1 公共连接层
@@ -262,6 +295,7 @@ ResponsesApiAdapter
 - SecretRef 解析和 Bearer 鉴权。
 - Base URL、超时、有限重试和熔断。
 - 错误体裁剪与 Secret 脱敏。
+- SSE 单行、单事件、总流和 HTTP 错误体大小上限。
 - SSRF、DNS 重绑定、重定向和私网策略。
 - 连接测试和能力体检编排。
 
@@ -276,6 +310,8 @@ ResponsesApiAdapter
 - Usage → input/output token 事实。
 - `finish_reason` →统一 finish/error。
 
+硅基流动体检不会按 Model ID 猜推理能力：只有 `enable_thinking=false/true` 都完成，并且输出可观察到从无 `reasoning_content` 到有 `reasoning_content` 的变化时，才声明 `toggle`；否则保持 fixed。未来增加 `thinking_budget` 或 `reasoning_effort` 也必须走目标 Endpoint 主动体检。
+
 ### 8.3 ResponsesApiAdapter
 
 负责把 Responses 协议映射为现有 `ModelEvent`：
@@ -287,17 +323,21 @@ ResponsesApiAdapter
 - input/output/cached/reasoning usage 映射。
 - response completed/failed/cancelled 终止语义。
 
+Responses Adapter 已进入真实 Provider resolver。入园体检会对目标 endpoint 依次验证正式流式终态、`low/medium/high/xhigh`、无副作用 Tool Call 及 `function_call_output` 续轮，并将实测的 `nativeByProfile` 持久化到 ModelStudent；同一 Model ID 在不同 Preset/Base URL 上会独立体检，不共享名称 preset。`store:false` 下的 Provider continuation 使用协议中性信封持久化，只有生成它的确切 ModelStudent/Adapter 可以解释；公开 Session、ACP、Context disclosure、Observation 和 Evaluation 只获得剥离或脱敏投影。上线边界见 [Model Reasoning Policy](REASONING_POLICY.md#10-自定义-responses-入园与-tool-loop-门禁)。
+
 Provider 上游使用 SSE 不改变产品边界：Browser 与 Remote 之间仍然只使用 ACP；Browser 不直接连接硅基流动、自定义 Base URL 或任何 Provider SSE。
 
 ## 9. Secret 与网络安全
 
-- 真实功能中，Key 只从密码输入框提交给 Remote；Demo 不发请求，仅在当前 React 内存状态中短暂保留输入值。
+- 正式页面中，Key 只从密码输入框提交给 Remote；测试成功前仅在页面/Remote 瞬时内存中保留，确认入园后写入 macOS Keychain。
 - Key 不得进入 ModelStudent JSON、Session、Context Summary、Token 统计、Evaluation Trace、URL、日志、`localStorage` 或 `sessionStorage`。
 - 持久层只保存 `credentialRef` 与脱敏尾号；保存后只能替换或删除，不能再次读取明文。
 - 本地部署优先使用 macOS Keychain；远程部署使用受控 Secret Store。
 - 预设的硅基流动 Base URL 不允许普通用户修改。
 - 自定义云端 Base URL 必须是 HTTPS；Ollama 只对受控本机/私网连接类型允许 HTTP。
 - Provider 原始错误可能包含 Header、URL 参数或请求片段，返回 Web 前必须脱敏。
+- 生产 Adapter 默认禁止重定向；不能把可选重定向开关宣传为跨 Origin 安全能力。
+- 当前 macOS `security` 命令写入路径会让 Secret 短暂存在于子进程 argv；这是本机单用户 V1 的已知安全债，远程/多用户部署前必须改用 Security.framework 或等价原生 Secret bridge。
 
 ## 10. 错误投影
 
@@ -318,20 +358,20 @@ type ModelConnectionErrorCode =
 
 用户默认看到可行动文案；脱敏后的上游信息放在“查看技术详情”中。页面不得只显示笼统的“连接失败”。
 
-## 11. Demo 边界
+## 11. Demo 与正式功能边界
 
-本轮 Demo：
+`apps/web/src/demo/**` 仍是确定性设计演示，不请求 Remote，也不代表真实连接结果；其中保存的示例 ModelStudent 不含 Key。正式 `/models/new` 则调用 Control API 完成体检与入园，并由 Remote 持有 Provider 连接、Secret、Catalog 与 Session/ACP 运行接线。
 
-- 只修改 `apps/web/src/demo/**` 和 Demo 路由。
-- 所有检测由确定性定时状态模拟。
-- 输入包含 `invalid` 时可进入失败演示。
-- 成功后只保存不含 Key 的 Demo ModelStudent 与非敏感连接摘要，不保存或回显 Key 原文。
-- 新生返回模型主页后自动选中，并出现在“我的 Models”。
-- 不请求 Remote、Ollama 或硅基流动。
-- 不创建第二个 ACP connection owner。
-- 不修改真实 `apps/web/src/App.tsx`、ACP reducer、Runtime 或 Provider。
+两者不得共享模拟状态或凭据：
 
-## 12. 真实开发分期
+- Demo 只演示页面状态，不声称已连接服务商；
+- 正式页面不读取 Demo `sessionStorage`，也不按输入内容伪造成功；
+- Browser 不直连 Provider，不持久化 Key，不消费上游 SSE；
+- 正式新生由 Remote 保存并在模型主页、“我的 Models”和新 Session 中使用。
+
+## 12. 实施状态与后续分期
+
+当前工作树已经完成 Phase A、Phase B 的 OpenAI Responses 与 SiliconFlow Chat Completions，以及 Phase C 的手填 Model ID、体检、安装、Catalog 和 Session/ACP 动态解析。模型目录发现、Ollama 管理入园、Anthropic Messages、Key 轮换与重新体检仍是后续范围。
 
 ### Phase A：管理领域与 Secret
 
@@ -343,16 +383,16 @@ type ModelConnectionErrorCode =
 ### Phase B：协议 Adapter
 
 - 将现有 Ollama 单实例改为按 Connection resolve。
-- 实现 ResponsesApiAdapter。
-- 实现 ChatCompletionsAdapter，仅配置硅基流动 preset。
+- 将已有 ResponsesApiAdapter（含 opaque reasoning continuation）接入受管 Connection，并实现目标 endpoint 的完整体检门禁；协议核心已有实现。
+- 实现 ChatCompletionsAdapter，并由硅基流动 preset 使用。
 - 建立共享连接层和错误归一化。
 
 ### Phase C：入园与会话接线
 
-- 连接测试、模型发现、模型体检。
+- 连接测试、手填模型 ID、模型体检；模型发现另行实现。
 - Session 保存 `modelStudentId`。
 - Runtime 在 Prompt Turn 开始前解析确切 Provider。
-- 我的 Models 支持替换 Key、重新检测、停用和删除。
+- 我的 Models 已支持列出与删除；替换 Key、重新检测和停用仍是后续管理能力。
 
 ### Phase D：验证与迁移
 
@@ -361,6 +401,7 @@ type ModelConnectionErrorCode =
 - Secret 泄漏扫描。
 - 自定义 URL SSRF/重定向/DNS rebinding 测试。
 - 旧环境变量 Ollama 配置迁移为默认 Connection 与 ModelStudent。
+- AnthropicMessagesAdapter 与对应 tool_use/tool_result、thinking signature continuation。
 
 ## 13. 验收标准
 
@@ -376,14 +417,20 @@ type ModelConnectionErrorCode =
 ### 真实功能
 
 - Browser 不接触 Provider Key 或上游 SSE。
-- Connection、模型发现、最小生成和 Tool Call 事实分别可观测。
+- Connection、手填 Model ID、最小生成和 Tool Call 事实分别可观测；模型目录发现未实现时不得显示为成功步骤。
 - Tool Calling 不支持时不影响纯聊天入园，但不能伪装成 Agent 工具可用。
 - 同一 Connection 可以新增多个 ModelStudent。
 - 任何 Secret 不进入 Session、Context、Trace 或日志。
+- 推理能力按 [Model Reasoning Policy](REASONING_POLICY.md) 持久化，未知自定义模型不会从名称猜测 native effort。
+- ModelStudent 同时保存不可伪造的 capability probe 与用户选择的 `generationDefaults.reasoningProfile`；后者必须属于该模型的 `supportedProfiles`。
+- Agent 不保存推理强度或 temperature；Session 只能覆盖推理强度，Runtime 的 system prompt 只能来自 Agent。
+- OpenAI 官方和自定义 Responses 复用同一个协议 Adapter；固定 Preset 不接受浏览器 Base URL。
+- 硅基流动的能力来自 Chat Completions 主动体检，不套用 Responses effort 表。
+- `GET /model-provider-presets` 只返回拥有真实 Adapter 的 ready 项；未来 Claude 接入不改入园状态机、Secret、Repository、Catalog、Session 或 ACP。
 
 ## 14. 官方依据
 
-- Codex 自定义 Provider 的 `base_url`、OpenAI 鉴权与 `wire_api=responses`：<https://learn.chatgpt.com/docs/config-file/config-reference>
+- OpenAI Responses API 与鉴权：<https://platform.openai.com/docs/api-reference/responses>
 - SiliconFlow OpenAI Chat Completions 快速开始：<https://docs.siliconflow.cn/en/userguide/quickstart>
 - SiliconFlow Function Calling：<https://docs.siliconflow.cn/en/userguide/guides/function-calling>
 - SiliconFlow 模型目录：<https://docs.siliconflow.cn/en/api-reference/models/get-model-list>

@@ -16,45 +16,45 @@ const READ_RESOURCE = "read_skill_resource";
 export class SkillToolProvider implements RuntimeToolProvider {
   readonly providerId = "skill-runtime";
   readonly definitions: ModelToolDefinition[];
-  private readonly allowedIds: Set<string>;
+  private readonly allowedNames: Set<string>;
 
   constructor(
     private readonly registry: SkillRegistry,
-    skillIds: string[],
+    skillNames: string[],
   ) {
-    registry.selected(skillIds);
-    this.allowedIds = new Set(skillIds);
-    this.definitions = skillIds.length > 0 ? definitions : [];
+    registry.selected(skillNames);
+    this.allowedNames = new Set(skillNames);
+    this.definitions = skillNames.length > 0 ? definitions([...this.allowedNames]) : [];
   }
 
   prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     if (call.name !== ACTIVATE && call.name !== READ_RESOURCE) {
       throw new Error(`未知 Skill Runtime Tool: ${call.name}`);
     }
-    const skillId = stringArg(call.arguments.skill_id, "skill_id");
+    const skillName = stringArg(call.arguments.name, "name");
     const path = call.name === READ_RESOURCE
       ? stringArg(call.arguments.path, "path")
       : undefined;
     return {
       id: call.id ?? fallbackId,
       name: call.name,
-      title: call.name === ACTIVATE ? `激活 ${skillId}` : `读取 ${skillId}/${path}`,
+      title: call.name === ACTIVATE ? `加载 ${skillName} 的完整指令` : `读取 ${skillName}/${path}`,
       kind: "read",
-      arguments: { skill_id: skillId, ...(path ? { path } : {}) },
+      arguments: { name: skillName, ...(path ? { path } : {}) },
       permission: "allow",
       locations: [],
       dedupeKey: `skill:${call.name}:${canonicalJson(call.arguments)}`,
       retry: "none",
-      ...(!this.allowedIds.has(skillId) ? { validationError: `当前 AgentVersion 未绑定 Skill: ${skillId}` } : {}),
+      ...(!this.allowedNames.has(skillName) ? { validationError: `当前 Agent 未绑定 Skill: ${skillName}` } : {}),
     };
   }
 
   async execute(call: PreparedToolCall, _context: ToolExecutionContext): Promise<ToolResult> {
-    const skillId = String(call.arguments.skill_id);
+    const skillName = String(call.arguments.name);
     if (call.name === ACTIVATE) {
-      const value = this.registry.instructions(skillId, this.allowedIds);
+      const value = this.registry.instructions(skillName, this.allowedNames);
       const rawOutput = {
-        skillId,
+        name: skillName,
         contentHash: value.record.contentHash,
         instructions: value.content,
       };
@@ -65,9 +65,9 @@ export class SkillToolProvider implements RuntimeToolProvider {
         locations: [],
       };
     }
-    const value = await this.registry.readResource(skillId, String(call.arguments.path), this.allowedIds);
+    const value = await this.registry.readResource(skillName, String(call.arguments.path), this.allowedNames);
     const rawOutput = {
-      skillId,
+      name: skillName,
       contentHash: value.record.contentHash,
       path: value.path,
       content: value.content,
@@ -89,8 +89,8 @@ export class SkillToolProvider implements RuntimeToolProvider {
         schemaHash: toolSchemaHash(definition),
       })),
       mcpServers: [],
-      skills: this.registry.selected([...this.allowedIds]).map((skill) => ({
-        skillId: skill.id,
+      skills: this.registry.selected([...this.allowedNames]).map((skill) => ({
+        name: skill.name,
         contentHash: skill.contentHash,
         source: skill.source.kind,
       })),
@@ -98,16 +98,16 @@ export class SkillToolProvider implements RuntimeToolProvider {
   }
 }
 
-const definitions: ModelToolDefinition[] = [
+function definitions(names: string[]): ModelToolDefinition[] { return [
   {
     type: "function",
     function: {
       name: ACTIVATE,
-      description: "当任务与可用 Skill 描述匹配时，读取该 Skill 的完整执行指令。每个 Skill 在同一 Turn 只需激活一次。",
+      description: "读取并加载当前 Agent 已绑定的一个 Skill 的完整 SKILL.md。安装或绑定只会让 Skill 出现在可用目录中，不等于已经加载；本工具也不执行原始任务。name 必须使用当前 JSON Schema enum 中的值，同一 Turn 已成功加载的 Skill 无需重复调用。",
       parameters: {
         type: "object",
-        properties: { skill_id: { type: "string", description: "上下文可用 Skill 目录中的稳定 ID" } },
-        required: ["skill_id"],
+        properties: { name: { type: "string", enum: names, description: "available_skills 中的 Skill name" } },
+        required: ["name"],
         additionalProperties: false,
       },
     },
@@ -116,19 +116,19 @@ const definitions: ModelToolDefinition[] = [
     type: "function",
     function: {
       name: READ_RESOURCE,
-      description: "读取已绑定 Skill 在 references、assets 或 scripts 中明确引用的文本资源；不会执行脚本。",
+      description: "在 activate_skill 已加载完整 SKILL.md 后，读取其中明确引用的 references、assets 或 scripts 文本资源；不会执行脚本。",
       parameters: {
         type: "object",
         properties: {
-          skill_id: { type: "string" },
+          name: { type: "string", enum: names, description: "已激活 Skill 的 name" },
           path: { type: "string", description: "相对 Skill 根目录的文件路径" },
         },
-        required: ["skill_id", "path"],
+        required: ["name", "path"],
         additionalProperties: false,
       },
     },
   },
-];
+]; }
 
 function stringArg(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} 必须是非空字符串`);

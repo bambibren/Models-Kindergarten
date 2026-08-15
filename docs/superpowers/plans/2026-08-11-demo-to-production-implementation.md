@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **后续范围变更（2026-08-14）：** 本计划最初排除模型入园；该排除已被后续明确需求覆盖。自定义 OpenAI Responses-compatible 入园按 [`2026-08-14-custom-responses-model-admission.md`](2026-08-14-custom-responses-model-admission.md) 独立实施，本文其余边界不变。
+
 **Goal:** 将 `/demo` 中除模型入园、小说真实创作和 Bearer Token 小说 MCP 外的产品体验接入真实主链；首页保留不可点击的小说调研卡片。实验评分实现理解/规划/输出三维人工注释 + Runtime metrics 执行分，四维共同进入等权总分、雷达图、排名和 winner；不实现任何自动评分调用。
 
 **Architecture:** Browser 只有一个 ACP connection owner；对话和实验 lane 执行均使用官方 ACP Session/Prompt，实验 Session 以 purpose 隐藏于普通会话列表。Remote 的 Control API 处理资源 CRUD、草稿、预览、后台 Job 和实验总体状态。Session 固定绑定 ModelStudent/Agent，页面不提供改绑；每个 Turn 保存实际能力与上下文快照。Agent 是单一可变实体，无版本、ETag、归档或迁移系统，最后一次成功保存生效。Skill/MCP 的安装、Agent 绑定、Runtime 可见与执行授权分层实现。
@@ -515,6 +517,8 @@ T3 与 T4 在 T2 后可并行；T8、T9、T10、T11 在 T5 后可并行，但共
 **Steps:**
 
 - [ ] 测试 `/evaluation/experiments/:id` loading/ready/partial failure/error/save，以及 scorecard loading/empty/editing/saving/error。
+- [ ] 测试每个新 Experiment 的 lane 全部完成后，Remote 必须调用该实验绑定的 ModelStudent 生成一次持久化标注工作表：合并需求选项、逐 lane 提取 Workflow、逐 lane 完整分段结果；页面刷新复用已保存工作表，失败重试或显式重新生成才再次调用模型。
+- [ ] 测试工作表生成器不给模型 Tools，也不接受 verdict/score/rank/winner；服务端严格校验 lane 集合，并把模型的分段边界建议规范化为首尾相接、完整覆盖的原文字符范围和 hash。强制重新生成必须删除旧 Scorecard。
 - [ ] 测试 A reuse 标记、B/C usage/stop reason、context/capability diff 和 raw answer 切换。
 - [ ] 测试理解、规划、输出三套人工 annotation facts 的字段校验、保存和刷新恢复；未完成任一人工维度时 status=draft，不得默认 100，不生成 total/rank/winner。
 - [ ] 测试 `runtime_execution_v1`：正常完成、Tool 成功率、错误、权限违规、重复调用、TTFT/总耗时同实验归一化；无 Tool 合法任务、缺失 TTFT、全部耗时相等和失败封顶 59 的边界。
@@ -527,7 +531,7 @@ T3 与 T4 在 T2 后可并行；T8、T9、T10、T11 在 T5 后可并行，但共
 - [ ] Run: `pnpm --filter @kindergarten/evaluation-web typecheck && pnpm --filter @kindergarten/evaluation-web test`。
 - [ ] Commit: `feat(evaluation-web): persist experiment comparisons and manual scores`
 
-**Done when:** 三维人工注释和 Runtime 执行分可跨应用持久查看；四维等权总分、雷达图、排名和 winner 都由真实 scorecard 重建，自动评分无入口/API。
+**Done when:** 每个 Experiment 的需求合并选项、Workflow 和结果分段均由真实 ModelStudent 生成并可重试/恢复；三维人工注释和 Runtime 执行分可跨应用持久查看；四维等权总分、雷达图、排名和 winner 都由真实 scorecard 重建，自动评分无入口/API。
 
 ---
 
@@ -698,7 +702,7 @@ rg -n "sessionStorage|setTimeout|127\.0\.0\.1:5175|novel.*bearer|automatic_score
 ## 最终 Definition of Done
 
 - [ ] 主 TRD 的成功标准全部有自动化证据或可重复手工验证记录。
-- [ ] 差距矩阵非留白项全部关闭；模型入园、自动评分、小说与 Bearer 项仍标留白。
+- [ ] 差距矩阵非留白项全部关闭；自定义 Responses 入园由后续计划交付，自动评分、小说与 Bearer 项仍标留白。
 - [ ] Browser 页面只有一个 ACP connection owner；实验没有第二执行器。
 - [ ] Remote 不保存 Web projection，Web 不保存 Runtime state。
 - [ ] Agent 无版本、ETag、归档或迁移系统；Turn 有不可变事实快照。

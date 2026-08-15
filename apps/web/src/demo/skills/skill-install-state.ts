@@ -68,21 +68,23 @@ export function parseDemoSkillSource(sourceUrl: string): Omit<DemoSkillRecord, "
   try {
     parsed = new URL(sourceUrl.trim());
   } catch {
-    throw new Error("请输入完整的 GitHub Skill 目录地址");
+    throw new Error("请输入完整的 GitHub Skill 地址");
   }
-  if (parsed.protocol !== "https:" || parsed.hostname !== "github.com") {
+  if (parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error("Demo 只接受公开 GitHub HTTPS 地址");
   }
-  const parts = parsed.pathname.split("/").filter(Boolean);
-  if (parts.length < 6 || parts[2] !== "tree") {
-    throw new Error("地址需要指向 GitHub /tree/{ref}/{skill-directory}");
+  const parts = parsed.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  const isRepositoryRoot = parts.length === 2;
+  const isTreeDirectory = parts.length >= 5 && parts[2] === "tree";
+  if (!isRepositoryRoot && !isTreeDirectory) {
+    throw new Error("地址必须指向 GitHub 仓库根目录或仓库内目录");
   }
-  const name = parts.at(-1);
+  const name = parts.at(-1)?.replace(/\.git$/i, "");
   if (!name) throw new Error("Skill 目录名称不能为空");
   return {
     name,
     description: sourceDescriptions[name] ?? "从 GitHub 安装的用户 Skill",
-    sourceUrl: parsed.toString().replace(/\/$/, ""),
+    sourceUrl: parsed.toString().replace(/\.git\/?$/i, "").replace(/\/$/, ""),
   };
 }
 

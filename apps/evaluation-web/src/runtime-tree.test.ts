@@ -17,7 +17,21 @@ describe("Runtime Tree", () => {
 });
 
 function round(id: string, index: number) {
-  return { id, index, startedAt: 0, context: { messages: [], truncatedSourceIds: [] } };
+  return {
+    id,
+    index,
+    startedAt: 0,
+    resolvedReasoning: {
+      schemaVersion: 1 as const,
+      requestedProfile: "auto" as const,
+      resolvedProfile: "balanced" as const,
+      source: "model_default" as const,
+      providerKind: "ollama",
+      model: "fixture",
+      native: {},
+    },
+    context: { messages: [], truncatedSourceIds: [] },
+  };
 }
 
 function tool(toolCallId: string, modelRoundId: string, startedAt: number, completedAt: number) {

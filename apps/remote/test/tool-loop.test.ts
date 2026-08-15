@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
-import { makePromptMeta } from "@kindergarten/contracts";
+import { TURN_STATE_NOTIFICATION, makePromptMeta, makeSessionBindingMeta, readTurnStateNotification, type TurnState } from "@kindergarten/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { KindergartenAgent } from "../src/acp/kindergarten-agent.js";
 import type {
@@ -17,6 +17,7 @@ import { SessionRepository } from "../src/repository/session-repository.js";
 import { AgentRuntime } from "../src/runtime/agent-runtime.js";
 import { FileSandbox } from "../src/tools/sandbox.js";
 import { ToolRegistry } from "../src/tools/tool-registry.js";
+import { SessionBindingService } from "../src/session/session-binding-service.js";
 
 const tempDirs: string[] = [];
 
@@ -31,18 +32,24 @@ describe("Tool Loop", () => {
     const dir = await tempDir();
     const sandbox = new FileSandbox(join(dir, "sandbox"));
     await sandbox.initialize();
+    const sessions = new SessionRepository(join(dir, "data"));
     const agent = new KindergartenAgent(
-      new SessionRepository(join(dir, "data")),
+      sessions,
       AgentRuntime.fromRegistry(new ScriptedToolProvider(), new ToolRegistry(sandbox)),
+      testBindings(),
     ).createApp();
 
     const updates: acp.SessionNotification[] = [];
     const permissions: acp.RequestPermissionRequest[] = [];
     const questions: acp.CreateElicitationRequest[] = [];
+    const turnStates: TurnState[] = [];
     const clientApp = acp
       .client({ name: "tool-test-client" })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         updates.push(params);
+      })
+      .onNotification(TURN_STATE_NOTIFICATION, { parse: readTurnStateNotification }, ({ params }) => {
+        turnStates.push(params.turn);
       })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {
         permissions.push(params);
@@ -60,6 +67,7 @@ describe("Tool Loop", () => {
     const session = await client.agent.request(acp.methods.agent.session.new, {
       cwd: "/workspace",
       mcpServers: [],
+      _meta: makeSessionBindingMeta({ schemaVersion: 1, modelStudentId: "student-1", agentId: "agent-1" }),
     });
 
     const response = await client.agent.request(acp.methods.agent.session.prompt, {
@@ -86,6 +94,14 @@ describe("Tool Loop", () => {
       notice.update.sessionUpdate === "tool_call_update" &&
       notice.update.status === "completed",
     )).toHaveLength(3);
+    expect(turnStates).toContainEqual(expect.objectContaining({ status: "active", phase: "preparing_context" }));
+    expect(turnStates).toContainEqual(expect.objectContaining({ status: "active", phase: "model_streaming" }));
+    expect(turnStates).toContainEqual(expect.objectContaining({ status: "active", phase: "tool_execution" }));
+    expect(turnStates.at(-1)).toEqual({ schemaVersion: 1, turnId: "tool-turn", status: "completed" });
+    expect((await sessions.get(session.sessionId)).turns[0]).toMatchObject({
+      state: { status: "completed" },
+      stopReason: "end_turn",
+    });
 
     updates.length = 0;
     await client.agent.request(acp.methods.agent.session.load, {
@@ -113,12 +129,22 @@ describe("Tool Loop", () => {
   });
 });
 
+function testBindings(): SessionBindingService {
+  return new SessionBindingService({
+    workspaceCwd: "/workspace",
+    agentExists: (id) => id === "agent-1",
+    modelStudentReady: (id) => id === "student-1",
+    experimentBinding: async () => undefined,
+  });
+}
+
 class ScriptedToolProvider implements ModelProvider {
   readonly student: ModelStudent = {
     id: "tool-fixture",
     name: "Tool Fixture",
+    sizeClass: "large",
     provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
-    agentConfig: { systemPrompt: "test" },
+    generationDefaults: {},
   };
   serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     const value = fragment.kind === "system"

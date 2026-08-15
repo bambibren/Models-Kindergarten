@@ -26,6 +26,11 @@ import { SkillInstaller } from "../src/skills/skill-installer.js";
 import { SkillLockStore } from "../src/skills/skill-lock-store.js";
 import { SkillRegistry } from "../src/skills/skill-registry.js";
 import { SkillToolProvider } from "../src/skills/skill-tool-provider.js";
+import {
+  configuredSkillContextVersion,
+  skillUseProtocol,
+} from "../src/skills/skill-context.js";
+import { prepareToolCall } from "../src/tools/tool-call-preparer.js";
 import type { PreparedToolCall, ToolOutcome } from "../src/tools/tool-registry.js";
 import { ToolCallLedger, ToolRuntime, type ToolObserver } from "../src/tools/tool-runtime.js";
 
@@ -202,7 +207,7 @@ allowed-tools: read_file
       source: { kind: "local", path: source },
       approved: true,
     });
-    expect(record.id).toBe("skill:demo-skill");
+    expect(record.name).toBe("demo-skill");
     expect(record.contentHash).toMatch(/^[0-9a-f]{64}$/);
 
     const registry = new SkillRegistry([{
@@ -212,22 +217,63 @@ allowed-tools: read_file
       source: "user",
     }], lock);
     await registry.initialize();
-    const provider = new SkillToolProvider(registry, [record.id]);
-    const activate = provider.prepare({ name: "activate_skill", arguments: { skill_id: record.id } }, "a1");
+    const provider = new SkillToolProvider(registry, [record.name]);
+    const activateDefinition = provider.definitions.find((item) => item.function.name === "activate_skill");
+    expect(activateDefinition?.function.description).toContain("不等于已经加载");
+    expect(activateDefinition?.function.description).toContain("完整 SKILL.md");
+    const invalidActivation = prepareToolCall(provider, {
+      name: "activate_skill",
+      arguments: { skillName: record.name, parameters: { theme: "kawaii" } },
+    }, "invalid-activation");
+    expect(invalidActivation.validationError).toMatchObject({
+      validationErrors: expect.arrayContaining([
+        expect.objectContaining({ keyword: "required", parameter: "name" }),
+        expect.objectContaining({ keyword: "additionalProperties", parameter: "skillName" }),
+        expect.objectContaining({ keyword: "additionalProperties", parameter: "parameters" }),
+      ]),
+      schemaCorrection: {
+        expectedSchema: {
+          properties: { name: { enum: [record.name] } },
+          required: ["name"],
+          additionalProperties: false,
+        },
+      },
+    });
+    const activate = provider.prepare({ name: "activate_skill", arguments: { name: record.name } }, "a1");
     const activated = await provider.execute(activate, testContext());
-    expect(activated.rawOutput).toMatchObject({ skillId: record.id, contentHash: record.contentHash });
+    expect(activated.rawOutput).toMatchObject({ name: record.name, contentHash: record.contentHash });
     expect(activated.modelContent).toContain("references/GUIDE.md");
 
     const read = provider.prepare({
       name: "read_skill_resource",
-      arguments: { skill_id: record.id, path: "references/GUIDE.md" },
+      arguments: { name: record.name, path: "references/GUIDE.md" },
     }, "a2");
     const resource = await provider.execute(read, testContext());
     expect(resource.modelContent).toContain("只读取需要的参考内容");
 
-    const context = await new SkillCatalogContextSource(registry, [record.id]).load(new AbortController().signal);
+    const context = await new SkillCatalogContextSource(registry, [record.name]).load(new AbortController().signal);
     expect(context[0]?.content).toContain("demo-skill");
+    expect(context[0]?.content).toContain(JSON.stringify([{
+      name: "demo-skill",
+      description: "演示渐进加载。用户要求演示 Skill 时使用。",
+      trust: "approved",
+    }]));
+    expect(context[0]?.content).not.toContain("安装或绑定只代表可用");
+    expect(context[0]?.content).not.toContain("activate_skill({");
+    expect(context[0]?.content).not.toContain("逐个调用 activate_skill");
+    expect(context[0]?.content).not.toContain("skill:demo-skill");
     expect(context[0]?.content).not.toContain("references/GUIDE.md");
+    expect(skillUseProtocol("v1")).toContain("当前 JSON Schema");
+    expect(skillUseProtocol("v1")).toContain("activate_skill");
+    expect(skillUseProtocol("v1")).not.toContain("demo-skill");
+    expect(skillUseProtocol("v1")).not.toContain("sandbox-notes");
+    expect(() => configuredSkillContextVersion("v2")).toThrow("不支持的 Skill 上下文版本: v2");
+    expect(() => provider.prepare({ name: "activate_skill", arguments: { name: "skill:demo-skill" } }, "bad"))
+      .not.toThrow();
+    expect(provider.prepare({ name: "activate_skill", arguments: { name: "skill:demo-skill" } }, "bad").validationError)
+      .toContain("未绑定 Skill");
+    expect(() => provider.prepare({ name: "activate_skill", arguments: { skill_id: record.name } }, "legacy"))
+      .toThrow("name 必须是非空字符串");
   });
 
   it("拒绝包含符号链接的 Skill", async () => {

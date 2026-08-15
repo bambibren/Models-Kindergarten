@@ -4,50 +4,106 @@ import type { ToolCallStatus } from "@agentclientprotocol/sdk";
 import type {
   ContextSummary,
   ContextSummaryItem,
+  AgentRecord,
+  ResolvedReasoningSnapshot,
 } from "@kindergarten/contracts";
 import {
   ContextAssembler,
   observeMessage,
+  rebudgetContextMessages,
+  replaceContextSegmentsInPlace,
   type ContextBuildResult,
 } from "../conversation/context-assembler.js";
-import type {
-  ModelProvider,
-  ModelToolCall,
-  ModelToolDefinition,
-  ModelUsage,
+import {
+  modelInputMessageCapacity,
+  type ModelProvider,
+  type ModelMessage,
+  type ModelToolCall,
+  type ModelToolDefinition,
+  type ModelUsage,
 } from "../model/model-provider.js";
+import type { ProviderOpaqueContinuation } from "../model/provider-continuation.js";
 import type { SessionEntry } from "../repository/session-types.js";
 import {
   noopRuntimeObservationSink,
   type RuntimeObservationSink,
 } from "@kindergarten/runtime-observation";
-import { toRunFailure } from "./run-failure.js";
+import { RunFailure, toRunFailure } from "./run-failure.js";
 import {
   ToolCallLedger,
   ToolRuntime,
 } from "../tools/tool-runtime.js";
+import { prepareToolCall } from "../tools/tool-call-preparer.js";
 import type {
   PreparedToolCall,
   ToolOutcome,
   ToolRegistryPort,
 } from "../tools/tool-registry.js";
+import type { RuntimeCapabilityResolverPort } from "../capability/runtime-capability-resolver.js";
+import type { TurnScope } from "./turn-scope.js";
+import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.js";
+import type { ModelContextSerialization } from "../model/model-provider.js";
+import { resolveReasoning } from "../reasoning/reasoning-resolver.js";
+import type { TurnActivePhase, TurnWaitingState } from "@kindergarten/contracts";
+import type { RepeatedInvalidToolCallGuardFactory } from "./repeated-invalid-tool-call-guard.js";
+import {
+  configuredSkillContextVersion,
+  skillUseProtocol,
+} from "../skills/skill-context.js";
+
+const MODEL_OUTPUT_CONTRACT = [
+  "【每轮响应契约】",
+  "- 如果仍需执行操作，必须返回至少一个符合当前工具 Schema 的工具调用。",
+  "- 如果不再需要调用工具，必须返回非空的最终正文，供用户直接阅读。",
+  "- thinking/analysis 只用于内部推理，不能替代工具调用或最终正文；不要用只有 thinking/analysis 的响应结束一轮。",
+].join("\n");
 
 export interface RunInput {
   text: string;
   sessionEntries: SessionEntry[];
   sessionId?: string;
   turnId?: string;
+  scope?: TurnScope;
 }
 
 export interface RunObserver {
   context(summary: ContextSummary): Promise<void>;
+  phase?(phase: TurnActivePhase, waitingFor?: TurnWaitingState): Promise<void>;
+  turnSnapshot?(facts: RuntimeTurnSnapshot): Promise<void>;
+  capabilitySnapshot?(generation: number, hash: string, snapshot: RuntimeCapabilitySnapshot): Promise<void>;
+  modelRoundStarted?(facts: RuntimeModelRoundSnapshot): Promise<void>;
+  modelRoundCompleted?(round: number, completedAt: string): Promise<void>;
   text(round: number, value: string): Promise<void>;
   thought(round: number, value: string): Promise<void>;
   roundComplete(round: number): Promise<void>;
+  providerContinuation?(
+    round: number,
+    continuation: ProviderOpaqueContinuation,
+    calls: ModelToolCall[],
+  ): Promise<void>;
   toolStart(call: PreparedToolCall): Promise<void>;
   toolFinish(call: PreparedToolCall, status: ToolCallStatus, result: ToolOutcome): Promise<void>;
   requestPermission(call: PreparedToolCall): Promise<boolean>;
   askUser(question: string, toolCallId: string): Promise<string>;
+}
+
+export interface RuntimeTurnSnapshot {
+  modelStudentId: string;
+  providerKind: string;
+  model: string;
+  agentId: string;
+  agentSnapshotHash: string;
+  agentSnapshot: Pick<AgentRecord, "systemPrompt" | "builtinTools" | "skills" | "mcps" | "historyPolicy" | "memoryPolicy">;
+  resolvedReasoning: ResolvedReasoningSnapshot;
+}
+
+export interface RuntimeModelRoundSnapshot {
+  roundIndex: number;
+  capabilityGeneration: number;
+  contextSummary: ContextSummary;
+  providerInput: ModelContextSerialization;
+  startedAt: string;
+  resolvedReasoning: ResolvedReasoningSnapshot;
 }
 
 export interface ModelRoundUsage extends ModelUsage {
@@ -63,6 +119,7 @@ export interface RunResult {
   runId: string;
   reason: "stop" | "length" | "cancelled";
   usage: TurnModelUsage;
+  fileRelativePaths: string[];
 }
 
 /** AgentRuntime 聚合完整能力；AgentRunner 只执行一次 session/prompt。 */
@@ -74,8 +131,17 @@ export class AgentRuntime {
     readonly tools: ToolRuntime,
     context = new ContextAssembler(),
     observations: RuntimeObservationSink = noopRuntimeObservationSink,
+    private readonly resolver?: RuntimeCapabilityResolverPort,
+    repeatedInvalidToolCallGuardFactory?: RepeatedInvalidToolCallGuardFactory,
   ) {
-    this.runner = new AgentRunner(model, tools, context, observations);
+    this.runner = new AgentRunner(
+      model,
+      tools,
+      context,
+      observations,
+      resolver,
+      repeatedInvalidToolCallGuardFactory,
+    );
   }
 
   static fromRegistry(
@@ -97,42 +163,128 @@ export class AgentRunner {
     private readonly tools: ToolRuntime,
     private readonly context: ContextAssembler,
     private readonly observations: RuntimeObservationSink,
+    private readonly resolver?: RuntimeCapabilityResolverPort,
+    private readonly repeatedInvalidToolCallGuardFactory?: RepeatedInvalidToolCallGuardFactory,
   ) {}
 
   async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<RunResult> {
     const runId = randomUUID();
     const startedAt = Date.now();
-    const built = await this.context.buildObserved(input.sessionEntries, input.text, signal);
+    await observer.phase?.("preparing_context");
+    const resolved = input.scope && this.resolver ? await this.resolver.resolve(input.scope, input.text) : undefined;
+    const model = resolved?.model ?? this.model;
+    const repeatedInvalidToolCallGuard = this.repeatedInvalidToolCallGuardFactory?.(model.student);
+    const tools = resolved?.tools ?? this.tools;
+    const context = resolved?.context ?? this.context;
+    const agentSystemPrompt = resolved?.agent.systemPrompt ?? "";
+    const systemPrompt = appendRuntimeContracts(agentSystemPrompt);
+    const reasoningCapability = model.reasoningCapability ?? {
+      schemaVersion: 1 as const,
+      control: "fixed" as const,
+      adjustable: false,
+      supportedProfiles: ["balanced" as const],
+      defaultProfile: "balanced" as const,
+    };
+    const resolvedReasoning = resolveReasoning({
+      providerKind: model.student.provider.kind,
+      model: model.student.provider.model,
+      capability: reasoningCapability,
+      modelDefault: model.student.generationDefaults.reasoningProfile ?? reasoningCapability.defaultProfile,
+      ...(input.scope?.reasoningOverride ? { sessionOverride: input.scope.reasoningOverride } : {}),
+      native: (profile) => model.nativeReasoning?.(profile) ?? {},
+    });
+    const built = await context.buildObserved(input.sessionEntries, input.text, signal);
+    const initialMessageCapacity = modelInputMessageCapacity(
+      model,
+      tools.registry.definitions.length > 0,
+    );
+    if (initialMessageCapacity !== undefined) {
+      try {
+        applyMessageBudget(built, initialMessageCapacity);
+      } catch (error) {
+        throw new RunFailure(
+          errorText(error),
+          "MODEL_INPUT_MESSAGE_LIMIT",
+          false,
+          { cause: error },
+        );
+      }
+    }
     const messages = built.messages;
     const contextObservations = built.observations;
-    const toolDefinitions = structuredClone(this.tools.registry.definitions);
-    const capabilitySnapshot = structuredClone(this.tools.registry.capabilitySnapshot());
+    let currentTools = tools;
+    let currentResolved = resolved;
+    let capabilityGeneration = 1;
+    const fileRelativePaths = new Set<string>();
+    let toolDefinitions = structuredClone(currentTools.registry.definitions);
+    let capabilitySnapshot = structuredClone(currentTools.registry.capabilitySnapshot());
     const ledger = new ToolCallLedger();
     const roundUsages: ModelRoundUsage[] = [];
     let modelRequests = 0;
     const observed = new ObservedRunObserver(observer, this.observations, runId);
-    await observed.context(contextSummary(
+    const firstContextSummary = buildContextSummary(
       input.turnId ?? runId,
-      this.model,
+      model,
+      systemPrompt,
       toolDefinitions,
       built,
-    ));
+    );
+    await observed.context(firstContextSummary);
+    if (resolved) {
+      await observed.turnSnapshot({
+        modelStudentId: model.student.id,
+        providerKind: model.student.provider.kind,
+        model: model.student.provider.model,
+        agentId: resolved.agent.agentId,
+        agentSnapshotHash: resolved.agentSnapshotHash,
+        agentSnapshot: {
+          systemPrompt: resolved.agent.systemPrompt,
+          builtinTools: structuredClone(resolved.agent.builtinTools),
+          skills: structuredClone(resolved.agent.skills),
+          mcps: structuredClone(resolved.agent.mcps),
+          historyPolicy: structuredClone(resolved.agent.historyPolicy),
+          memoryPolicy: structuredClone(resolved.agent.memoryPolicy),
+        },
+        resolvedReasoning,
+      });
+      await observed.capabilitySnapshot(capabilityGeneration, resolved.capabilityHash, capabilitySnapshot);
+    }
     this.observations.emit({
       type: "turn_started",
       runId,
       sessionId: input.sessionId ?? `runtime:${runId}`,
       turnId: input.turnId ?? runId,
       startedAt,
+      resolvedReasoning: structuredClone(resolvedReasoning),
       variant: variantSnapshot(
-        this.model,
+        model,
+        systemPrompt,
         toolDefinitions.map((tool) => tool.function.name),
         capabilitySnapshot,
       ),
     });
 
     for (let round = 0; ; round += 1) {
+      const messageCapacity = modelInputMessageCapacity(model);
+      if (messageCapacity !== undefined) {
+        try {
+          applyMessageBudget(built, messageCapacity);
+        } catch (error) {
+          const failure = new RunFailure(
+            errorText(error),
+            "MODEL_INPUT_MESSAGE_LIMIT",
+            false,
+            { cause: error },
+          );
+          this.runtimeError(runId, "turn", failure);
+          this.completeTurn(runId, "failed", "resource_limit");
+          throw failure;
+        }
+      }
+      await observed.phase("model_streaming");
       modelRequests += 1;
       const roundId = `${runId}:round:${round}`;
+      const roundStartedAt = new Date().toISOString();
       observed.enterRound(roundId);
       this.observations.emit({
         type: "model_round_started",
@@ -140,10 +292,11 @@ export class AgentRunner {
         roundId,
         index: round,
         startedAt: Date.now(),
+        resolvedReasoning: structuredClone(resolvedReasoning),
         context: {
           messages: [
             observeMessage(
-              { role: "system", content: this.model.student.agentConfig.systemPrompt },
+              { role: "system", content: systemPrompt },
               "system",
               "system-prompt",
             ),
@@ -158,12 +311,23 @@ export class AgentRunner {
       const calls = new Map<string, ModelToolCall>();
       let firstTokenSeen = false;
       let roundUsage: ModelUsage | undefined;
+      let providerOpaqueContinuation: ProviderOpaqueContinuation | undefined;
+      const modelInput = { systemPrompt, messages, tools: toolDefinitions, reasoning: resolvedReasoning } satisfies import("../model/model-provider.js").ModelInput;
+      await observed.modelRoundStarted({
+        roundIndex: round,
+        capabilityGeneration,
+        contextSummary: buildContextSummary(input.turnId ?? runId, model, systemPrompt, toolDefinitions, {
+          ...built,
+          messages: structuredClone(messages),
+          observations: structuredClone(contextObservations),
+        }),
+        providerInput: serializeModelInput(model, modelInput),
+        startedAt: roundStartedAt,
+        resolvedReasoning,
+      });
 
       try {
-        for await (const event of this.model.stream(
-          { messages, tools: toolDefinitions },
-          signal,
-        )) {
+        for await (const event of model.stream(modelInput, signal)) {
           if (
             !firstTokenSeen &&
             (event.type === "text_delta" ||
@@ -186,6 +350,8 @@ export class AgentRunner {
             await observed.thought(round, event.text);
           } else if (event.type === "tool_calls") {
             for (const call of event.calls) calls.set(toolCallKey(call), call);
+          } else if (event.type === "provider_continuation") {
+            providerOpaqueContinuation = structuredClone(event.continuation);
           } else if (event.type === "usage") {
             roundUsage = mergeUsage(roundUsage, event);
             this.observations.emit({
@@ -194,6 +360,8 @@ export class AgentRunner {
               roundId,
               ...(event.inputTokens !== undefined ? { inputTokens: event.inputTokens } : {}),
               ...(event.outputTokens !== undefined ? { outputTokens: event.outputTokens } : {}),
+              ...(event.cachedInputTokens !== undefined ? { cachedInputTokens: event.cachedInputTokens } : {}),
+              ...(event.reasoningOutputTokens !== undefined ? { reasoningOutputTokens: event.reasoningOutputTokens } : {}),
             });
           } else if (event.type === "finish") {
             reason = event.reason;
@@ -206,6 +374,7 @@ export class AgentRunner {
             runId,
             reason: "cancelled",
             usage: aggregateUsage(modelRequests, roundUsages),
+            fileRelativePaths: [...fileRelativePaths],
           };
         }
         this.runtimeError(runId, "model", error);
@@ -227,19 +396,57 @@ export class AgentRunner {
           ...(thinking ? { thinking } : {}),
         },
       });
+      const modelCalls = [...calls.values()].toSorted(compareToolCallOrder);
+      if (providerOpaqueContinuation) {
+        await observed.providerContinuation(
+          round,
+          providerOpaqueContinuation,
+          modelCalls,
+        );
+      }
+      await observed.modelRoundCompleted(round, new Date().toISOString());
       await observed.roundComplete(round);
-      const modelCalls = [...calls.values()];
-      if (modelCalls.length === 0) {
-        this.completeTurn(runId, reason === "cancelled" ? "cancelled" : "completed", reason);
+      const outcome = resolveModelResponse({ content, thinking, calls: modelCalls, reason });
+      if (outcome.kind === "cancelled") {
+        this.completeTurn(runId, "cancelled", "cancelled");
+        return {
+          runId,
+          reason: "cancelled",
+          usage: aggregateUsage(modelRequests, roundUsages),
+          fileRelativePaths: [...fileRelativePaths],
+        };
+      }
+      if (outcome.kind === "truncated") {
+        const failure = new RunFailure(
+          "模型回答因输出长度限制被截断，当前 Turn 未完成",
+          "MODEL_OUTPUT_TRUNCATED",
+          true,
+        );
+        this.runtimeError(runId, "model", failure);
+        this.completeTurn(runId, "failed", "length");
+        throw failure;
+      }
+      if (outcome.kind === "invalid") {
+        const message = outcome.reason === "thinking_only"
+          ? "模型只有思考过程，没有返回工具调用或最终正文"
+          : "模型没有返回工具调用或最终正文";
+        const failure = new RunFailure(message, "EMPTY_ASSISTANT_RESPONSE", true);
+        this.runtimeError(runId, "model", failure);
+        this.completeTurn(runId, "failed", "invalid_model_output");
+        throw failure;
+      }
+      if (outcome.kind === "final") {
+        this.completeTurn(runId, "completed", reason);
         return {
           runId,
           reason,
           usage: aggregateUsage(modelRequests, roundUsages),
+          fileRelativePaths: [...fileRelativePaths],
         };
       }
 
       const prepared = modelCalls.map((call, index) =>
-        prepareCall(this.tools.registry, call, `${randomUUID()}:${index}`),
+        ({ modelCall: call, call: prepareToolCall(currentTools.registry, call, `${randomUUID()}:${index}`) }),
       );
       const assistantMessage = {
         role: "assistant",
@@ -250,7 +457,10 @@ export class AgentRunner {
           name: modelCall.name,
           arguments: modelCall.arguments,
         })),
-      } satisfies import("../model/model-provider.js").ModelMessage;
+        ...(providerOpaqueContinuation
+          ? { providerOpaqueContinuation: structuredClone(providerOpaqueContinuation) }
+          : {}),
+      } satisfies ModelMessage;
       messages.push(assistantMessage);
       contextObservations.push(observeMessage(
         assistantMessage,
@@ -260,7 +470,8 @@ export class AgentRunner {
 
       let batch;
       try {
-        batch = await this.tools.executeBatch(
+        await observed.phase("tool_execution");
+        batch = await currentTools.executeBatch(
           prepared.map((item) => item.call),
           observed,
           ledger,
@@ -273,6 +484,7 @@ export class AgentRunner {
             runId,
             reason: "cancelled",
             usage: aggregateUsage(modelRequests, roundUsages),
+            fileRelativePaths: [...fileRelativePaths],
           };
         }
         this.runtimeError(runId, "tool_runtime", error);
@@ -292,6 +504,42 @@ export class AgentRunner {
         } satisfies import("../model/model-provider.js").ModelMessage;
         messages.push(toolMessage);
         contextObservations.push(observeMessage(toolMessage, "tool_result", item.call.id));
+        outcome.effects?.fileRelativePaths?.forEach((path) => fileRelativePaths.add(path));
+      }
+      const exhaustedCall = repeatedInvalidToolCallGuard?.inspect(
+        round,
+        prepared.map((item) => item.call),
+        batch.outcomes,
+      );
+      if (exhaustedCall) {
+        const failure = new RunFailure(
+          `工具 ${exhaustedCall.toolName} 在同一用户 Turn 的 ${exhaustedCall.attempts} 个模型轮中重复提交完全相同的无效参数，已结束当前用户 Turn`,
+          "TOOL_ARGUMENT_RETRY_LIMIT",
+          false,
+        );
+        this.runtimeError(runId, "turn", failure);
+        this.completeTurn(runId, "failed", "resource_limit");
+        throw failure;
+      }
+      if (input.scope && this.resolver && batch.outcomes.some((item) => item.effects?.capabilitiesChanged)) {
+        const next = await this.resolver.resolve(input.scope, input.text);
+        if (next.capabilityHash !== currentResolved?.capabilityHash) {
+          currentResolved = next;
+          currentTools = next.tools;
+          toolDefinitions = structuredClone(currentTools.registry.definitions);
+          capabilitySnapshot = structuredClone(currentTools.registry.capabilitySnapshot());
+          const refreshed = await next.context.buildObserved([], "", signal);
+          replaceContextSegmentsInPlace(built, refreshed.segments);
+          capabilityGeneration += 1;
+          this.observations.emit({
+            type: "capability_generation_changed",
+            runId,
+            generation: capabilityGeneration,
+            hash: next.capabilityHash,
+            at: Date.now(),
+          });
+          await observed.capabilitySnapshot(capabilityGeneration, next.capabilityHash, capabilitySnapshot);
+        }
       }
     }
   }
@@ -323,6 +571,21 @@ export class AgentRunner {
       ...(stopReason ? { stopReason } : {}),
     });
   }
+}
+
+function applyMessageBudget(built: ContextBuildResult, maxMessages: number): void {
+  const budgeted = rebudgetContextMessages(
+    built.messages,
+    built.observations,
+    maxMessages,
+  );
+  built.messages.splice(0, built.messages.length, ...budgeted.messages);
+  built.observations.splice(0, built.observations.length, ...budgeted.observations);
+  built.truncatedSourceIds.splice(
+    0,
+    built.truncatedSourceIds.length,
+    ...new Set([...built.truncatedSourceIds, ...budgeted.truncatedSourceIds]),
+  );
 }
 
 function mergeUsage(current: ModelUsage | undefined, next: ModelUsage): ModelUsage {
@@ -370,6 +633,7 @@ function sumUsageField<K extends keyof ModelUsage>(
 
 class ObservedRunObserver implements RunObserver {
   private roundId = "";
+  private readonly waitingFor: TurnWaitingState = { permission: 0, input: 0 };
 
   constructor(
     private readonly delegate: RunObserver,
@@ -379,9 +643,21 @@ class ObservedRunObserver implements RunObserver {
 
   enterRound(roundId: string): void { this.roundId = roundId; }
   context(summary: ContextSummary): Promise<void> { return this.delegate.context(summary); }
+  phase(phase: TurnActivePhase, waitingFor?: TurnWaitingState): Promise<void> { return this.delegate.phase?.(phase, waitingFor) ?? Promise.resolve(); }
+  turnSnapshot(facts: RuntimeTurnSnapshot): Promise<void> { return this.delegate.turnSnapshot?.(facts) ?? Promise.resolve(); }
+  capabilitySnapshot(generation: number, hash: string, snapshot: RuntimeCapabilitySnapshot): Promise<void> { return this.delegate.capabilitySnapshot?.(generation, hash, snapshot) ?? Promise.resolve(); }
+  modelRoundStarted(facts: RuntimeModelRoundSnapshot): Promise<void> { return this.delegate.modelRoundStarted?.(facts) ?? Promise.resolve(); }
+  modelRoundCompleted(round: number, completedAt: string): Promise<void> { return this.delegate.modelRoundCompleted?.(round, completedAt) ?? Promise.resolve(); }
   text(round: number, value: string): Promise<void> { return this.delegate.text(round, value); }
   thought(round: number, value: string): Promise<void> { return this.delegate.thought(round, value); }
   roundComplete(round: number): Promise<void> { return this.delegate.roundComplete(round); }
+  providerContinuation(
+    round: number,
+    continuation: ProviderOpaqueContinuation,
+    calls: ModelToolCall[],
+  ): Promise<void> {
+    return this.delegate.providerContinuation?.(round, continuation, calls) ?? Promise.resolve();
+  }
 
   async toolStart(call: PreparedToolCall): Promise<void> {
     this.observations.emit({
@@ -418,25 +694,43 @@ class ObservedRunObserver implements RunObserver {
   }
 
   async requestPermission(call: PreparedToolCall): Promise<boolean> {
-    const allowed = await this.delegate.requestPermission(call);
-    this.observations.emit({
-      type: "permission_decided",
-      runId: this.runId,
-      toolCallId: call.id,
-      required: true,
-      decision: allowed ? "allowed" : "denied",
-      decidedAt: Date.now(),
-    });
-    return allowed;
+    await this.changeWaiting("permission", 1);
+    try {
+      const allowed = await this.delegate.requestPermission(call);
+      this.observations.emit({
+        type: "permission_decided",
+        runId: this.runId,
+        toolCallId: call.id,
+        required: true,
+        decision: allowed ? "allowed" : "denied",
+        decidedAt: Date.now(),
+      });
+      return allowed;
+    } finally {
+      await this.changeWaiting("permission", -1);
+    }
   }
 
-  askUser(question: string, toolCallId: string): Promise<string> {
-    return this.delegate.askUser(question, toolCallId);
+  async askUser(question: string, toolCallId: string): Promise<string> {
+    await this.changeWaiting("input", 1);
+    try {
+      return await this.delegate.askUser(question, toolCallId);
+    } finally {
+      await this.changeWaiting("input", -1);
+    }
+  }
+
+  private async changeWaiting(kind: keyof TurnWaitingState, delta: 1 | -1): Promise<void> {
+    const next = this.waitingFor[kind] + delta;
+    if (next < 0) throw new Error(`Turn waitingFor.${kind} 计数下溢`);
+    this.waitingFor[kind] = next;
+    await this.phase("tool_execution", { ...this.waitingFor });
   }
 }
 
 function variantSnapshot(
   model: ModelProvider,
+  systemPrompt: string,
   toolNames: string[],
   capabilities: ReturnType<ToolRegistryPort["capabilitySnapshot"]>,
 ) {
@@ -445,25 +739,25 @@ function variantSnapshot(
     studentName: model.student.name,
     provider: model.student.provider.kind,
     model: model.student.provider.model,
-    ...(model.student.agentConfig.temperature !== undefined
-      ? { temperature: model.student.agentConfig.temperature }
+    ...(model.student.generationDefaults.temperature !== undefined
+      ? { temperature: model.student.generationDefaults.temperature }
       : {}),
     systemPromptHash: createHash("sha256")
-      .update(model.student.agentConfig.systemPrompt)
+      .update(systemPrompt)
       .digest("hex"),
-    runtimeVersion: "1.6",
+    runtimeVersion: "D2P-1.2",
     toolNames,
     capabilities,
   };
 }
 
-function contextSummary(
+export function buildContextSummary(
   turnId: string,
   model: ModelProvider,
+  systemPrompt: string,
   tools: ModelToolDefinition[],
   built: ContextBuildResult,
 ): ContextSummary {
-  const systemPrompt = model.student.agentConfig.systemPrompt;
   const items: ContextSummaryItem[] = [
     {
       id: "system-prompt",
@@ -571,41 +865,71 @@ function contextMessages(
   });
 }
 
-function estimateTokens(value: string): number {
-  return Math.max(1, Math.ceil(value.length / 4));
+export function serializeModelInput(
+  model: ModelProvider,
+  input: import("../model/model-provider.js").ModelInput,
+): ModelContextSerialization {
+  if (model.serializeInput) return model.serializeInput(input);
+  return {
+    provider: model.student.provider.kind,
+    model: model.student.provider.model,
+    format: "json",
+    value: JSON.stringify({
+      system: model.serializeContext({ kind: "system", content: input.systemPrompt }).value,
+      tools: model.serializeContext({ kind: "tools", tools: input.tools }).value,
+      messages: model.serializeContext({ kind: "messages", messages: input.messages }).value,
+    }, null, 2),
+  };
 }
 
-function prepareCall(
-  registry: ToolRegistryPort,
-  modelCall: ModelToolCall,
-  fallbackId: string,
-): { modelCall: ModelToolCall; call: PreparedToolCall } {
-  try {
-    return { modelCall, call: registry.prepare(modelCall, fallbackId) };
-  } catch (error) {
-    const message = errorText(error);
-    return {
-      modelCall,
-      call: {
-        id: fallbackId,
-        name: modelCall.name,
-        title: `无效工具调用：${modelCall.name}`,
-        kind: "other",
-        arguments: modelCall.arguments,
-        permission: "allow",
-        locations: [],
-        dedupeKey: `${modelCall.name}:${JSON.stringify(modelCall.arguments)}`,
-        retry: "none",
-        validationError: message,
-      },
-    };
-  }
+function estimateTokens(value: string): number {
+  return Math.max(1, Math.ceil(value.length / 4));
 }
 
 function toolCallKey(call: ModelToolCall): string {
   if (call.id) return call.id;
   if (call.index !== undefined) return `index:${call.index}`;
   return `${call.name}:${JSON.stringify(call.arguments)}`;
+}
+
+function compareToolCallOrder(left: ModelToolCall, right: ModelToolCall): number {
+  if (left.index === undefined && right.index === undefined) return 0;
+  if (left.index === undefined) return 1;
+  if (right.index === undefined) return -1;
+  return left.index - right.index;
+}
+
+type ModelResponseOutcome =
+  | { kind: "cancelled" }
+  | { kind: "truncated" }
+  | { kind: "tool_calls" }
+  | { kind: "final" }
+  | { kind: "invalid"; reason: "thinking_only" | "empty" };
+
+function resolveModelResponse(input: {
+  content: string;
+  thinking: string;
+  calls: ModelToolCall[];
+  reason: "stop" | "length" | "cancelled";
+}): ModelResponseOutcome {
+  if (input.reason === "cancelled") return { kind: "cancelled" };
+  // 被截断的正文或 Tool Call 都可能不完整，不能产生完成状态或工具副作用。
+  if (input.reason === "length") return { kind: "truncated" };
+  if (input.calls.length > 0) return { kind: "tool_calls" };
+  if (input.content.trim().length > 0) return { kind: "final" };
+  return {
+    kind: "invalid",
+    reason: input.thinking.trim().length > 0 ? "thinking_only" : "empty",
+  };
+}
+
+function appendRuntimeContracts(systemPrompt: string): string {
+  const prompt = systemPrompt.trimEnd();
+  const contracts = [
+    MODEL_OUTPUT_CONTRACT,
+    skillUseProtocol(configuredSkillContextVersion()),
+  ].join("\n\n");
+  return prompt ? `${prompt}\n\n${contracts}` : contracts;
 }
 
 function errorText(value: unknown): string {

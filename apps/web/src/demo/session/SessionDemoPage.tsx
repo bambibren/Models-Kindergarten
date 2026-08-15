@@ -1,6 +1,7 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, UserRound } from "lucide-react";
+import type { ReasoningProfile } from "@kindergarten/contracts";
 import { demoAgentStrategies, demoArtifacts, demoChatStream, demoMcpInstallations, demoModelStudents, demoSessions } from "../demo-data.js";
 import type { DemoArtifact, DemoStreamItem } from "../demo-types.js";
 import { loadSavedAgents, mergeAgentStrategies, saveAgent } from "../agent-editor/agent-storage.js";
@@ -9,6 +10,8 @@ import { bindSkillsToAgent, isWebsiteDevelopmentRequest, skillInstallProgress, w
 import { useDemoSkillInstall } from "../skills/use-demo-skill-install.js";
 import { DemoChatStream } from "../shared/DemoChatStream.js";
 import { DemoTopNav } from "../shared/DemoTopNav.js";
+import { ReasoningProfileSelect } from "../../components/reasoning/ReasoningProfileSelect.js";
+import { loadDemoSessionReasoning, saveDemoSessionReasoning } from "../reasoning/demo-reasoning-state.js";
 import { ArtifactPanel } from "./ArtifactPanel.js";
 import { SkillInstallBanner } from "./SkillInstallBanner.js";
 import { clampArtifactWidth, defaultArtifactWidth } from "./split-pane.js";
@@ -26,6 +29,7 @@ export function SessionDemoPage() {
   const selectedAgent = agents.find((agent) => agent.id === initialAgentId) ?? agents[0] ?? demoAgentStrategies[0];
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [activeSession, setActiveSession] = useState(query.get("draft") ? "demo-new-session" : query.get("sessionId") ?? demoSessions[0]?.id ?? "");
+  const [reasoningProfile, setReasoningProfile] = useState<ReasoningProfile>(() => loadDemoSessionReasoning(sessionStorage, query.get("draft") ? "demo-new-session" : query.get("sessionId") ?? demoSessions[0]?.id ?? ""));
   const [artifact, setArtifact] = useState<DemoArtifact | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(520);
   const [isResizing, setIsResizing] = useState(false);
@@ -45,6 +49,16 @@ export function SessionDemoPage() {
     installStarted.current = true;
     startInstall(websiteSkillSources);
   }, [startInstall, websiteFlow]);
+
+  function selectSession(sessionId: string) {
+    setActiveSession(sessionId);
+    setReasoningProfile(loadDemoSessionReasoning(sessionStorage, sessionId));
+  }
+
+  function changeReasoning(profile: ReasoningProfile) {
+    saveDemoSessionReasoning(sessionStorage, activeSession, profile);
+    setReasoningProfile(profile);
+  }
 
   function openArtifact(next: DemoArtifact) {
     const containerWidth = workspaceRef.current?.clientWidth;
@@ -93,9 +107,9 @@ export function SessionDemoPage() {
           {!railCollapsed && <span><strong>Admin 的会话</strong><small>写死数据 Demo</small></span>}
           <button aria-label={railCollapsed ? "展开会话列表" : "收起会话列表"} type="button" onClick={() => setRailCollapsed((value) => !value)}>{railCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
         </header>
-        <button className="mk-session-new" type="button" onClick={() => setActiveSession("demo-new-session")}><Plus size={16} />{!railCollapsed && <span>新对话</span>}</button>
+        <button className="mk-session-new" type="button" onClick={() => selectSession("demo-new-session")}><Plus size={16} />{!railCollapsed && <span>新对话</span>}</button>
         <nav aria-label="Admin 历史会话">
-          {demoSessions.map((session) => <button className={activeSession === session.id ? "active" : ""} key={session.id} title={session.title} type="button" onClick={() => setActiveSession(session.id)}>
+          {demoSessions.map((session) => <button className={activeSession === session.id ? "active" : ""} key={session.id} title={session.title} type="button" onClick={() => selectSession(session.id)}>
             <MessageSquare size={14} />{!railCollapsed && <><span>{session.title}</span><small>{session.updatedAt}</small></>}
           </button>)}
         </nav>
@@ -125,6 +139,14 @@ export function SessionDemoPage() {
               {showInstallBanner && installBatch && <SkillInstallBanner batch={installBatch} />}
               <form className="mk-session-composer" onSubmit={(event) => event.preventDefault()}>
                 <textarea aria-label="Demo 消息输入" disabled={Boolean(installBatch && !websiteReady)} placeholder={installBatch && !websiteReady ? "Skills 安装完成后可继续对话…" : "给 ModelStudent 发送消息…"} rows={1} />
+                {selectedModel?.capabilities.reasoningControl.adjustable && <ReasoningProfileSelect
+                  capability={selectedModel.capabilities.reasoningControl}
+                  choices={(["auto", ...selectedModel.capabilities.reasoningControl.supportedProfiles] as ReasoningProfile[]).map((profile) => ({ profile }))}
+                  className="mk-demo-reasoning-select"
+                  label="Demo 当前会话思考强度"
+                  onChange={changeReasoning}
+                  value={reasoningProfile}
+                />}
                 <button disabled aria-label="发送 Demo 消息" type="submit">发送</button>
               </form>
             </div>

@@ -25,12 +25,22 @@ describe("Minimal Evaluator", () => {
 });
 
 function fixture(): TurnTraceDocument {
+  const resolvedReasoning = {
+    schemaVersion: 1 as const,
+    requestedProfile: "deep" as const,
+    resolvedProfile: "deep" as const,
+    source: "model_default" as const,
+    providerKind: "ollama",
+    model: "qwen3:8b",
+    native: { think: true },
+  };
   return {
     schemaVersion: 1,
     traceId: "trace",
     runId: "run",
     sessionId: "session",
     turnId: "turn",
+    resolvedReasoning,
     variant: {
       studentId: "student",
       studentName: "Student",
@@ -49,6 +59,7 @@ function fixture(): TurnTraceDocument {
         id: "round-1",
         index: 0,
         startedAt: 110,
+        resolvedReasoning,
         firstTokenAt: 130,
         context: { messages: [], truncatedSourceIds: ["old"], inputTokens: 100 },
         outputTokens: 20,
@@ -57,6 +68,7 @@ function fixture(): TurnTraceDocument {
         id: "round-2",
         index: 1,
         startedAt: 300,
+        resolvedReasoning,
         context: { messages: [], truncatedSourceIds: ["old"], inputTokens: 200 },
         outputTokens: 30,
       },

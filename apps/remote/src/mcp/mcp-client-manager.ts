@@ -35,54 +35,8 @@ export class McpClientManager {
     if (this.document) return structuredClone(this.document);
     const document = await this.store.load();
     this.document = document;
-    const auth = new McpAuthBroker(document.authProfiles, this.secrets);
     await Promise.all(document.servers.filter((server) => server.enabled).map(async (server) => {
-      this.states.set(server.id, { serverId: server.id, status: "connecting" });
-      try {
-        const headers = await this.resolveHeaders(
-          server.transport.kind === "streamable_http" ? server.transport.headerRefs : undefined,
-        );
-        const provider: AuthProvider | undefined = server.transport.kind === "streamable_http"
-          ? auth.provider(server.transport.authProfileId)
-          : undefined;
-        const client = await this.connector.connect(server, provider, headers);
-        const [tools, resources, prompts] = await Promise.all([
-          client.listTools(),
-          client.listResources(),
-          client.listPrompts(),
-        ]);
-        const fetchedAt = Date.now();
-        const revision = createHash("sha256").update(canonicalJson({
-          era: client.protocolEra,
-          tools,
-          resources,
-          prompts,
-        })).digest("hex");
-        this.clients.set(server.id, client);
-        this.snapshots.set(server.id, {
-          serverId: server.id,
-          revision,
-          fetchedAt,
-          ...(client.instructions ? { instructions: client.instructions } : {}),
-          tools,
-          resources,
-          prompts,
-        });
-        this.states.set(server.id, {
-          serverId: server.id,
-          status: "ready",
-          protocolEra: client.protocolEra,
-          connectedAt: fetchedAt,
-        });
-      } catch (error) {
-        const failure = toMcpFailure(error, "discovery");
-        this.states.set(server.id, {
-          serverId: server.id,
-          status: failure.category === "authentication" ? "auth_required" : "failed",
-          lastError: failure,
-        });
-        console.warn(`MCP Server ${server.id} 不可用：${failure.message}`);
-      }
+      await this.connectManaged(server, false);
     }));
     return structuredClone(document);
   }
@@ -104,6 +58,91 @@ export class McpClientManager {
 
   capabilitySnapshots(): McpCapabilitySnapshot[] {
     return this.configuredOrder(this.snapshots).map((item) => structuredClone(item));
+  }
+
+  async testCandidate(server: McpServerConfig): Promise<McpCapabilitySnapshot> {
+    if (server.transport.kind !== "streamable_http" || server.transport.authProfileId || server.transport.headerRefs) {
+      throw new Error("MCP candidate 只支持无鉴权 streamable_http");
+    }
+    const client = await this.connector.connect(server, undefined, {});
+    try {
+      return await discover(server.id, client);
+    } finally {
+      await client.close();
+    }
+  }
+
+  async installNoAuth(server: McpServerConfig): Promise<McpCapabilitySnapshot> {
+    await this.initialize();
+    if (server.transport.kind !== "streamable_http" || server.transport.authProfileId || server.transport.headerRefs) {
+      throw new Error("安装入口只支持无鉴权 streamable_http");
+    }
+    if (this.document!.servers.some((item) => item.id === server.id)) throw new Error(`MCP Server 已存在: ${server.id}`);
+    const previous = structuredClone(this.document!);
+    this.document = { ...this.document!, servers: [...this.document!.servers, structuredClone(server)] };
+    await this.store.save(this.document);
+    try {
+      await this.connectManaged(server, true);
+    } catch (error) {
+      await this.disconnectClient(server.id);
+      this.states.delete(server.id);
+      this.snapshots.delete(server.id);
+      this.document = previous;
+      await this.store.save(previous);
+      throw error;
+    }
+    const snapshot = this.snapshots.get(server.id);
+    if (!snapshot) throw new Error(`MCP Server ${server.id} 安装后未就绪`);
+    return structuredClone(snapshot);
+  }
+
+  async reconnect(serverId: string): Promise<McpCapabilitySnapshot> {
+    const server = this.serverConfig(serverId);
+    await this.disconnectClient(serverId);
+    await this.connectManaged(server, true);
+    const snapshot = this.snapshots.get(serverId);
+    if (!snapshot) throw new Error(`MCP Server ${serverId} 重连失败`);
+    return structuredClone(snapshot);
+  }
+
+  async setEnabled(serverId: string, enabled: boolean): Promise<void> {
+    const current = this.serverConfig(serverId);
+    const previous = structuredClone(this.document!);
+    const next = {
+      ...this.document!,
+      servers: this.document!.servers.map((item) => item.id === serverId ? { ...item, enabled } : item),
+    };
+    this.document = next;
+    await this.store.save(next);
+    if (!enabled) {
+      await this.disconnectClient(serverId);
+      this.states.set(serverId, { serverId, status: "disconnected" });
+    } else {
+      try {
+        await this.connectManaged({ ...current, enabled: true }, true);
+      } catch (error) {
+        this.document = previous;
+        await this.store.save(previous);
+        throw error;
+      }
+    }
+  }
+
+  async uninstall(serverId: string): Promise<void> {
+    this.serverConfig(serverId);
+    await this.disconnectClient(serverId);
+    this.states.delete(serverId);
+    this.snapshots.delete(serverId);
+    this.document = {
+      ...this.document!,
+      servers: this.document!.servers.filter((item) => item.id !== serverId),
+      agentCapabilities: {
+        ...this.document!.agentCapabilities,
+        mcpTools: this.document!.agentCapabilities.mcpTools.filter((item) => !item.id.startsWith(`mcp:${serverId}:tool:`)),
+        resources: this.document!.agentCapabilities.resources.filter((item) => item.serverId !== serverId),
+      },
+    };
+    await this.store.save(this.document);
   }
 
   async callTool(
@@ -146,6 +185,45 @@ export class McpClientManager {
     for (const state of this.states.values()) state.status = "disconnected";
   }
 
+  private async connectManaged(server: McpServerConfig, failLoudly: boolean): Promise<void> {
+    this.states.set(server.id, { serverId: server.id, status: "connecting" });
+    try {
+      const headers = await this.resolveHeaders(
+        server.transport.kind === "streamable_http" ? server.transport.headerRefs : undefined,
+      );
+      const auth = new McpAuthBroker(this.document?.authProfiles ?? [], this.secrets);
+      const provider: AuthProvider | undefined = server.transport.kind === "streamable_http"
+        ? auth.provider(server.transport.authProfileId)
+        : undefined;
+      const client = await this.connector.connect(server, provider, headers);
+      const snapshot = await discover(server.id, client);
+      this.clients.set(server.id, client);
+      this.snapshots.set(server.id, snapshot);
+      this.states.set(server.id, {
+        serverId: server.id,
+        status: "ready",
+        protocolEra: client.protocolEra,
+        connectedAt: snapshot.fetchedAt,
+      });
+    } catch (error) {
+      const failure = toMcpFailure(error, "discovery");
+      this.states.set(server.id, {
+        serverId: server.id,
+        status: failure.category === "authentication" ? "auth_required" : "failed",
+        lastError: failure,
+      });
+      if (failLoudly) throw new McpRuntimeError(failure, { cause: error });
+      console.warn(`MCP Server ${server.id} 不可用：${failure.message}`);
+    }
+  }
+
+  private async disconnectClient(serverId: string): Promise<void> {
+    const client = this.clients.get(serverId);
+    this.clients.delete(serverId);
+    this.snapshots.delete(serverId);
+    if (client) await client.close();
+  }
+
   private client(serverId: string): McpConnectedClient {
     const client = this.clients.get(serverId);
     if (client) return client;
@@ -179,6 +257,30 @@ export class McpClientManager {
       return value === undefined ? [] : [value];
     });
   }
+}
+
+async function discover(serverId: string, client: McpConnectedClient): Promise<McpCapabilitySnapshot> {
+  const [tools, resources, prompts] = await Promise.all([
+    client.listTools(),
+    client.listResources(),
+    client.listPrompts(),
+  ]);
+  const fetchedAt = Date.now();
+  const revision = createHash("sha256").update(canonicalJson({
+    era: client.protocolEra,
+    tools,
+    resources,
+    prompts,
+  })).digest("hex");
+  return {
+    serverId,
+    revision,
+    fetchedAt,
+    ...(client.instructions ? { instructions: client.instructions } : {}),
+    tools,
+    resources,
+    prompts,
+  };
 }
 
 export class McpRuntimeError extends Error {

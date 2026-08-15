@@ -13,7 +13,7 @@ export function loadSavedAgents(storage: AgentStorage): DemoAgentStrategy[] {
   try {
     const value: unknown = JSON.parse(raw);
     if (!Array.isArray(value)) return [];
-    return value.filter(isAgentStrategy);
+    return value.filter(isAgentStrategy).map(stripRemovedFields);
   } catch {
     return [];
   }
@@ -21,7 +21,8 @@ export function loadSavedAgents(storage: AgentStorage): DemoAgentStrategy[] {
 
 export function saveAgent(storage: AgentStorage, agent: DemoAgentStrategy): DemoAgentStrategy[] {
   const current = loadSavedAgents(storage);
-  const next = [agent, ...current.filter((candidate) => candidate.id !== agent.id)];
+  const saved = stripRemovedFields(agent);
+  const next = [saved, ...current.filter((candidate) => candidate.id !== saved.id)];
   storage.setItem(demoAgentStorageKey, JSON.stringify(next));
   return next;
 }
@@ -40,4 +41,9 @@ function isAgentStrategy(value: unknown): value is DemoAgentStrategy {
     && Array.isArray(candidate.modules)
     && typeof candidate.updatedAt === "string"
     && (candidate.state === "active" || candidate.state === "draft");
+}
+
+function stripRemovedFields(agent: DemoAgentStrategy): DemoAgentStrategy {
+  const { defaultReasoningProfile: _removed, ...current } = agent as DemoAgentStrategy & { defaultReasoningProfile?: unknown };
+  return current;
 }

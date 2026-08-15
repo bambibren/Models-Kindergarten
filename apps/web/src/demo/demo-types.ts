@@ -1,3 +1,5 @@
+import type { ModelReasoningCapability } from "@kindergarten/contracts";
+
 export type DemoArtifactKind = "markdown" | "html";
 
 export interface DemoArtifact {
@@ -142,6 +144,7 @@ export interface DemoModelCapabilities {
   toolCalls: DemoCapabilityState;
   reasoning: DemoCapabilityState;
   usage: DemoCapabilityState;
+  reasoningControl: ModelReasoningCapability;
 }
 
 export interface DemoAgentStrategy {

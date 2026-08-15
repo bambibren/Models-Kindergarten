@@ -53,7 +53,7 @@ export function ChatViewport({ historyChatEntries, streamingChatEntries, promptT
   return <section className="chat-viewport" ref={viewportRef} onScroll={updateFollowState} aria-live="polite"><div className="chat-content" ref={contentRef}>
     <ChatBlockList collection={historyChatEntries} />
     <ChatBlockList collection={streamingChatEntries} />
-    {isPromptTurnActive(promptTurn) && <PromptTurnLoader />}
+    {isPromptTurnActive(promptTurn) && <PromptTurnLoader turn={promptTurn} />}
     {!isPromptTurnActive(promptTurn) && <PromptTurnStatusRow state={promptTurn} onAction={onTurnAction} />}
     {canDisplaySessionTokenTotal(promptTurn) && <TokenUsageTotal
       history={historyChatEntries}

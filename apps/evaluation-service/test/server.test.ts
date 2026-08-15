@@ -40,12 +40,22 @@ describe("Evaluation API", () => {
 });
 
 function traceFixture(): TurnTraceDocument {
+  const resolvedReasoning = {
+    schemaVersion: 1 as const,
+    requestedProfile: "auto" as const,
+    resolvedProfile: "balanced" as const,
+    source: "model_default" as const,
+    providerKind: "ollama",
+    model: "qwen3:8b",
+    native: { think: true },
+  };
   return {
     schemaVersion: 1,
     traceId: "trace",
     runId: "run",
     sessionId: "session",
     turnId: "turn",
+    resolvedReasoning,
     variant: {
       studentId: "student",
       studentName: "Student",

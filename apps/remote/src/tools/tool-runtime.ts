@@ -93,7 +93,33 @@ export class ToolRuntime {
   ): Promise<ToolOutcome> {
     try {
       if (call.validationError) {
-        return errorOutcome(call, "invalid_arguments", "validation", call.validationError, false);
+        const validation = typeof call.validationError === "string"
+          ? { message: call.validationError }
+          : call.validationError;
+        return errorOutcome(
+          call,
+          "invalid_arguments",
+          "validation",
+          validation.message,
+          false,
+          undefined,
+          {
+            ...(validation.validationErrors ? { validation_errors: validation.validationErrors } : {}),
+            ...(validation.argumentCorrection ? {
+              argument_correction: {
+                message: validation.argumentCorrection.message,
+                exact_retry_arguments: validation.argumentCorrection.exactRetryArguments,
+              },
+            } : {}),
+            ...(validation.schemaCorrection ? {
+              schema_correction: {
+                message: validation.schemaCorrection.message,
+                expected_schema: validation.schemaCorrection.expectedSchema,
+              },
+            } : {}),
+          },
+          validation.instruction,
+        );
       }
       const allowed = await this.permissions.authorize(call, observer);
       if (!allowed) {
@@ -134,6 +160,9 @@ export class ToolRuntime {
 
 function duplicateOutcome(call: PreparedToolCall, previous: LedgerRecord): ToolOutcome {
   const completed = previous.outcome?.status === "success";
+  const repeatedValidationError = previous.outcome?.error?.code === "invalid_arguments"
+    ? previous.outcome.error
+    : undefined;
   const rawOutput = {
     previousCallId: previous.callId,
     previousStatus: previous.status ?? "running",
@@ -142,6 +171,7 @@ function duplicateOutcome(call: PreparedToolCall, previous: LedgerRecord): ToolO
   return {
     status: "duplicate_blocked",
     retryable: false,
+    ...(repeatedValidationError ? { error: repeatedValidationError } : {}),
     modelContent: JSON.stringify({
       ok: completed,
       cached: true,
@@ -176,14 +206,23 @@ function errorOutcome(
   message: string,
   retryable: boolean,
   rawOutput?: unknown,
+  details?: Record<string, unknown>,
+  instruction?: string,
 ): ToolOutcome {
   const error = { code, category, message };
+  const publicOutput = { error, ...details };
   return {
     status: "error",
     retryable,
     error,
-    modelContent: modelEnvelope(call, false, error),
-    rawOutput: rawOutput ?? { error },
+    modelContent: JSON.stringify({
+      ok: false,
+      tool: call.name,
+      toolCallId: call.id,
+      ...publicOutput,
+      instruction: instruction ?? "The tool operation did not complete. Do not repeat identical arguments.",
+    }),
+    rawOutput: rawOutput ?? publicOutput,
     content: [{ type: "content", content: { type: "text", text: message } }],
     locations: call.locations,
   };

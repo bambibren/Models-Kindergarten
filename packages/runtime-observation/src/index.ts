@@ -1,3 +1,17 @@
+export type ObservationReasoningProfile = "auto" | "fast" | "balanced" | "deep" | "max";
+export type ObservationConcreteReasoningProfile = Exclude<ObservationReasoningProfile, "auto">;
+
+/** 与产品 contract 同形的自包含观察快照，避免观察包反向依赖领域包。 */
+export interface RuntimeResolvedReasoningSnapshot {
+  schemaVersion: 1;
+  requestedProfile: ObservationReasoningProfile;
+  resolvedProfile: ObservationConcreteReasoningProfile;
+  source: "session_override" | "model_default";
+  providerKind: string;
+  model: string;
+  native: Record<string, string | number | boolean>;
+}
+
 export interface RuntimeVariantSnapshot {
   studentId: string;
   studentName: string;
@@ -23,7 +37,7 @@ export interface RuntimeVariantSnapshot {
       toolSchemaHashes: Record<string, string>;
     }>;
     skills: Array<{
-      skillId: string;
+      name: string;
       contentHash: string;
       source: "builtin" | "project" | "user" | "git";
     }>;
@@ -52,12 +66,20 @@ export interface ContextMessageObservation {
 
 export type RuntimeObservationEvent =
   | {
+      type: "capability_generation_changed";
+      runId: string;
+      generation: number;
+      hash: string;
+      at: number;
+    }
+  | {
       type: "turn_started";
       runId: string;
       sessionId: string;
       turnId: string;
       startedAt: number;
       variant: RuntimeVariantSnapshot;
+      resolvedReasoning: RuntimeResolvedReasoningSnapshot;
     }
   | {
       type: "model_round_started";
@@ -65,6 +87,7 @@ export type RuntimeObservationEvent =
       roundId: string;
       index: number;
       startedAt: number;
+      resolvedReasoning: RuntimeResolvedReasoningSnapshot;
       context: {
         messages: ContextMessageObservation[];
         truncatedSourceIds: string[];
@@ -82,6 +105,8 @@ export type RuntimeObservationEvent =
       roundId: string;
       inputTokens?: number;
       outputTokens?: number;
+      cachedInputTokens?: number;
+      reasoningOutputTokens?: number;
     }
   | {
       type: "model_round_completed";

@@ -1,7 +1,8 @@
 import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import { createHash } from "node:crypto";
+import { relative } from "node:path";
 import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.js";
-import type { ModelToolCall, ModelToolDefinition } from "../model/model-provider.js";
+import type { ModelToolCall, ModelToolDefinition, ModelToolSchema } from "../model/model-provider.js";
 import { ProcessSandbox } from "./process-sandbox.js";
 import { FileSandbox } from "./sandbox.js";
 import { WebAccess, type WebToolClient } from "./web-access.js";
@@ -19,6 +20,31 @@ export type ToolErrorCategory =
   | "execution"
   | "dependency_unavailable";
 
+export interface ToolExactArgumentCorrection {
+  message: string;
+  exactRetryArguments: Record<string, unknown>;
+}
+
+export interface ToolSchemaValidationError {
+  keyword: string;
+  instancePath: string;
+  parameter?: string;
+  message: string;
+}
+
+export interface ToolSchemaCorrection {
+  message: string;
+  expectedSchema: ModelToolSchema;
+}
+
+export interface ToolValidationError {
+  message: string;
+  validationErrors?: ToolSchemaValidationError[];
+  argumentCorrection?: ToolExactArgumentCorrection;
+  schemaCorrection?: ToolSchemaCorrection;
+  instruction?: string;
+}
+
 export interface PreparedToolCall {
   id: string;
   name: ToolName | string;
@@ -29,7 +55,7 @@ export interface PreparedToolCall {
   locations: ToolCallLocation[];
   dedupeKey: string;
   retry: "none" | "transient";
-  validationError?: string;
+  validationError?: string | ToolValidationError;
 }
 
 export interface ToolExecutionContext {
@@ -42,6 +68,10 @@ export interface ToolResult {
   rawOutput: unknown;
   content: ToolCallContent[];
   locations: ToolCallLocation[];
+  effects?: {
+    capabilitiesChanged?: boolean;
+    fileRelativePaths?: string[];
+  };
 }
 
 /** ToolRuntime 依赖的最小端口；内置、MCP 和 Skill Provider 使用同一条执行链。 */
@@ -74,7 +104,7 @@ export type ToolName =
 /** Registry 只拥有 Tool Schema、参数规范化和具体 Handler。 */
 export class ToolRegistry implements ToolRegistryPort {
   readonly providerId = "builtin";
-  readonly definitions: ModelToolDefinition[] = definitions;
+  readonly definitions: ModelToolDefinition[];
   readonly process: ProcessSandbox;
   readonly web: WebToolClient;
 
@@ -82,30 +112,35 @@ export class ToolRegistry implements ToolRegistryPort {
     readonly sandbox: FileSandbox,
     process?: ProcessSandbox,
     web?: WebToolClient,
+    private readonly bindings?: Map<string, { enabled: boolean; permission: "allow" | "ask" | "deny" }>,
   ) {
     this.process = process ?? new ProcessSandbox(sandbox);
     this.web = web ?? new WebAccess();
+    this.definitions = definitions.filter((definition) => this.bindings === undefined || this.bindings.get(definition.function.name)?.enabled === true);
   }
 
   prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     const name = toolName(call.name);
+    if (!this.definitions.some((item) => item.function.name === name)) {
+      throw new Error(`当前 Agent 未启用 Built-in Tool: ${name}`);
+    }
     const id = call.id ?? fallbackId;
     if (name === "list_files") {
       const path = optionalStringArg(call.arguments, "path") ?? ".";
-      return prepared(id, name, `列出 ${path}`, "read", { path }, "allow", [], "none");
+      return prepared(id, name, `列出 ${path}`, "read", { path }, this.permission(name, "allow"), [], "none");
     }
     if (name === "read_file") {
       const path = stringArg(call.arguments, "path");
       return prepared(id, name, `读取 ${path}`, "read", { path }, "allow", [
         { path: this.sandbox.preview(path) },
-      ], "none");
+      ], "none", this.permission(name, "allow"));
     }
     if (name === "write_file") {
       const path = stringArg(call.arguments, "path");
       const content = stringArg(call.arguments, "content", true);
       return prepared(id, name, `写入 ${path}`, "edit", { path, content }, "ask", [
         { path: this.sandbox.preview(path) },
-      ], "none");
+      ], "none", this.permission(name, "ask"));
     }
     if (name === "run_command") {
       const command = stringArg(call.arguments, "command");
@@ -117,7 +152,7 @@ export class ToolRegistry implements ToolRegistryPort {
         `运行 ${short(command, 60)}`,
         "execute",
         { command, cwd, ...(timeoutMs === undefined ? {} : { timeout_ms: timeoutMs }) },
-        "always_ask",
+        this.permission(name, "always_ask"),
         [],
         "none",
       );
@@ -128,14 +163,14 @@ export class ToolRegistry implements ToolRegistryPort {
       return prepared(id, name, `搜索 ${short(query, 60)}`, "search", {
         query,
         max_results: maxResults,
-      }, "allow", [], "transient");
+      }, this.permission(name, "allow"), [], "transient");
     }
     if (name === "web_fetch") {
       const url = stringArg(call.arguments, "url");
-      return prepared(id, name, `读取 ${short(url, 72)}`, "fetch", { url }, "allow", [], "transient");
+      return prepared(id, name, `读取 ${short(url, 72)}`, "fetch", { url }, this.permission(name, "allow"), [], "transient");
     }
     const question = stringArg(call.arguments, "question");
-    return prepared(id, name, "询问用户", "other", { question }, "allow", [], "none");
+    return prepared(id, name, "询问用户", "other", { question }, this.permission(name, "allow"), [], "none");
   }
 
   async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
@@ -159,6 +194,7 @@ export class ToolRegistry implements ToolRegistryPort {
         rawOutput,
         content: [{ type: "diff", path: value.path, oldText: value.oldText, newText: value.newText }],
         locations: [{ path: value.path }],
+        effects: { fileRelativePaths: [relative(this.sandbox.root, value.path).split("\\").join("/")] },
       };
     }
     if (call.name === "run_command") {
@@ -212,6 +248,14 @@ export class ToolRegistry implements ToolRegistryPort {
       skills: [],
     };
   }
+
+  private permission(name: string, required: PermissionMode): PermissionMode {
+    const configured = this.bindings?.get(name)?.permission;
+    if (configured === "deny") return "deny";
+    if (required === "always_ask") return "always_ask";
+    if (required === "ask") return "ask";
+    return configured ?? required;
+  }
 }
 
 function prepared(
@@ -223,6 +267,7 @@ function prepared(
   permission: PermissionMode,
   locations: ToolCallLocation[],
   retry: PreparedToolCall["retry"],
+  permissionOverride?: PermissionMode,
 ): PreparedToolCall {
   return {
     id,
@@ -230,7 +275,7 @@ function prepared(
     title,
     kind,
     arguments: args,
-    permission,
+    permission: permissionOverride ?? permission,
     locations,
     dedupeKey: `${name}:${canonicalJson(args)}`,
     retry,
@@ -256,6 +301,7 @@ export function modelEnvelope(
   ok: boolean,
   value: unknown,
   text?: string,
+  instructionOverride?: string,
 ): string {
   return JSON.stringify({
     ok,
@@ -263,9 +309,9 @@ export function modelEnvelope(
     toolCallId: call.id,
     ...(ok ? { result: value } : { error: value }),
     ...(text ? { text } : {}),
-    instruction: ok
+    instruction: instructionOverride ?? (ok
       ? "The tool operation completed. Do not repeat it unless the input must change."
-      : "The tool operation did not complete. Do not repeat identical arguments.",
+      : "The tool operation did not complete. Do not repeat identical arguments."),
   });
 }
 

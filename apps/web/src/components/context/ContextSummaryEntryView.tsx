@@ -15,6 +15,8 @@ import type {
   ContextSummaryKind,
 } from "@kindergarten/contracts";
 import type { ContextSummaryEntry } from "../../chat/chat-types.js";
+import { useEffect, useState } from "react";
+import { controlApi } from "../../api/control-api.js";
 
 const icons: Record<ContextSummaryKind, LucideIcon> = {
   system_instruction: ShieldCheck,
@@ -28,6 +30,12 @@ const icons: Record<ContextSummaryKind, LucideIcon> = {
 
 export function ContextSummaryEntryView({ entry }: { entry: ContextSummaryEntry }) {
   const { items, totalEstimatedTokens } = entry.summary;
+  const [canExperiment, setCanExperiment] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    void controlApi.turn(entry.turnId).then((turn) => { if (!disposed) setCanExperiment(turn.state.status === "completed"); }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, [entry.turnId]);
   if (items.length === 0) return null;
   return <Collapsible.Root className="context-summary">
     <Collapsible.Trigger className="context-summary-trigger">
@@ -39,6 +47,7 @@ export function ContextSummaryEntryView({ entry }: { entry: ContextSummaryEntry 
     <Collapsible.Content className="context-summary-content">
       <div className="context-summary-panel">
         {items.map((item) => <ContextSummaryRow key={item.id} item={item} />)}
+        {canExperiment && <a className="context-experiment-link" href={`/context-lab?turnId=${encodeURIComponent(entry.turnId)}`}>用本轮做上下文对照实验</a>}
       </div>
     </Collapsible.Content>
   </Collapsible.Root>;

@@ -24,10 +24,12 @@ import type {
 import { loadTurnEvaluation } from "./api.js";
 import { buildRuntimeTree } from "./runtime-tree.js";
 import { AgentEvaluationDemoPage } from "./demo/agent-evaluation/AgentEvaluationDemoPage.js";
+import { ExperimentEvaluationPage } from "./experiment/ExperimentEvaluationPage.js";
 
 type PageRoute =
   | { kind: "turn"; sessionId: string; turnId: string }
-  | { kind: "agent-evaluation-demo" };
+  | { kind: "agent-evaluation-demo" }
+  | { kind: "experiment"; experimentId: string };
 
 type PageState =
   | { phase: "loading" }
@@ -45,6 +47,7 @@ export default function App() {
       return;
     }
     if (route.kind === "agent-evaluation-demo") return;
+    if (route.kind === "experiment") return;
     let disposed = false;
     void loadTurnEvaluation(route.sessionId, route.turnId)
       .then((record) => {
@@ -57,6 +60,7 @@ export default function App() {
   }, [route]);
 
   if (route?.kind === "agent-evaluation-demo") return <AgentEvaluationDemoPage />;
+  if (route?.kind === "experiment") return <ExperimentEvaluationPage experimentId={route.experimentId} />;
   if (state.phase === "loading") return <CenteredState title="正在读取本轮评测" detail="等待 Runtime Trace 完成上传…" />;
   if (state.phase === "not_found") return <CenteredState title="尚未生成本轮评测" detail="该 Turn 可能仍在上传，或 Remote 未连接 Evaluation Service。" />;
   if (state.phase === "error") return <CenteredState title="无法打开评测" detail={state.message} failed />;
@@ -183,6 +187,8 @@ function readRoute(): PageRoute | null {
   if (/^\/evaluation\/demo\/agent-comparison\/?$/.test(location.pathname)) {
     return { kind: "agent-evaluation-demo" };
   }
+  const experiment = location.pathname.match(/^\/evaluation\/experiments\/([^/]+)\/?$/)?.[1];
+  if (experiment) return { kind: "experiment", experimentId: decodeURIComponent(experiment) };
   const match = location.pathname.match(/^\/evaluation\/sessions\/([^/]+)\/turns\/([^/]+)\/?$/);
   return match?.[1] && match[2]
     ? { kind: "turn", sessionId: decodeURIComponent(match[1]), turnId: decodeURIComponent(match[2]) }

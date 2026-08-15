@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import type * as acp from "@agentclientprotocol/sdk";
+import type { ModelReasoningCapability, ReasoningProfile } from "@kindergarten/contracts";
 import { AcpWebClient } from "./acp/acp-client.js";
 import { ChatViewport } from "./components/chat/ChatViewport.js";
 import { Composer } from "./components/composer/Composer.js";
-import { ComposerAvailabilityNotice } from "./components/errors/ComposerAvailabilityNotice.js";
+import { ComposerAgentMissingNotice, ComposerAvailabilityNotice } from "./components/errors/ComposerAvailabilityNotice.js";
 import { InteractionPendingPanel } from "./components/interactions/InteractionPendingPanel.js";
 import { ChatHeader } from "./components/layout/ChatHeader.js";
 import { SessionSidebar } from "./components/layout/SessionSidebar.js";
@@ -14,6 +15,11 @@ import {
   type TurnAction,
 } from "./prompt-turn/prompt-turn-types.js";
 import { useAppStore } from "./store/app-store.js";
+import { controlApi } from "./api/control-api.js";
+import { ArtifactPanel } from "./product/ArtifactPanel.js";
+import { projectReasoningConfig } from "./reasoning/reasoning-config.js";
+import { isMissingAgentError, projectSessionAvailability, type SessionAgentAvailability } from "./session/session-identity.js";
+import { sessionResumeMeta } from "./chat/chat-resume.js";
 
 const ACP_URL = import.meta.env.VITE_ACP_URL ?? "ws://127.0.0.1:7331/acp";
 const REMOTE_CWD = "/workspace";
@@ -24,16 +30,42 @@ export default function App() {
   const chat = useAppStore((state) => state.chat);
   const promptTurn = useAppStore((state) => state.promptTurn);
   const clientRef = useRef<AcpWebClient | null>(null);
+  const reconnectRef = useRef<(() => Promise<void>) | null>(null);
+  const initialAction = useRef(readInitialAction());
+  const [identity, setIdentity] = useState<SessionIdentity>({ agentName: "Agent", modelName: "ModelStudent", agentAvailability: "loading" });
+  const [configOptions, setConfigOptions] = useState<acp.SessionConfigOption[]>([]);
+  const [reasoningBusy, setReasoningBusy] = useState(false);
+  const [artifactId, setArtifactId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const open = (event: Event) => {
+      const id = (event as CustomEvent<unknown>).detail;
+      if (typeof id === "string" && id.length > 0) setArtifactId(id);
+    };
+    window.addEventListener("mk-open-file-reference", open);
+    return () => window.removeEventListener("mk-open-file-reference", open);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
     let current: AcpWebClient | null = null;
+    let opening = false;
     const store = useAppStore.getState;
 
-    void (async () => {
+    const connect = async (mode: "initial" | "resume"): Promise<void> => {
+      if (opening || disposed) return;
+      opening = true;
+      store().setConnection({ phase: "connecting" });
+      let opened: AcpWebClient | null = null;
       try {
-        const client = await AcpWebClient.open(ACP_URL, {
-          onUpdate: (value) => store().dispatchChat({ type: "acp/update", value }),
+        let client: AcpWebClient | null = null;
+        client = await AcpWebClient.open(ACP_URL, {
+          onUpdate: (value) => {
+            store().dispatchChat({ type: "acp/update", value });
+            if (value.sessionId === store().chat.sessionId && value.update.sessionUpdate === "config_option_update") {
+              setConfigOptions(value.update.configOptions);
+            }
+          },
           onContextSummary: (value) => store().dispatchChat({
             type: "context/summary",
             value,
@@ -42,6 +74,22 @@ export default function App() {
             type: "token/usage",
             value,
           }),
+          onTurnState: (value) => {
+            const before = store().promptTurn;
+            store().dispatchPromptTurn({
+              type: "turn/remote-state",
+              sessionId: value.sessionId,
+              turn: value.turn,
+            });
+            if (
+              value.turn.status !== "active" &&
+              before.status !== "idle" &&
+              before.request.sessionId === value.sessionId &&
+              before.request.turnId === value.turn.turnId
+            ) {
+              store().dispatchChat({ type: "stream/commit", operationId: before.request.operationId });
+            }
+          },
           onInteraction: (interaction) => {
             store().dispatchPromptTurn({ type: "interaction/enqueue", interaction });
           },
@@ -49,31 +97,16 @@ export default function App() {
             store().dispatchPromptTurn({ type: "interaction/remove", id });
           },
           onClose: () => {
-            if (disposed) return;
-            const state = store();
-            state.setConnection({
+            if (disposed || current !== client) return;
+            current = null;
+            clientRef.current = null;
+            store().setConnection({
               phase: "disconnected",
               message: "ACP Remote 连接已断开",
             });
-
-            // 断线后不会再收到 Chunk；立即提交已接收内容，并将活动 Turn 收敛为失败。
-            const operationId = state.chat.streaming?.operationId;
-            if (operationId) {
-              state.dispatchChat({ type: "stream/commit", operationId });
-            }
-            const turn = state.promptTurn;
-            if (isPromptTurnActive(turn)) {
-              state.dispatchPromptTurn({
-                type: "turn/fail",
-                operationId: turn.request.operationId,
-                failure: {
-                  kind: "connection_error",
-                  message: "ACP Remote 连接已断开",
-                },
-              });
-            }
           },
         });
+        opened = client;
 
         if (disposed) {
           client.close();
@@ -81,30 +114,106 @@ export default function App() {
         }
         current = client;
         clientRef.current = client;
-        store().setConnection({ phase: "connected" });
 
-        const result = await client.list(REMOTE_CWD);
-        store().setSessions(result.sessions);
-        const first = result.sessions[0];
-        if (first) {
-          await loadSession(client, first);
-        } else {
-          const created = await client.create(REMOTE_CWD);
-          openEmptySession(created.sessionId);
+        if (mode === "resume") {
+          const state = store();
+          const sessionId = state.chat.sessionId;
+          if (!sessionId) throw new Error("当前没有可以恢复的 Session");
+          const turn = state.promptTurn;
+          const response = await client.resume(
+            sessionId,
+            REMOTE_CWD,
+            turn.status === "idle" ? undefined : sessionResumeMeta(state.chat, turn.request.turnId),
+          );
+          setConfigOptions(response.configOptions ?? []);
           await refreshSessions(client);
+          await loadIdentity(sessionId);
+          store().setConnection({ phase: "connected" });
+        } else {
+          store().setConnection({ phase: "connected" });
+          const result = await client.list(REMOTE_CWD);
+          store().setSessions(result.sessions);
+          const action = initialAction.current;
+          const requested = action.kind === "load" ? result.sessions.find((item) => item.sessionId === action.sessionId) : undefined;
+          if (requested) {
+            await loadSession(client, requested);
+            replaceSessionUrl(requested.sessionId);
+            await loadIdentity(requested.sessionId);
+          } else if (action.kind === "launch") {
+            const remembered = rememberedLaunchSession(action.launchId, result.sessions);
+            if (remembered) {
+              await loadSession(client, remembered);
+              replaceSessionUrl(remembered.sessionId);
+              await loadIdentity(remembered.sessionId);
+              return;
+            }
+            const launch = await controlApi.sessionLaunch(action.launchId);
+            const created = await client.create(REMOTE_CWD, { modelStudentId: launch.modelStudentId, agentId: launch.agentId });
+            rememberLaunchSession(action.launchId, created.sessionId);
+            openEmptySession(created.sessionId);
+            setConfigOptions(created.configOptions ?? []);
+            replaceSessionUrl(created.sessionId);
+            await refreshSessions(client);
+            await loadIdentity(created.sessionId);
+            if (launch.reasoningProfileOverride) {
+              const configId = thoughtLevelConfigId(created.configOptions ?? []);
+              if (!configId) throw new Error("当前 Session 没有提供思考强度配置");
+              const configured = await client.setConfigOption(created.sessionId, configId, launch.reasoningProfileOverride);
+              setConfigOptions(configured.configOptions);
+            }
+            await send(launch.promptText);
+          } else {
+            const first = result.sessions[0];
+            if (first) {
+              await loadSession(client, first);
+              replaceSessionUrl(first.sessionId);
+              await loadIdentity(first.sessionId);
+            }
+          }
         }
       } catch (cause) {
         if (!disposed) {
+          if (opened && current === opened) {
+            current = null;
+            clientRef.current = null;
+            opened.close();
+          }
           store().setConnection({
             phase: "disconnected",
             message: errorMessage(cause),
           });
         }
+      } finally {
+        opening = false;
       }
-    })();
+    };
+
+    const navigate = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!(anchor instanceof HTMLAnchorElement) || anchor.target || anchor.download) return;
+      const target = new URL(anchor.href, location.href);
+      if (target.origin !== location.origin || target.href === location.href) return;
+      event.preventDefault();
+      void closeCurrentSession(current).finally(() => { location.href = target.href; });
+    };
+    const pagehide = () => {
+      const client = current;
+      const sessionId = store().chat.sessionId;
+      if (client && sessionId) void client.closeSession(sessionId).catch(() => undefined);
+      client?.close();
+    };
+
+    reconnectRef.current = () => connect("resume");
+    document.addEventListener("click", navigate);
+    window.addEventListener("pagehide", pagehide);
+    void connect("initial");
 
     return () => {
       disposed = true;
+      reconnectRef.current = null;
+      document.removeEventListener("click", navigate);
+      window.removeEventListener("pagehide", pagehide);
       current?.close();
       clientRef.current = null;
     };
@@ -114,6 +223,9 @@ export default function App() {
     const store = useAppStore.getState();
     store.dispatchPromptTurn({ type: "turn/reset" });
     store.dispatchChat({ type: "session/open", sessionId });
+    setConfigOptions([]);
+    setReasoningBusy(false);
+    setIdentity((current) => ({ ...current, agentAvailability: "loading" }));
   }
 
   async function refreshSessions(client = clientRef.current): Promise<void> {
@@ -125,6 +237,7 @@ export default function App() {
   async function loadSession(client: AcpWebClient, session: SessionInfo): Promise<void> {
     const operationId = crypto.randomUUID();
     const store = useAppStore.getState();
+    setIdentity((current) => ({ ...current, agentAvailability: "loading" }));
     store.dispatchPromptTurn({ type: "turn/reset" });
     store.dispatchChat({ type: "session/open", sessionId: session.sessionId });
     store.dispatchChat({
@@ -134,7 +247,8 @@ export default function App() {
       turnId: `load:${operationId}`,
     });
     try {
-      await client.load(session.sessionId, session.cwd);
+      const response = await client.load(session.sessionId, session.cwd);
+      setConfigOptions(response.configOptions ?? []);
     } finally {
       // load 的通知也使用 streamingChatEntries，结束时必须统一提交或清理。
       store.dispatchChat({ type: "stream/commit", operationId });
@@ -142,26 +256,65 @@ export default function App() {
   }
 
   async function createSession(): Promise<void> {
-    const client = clientRef.current;
-    if (!client) return;
-    try {
-      const created = await client.create(REMOTE_CWD);
-      openEmptySession(created.sessionId);
-      await refreshSessions(client);
-    } catch (cause) {
-      // Session 管理失败不属于 Prompt Turn，不能写入 Turn 状态机。
-      console.error("创建 Session 失败", cause);
-    }
+    await closeCurrentSession();
+    location.href = "/";
   }
 
   async function selectSession(session: SessionInfo): Promise<void> {
     const client = clientRef.current;
     if (!client || session.sessionId === useAppStore.getState().chat.sessionId) return;
     try {
+      await closeCurrentSession(client);
       await loadSession(client, session);
+      replaceSessionUrl(session.sessionId);
+      await loadIdentity(session.sessionId);
     } catch (cause) {
       // V1.6 不引入另一套全局错误中心；保留诊断信息且不污染当前 Turn。
       console.error("加载 Session 失败", cause);
+    }
+  }
+
+  async function loadIdentity(sessionId: string): Promise<void> {
+    setIdentity((current) => ({ ...current, agentAvailability: "loading" }));
+    try {
+      const session = await fetchSessionIdentity(sessionId);
+      const models = await controlApi.models();
+      const model = models.items.find((item) => item.modelStudentId === session.modelStudentId);
+      let agent: Awaited<ReturnType<typeof controlApi.agent>>;
+      try {
+        agent = await controlApi.agent(session.agentId);
+      } catch (error) {
+        if (!isMissingAgentError(error)) throw error;
+        setIdentity({
+          agentName: "Agent 已删除",
+          modelName: model?.displayName ?? session.modelStudentId,
+          agentAvailability: "missing",
+          ...(model ? { reasoningCapability: model.supports.reasoning } : {}),
+        });
+        return;
+      }
+      setIdentity({
+        agentName: agent.name,
+        modelName: model?.displayName ?? session.modelStudentId,
+        agentAvailability: "available",
+        ...(model ? { reasoningCapability: model.supports.reasoning } : {}),
+      });
+    } catch (error) { console.error("读取 Session 身份失败", error); }
+  }
+
+  async function changeReasoning(profile: ReasoningProfile): Promise<void> {
+    const client = clientRef.current;
+    const sessionId = useAppStore.getState().chat.sessionId;
+    const reasoning = projectReasoningConfig(configOptions, identity.reasoningCapability);
+    if (!client || !sessionId || !reasoning || reasoningBusy || isPromptTurnActive(useAppStore.getState().promptTurn)) return;
+    setReasoningBusy(true);
+    try {
+      const response = await client.setConfigOption(sessionId, reasoning.configId, profile);
+      setConfigOptions(response.configOptions);
+    } catch (error) {
+      console.error("更新当前 Session 思考强度失败", error);
+    } finally {
+      setReasoningBusy(false);
     }
   }
 
@@ -201,6 +354,12 @@ export default function App() {
       });
     } catch (cause) {
       const store = useAppStore.getState();
+      const turn = store.promptTurn;
+      if (
+        (store.connection.phase === "disconnected" || clientRef.current !== client) &&
+        isPromptTurnActive(turn) &&
+        turn.request.operationId === operationId
+      ) return;
       store.dispatchChat({ type: "stream/commit", operationId });
       store.dispatchPromptTurn({
         type: "turn/fail",
@@ -238,33 +397,38 @@ export default function App() {
 
   function handleTurnAction(action: TurnAction): void {
     if (action.type === "reconnect") {
-      location.reload();
+      reconnectCurrentSession();
       return;
     }
     const state = useAppStore.getState().promptTurn;
-    if (state.phase === "failed") void send(state.request.text);
+    if (state.status === "failed") void send(state.request.text);
   }
 
   const active = isPromptTurnActive(promptTurn);
-  const interactionState = promptTurn.phase === "waiting_for_user"
+  const interactionState = promptTurn.status === "active" && promptTurn.interactions.order.length > 0
     ? promptTurn.interactions
     : undefined;
   const activeInteractionId = interactionState?.order[0];
   const activeInteraction = activeInteractionId
     ? interactionState?.byId[activeInteractionId]
     : undefined;
-  const ready = connection.phase === "connected" && chat.sessionId !== null;
+  const availability = projectSessionAvailability(
+    connection.phase === "connected",
+    chat.sessionId !== null,
+    identity.agentAvailability,
+  );
+  const reasoning = projectReasoningConfig(configOptions, identity.reasoningCapability);
 
-  return <main className="app-shell">
+  return <main className={`app-shell ${artifactId ? "with-artifact" : ""}`}>
     <SessionSidebar
       sessions={sessions}
       activeId={chat.sessionId}
-      disabled={!ready || active}
+      disabled={!availability.navigationEnabled || active}
       onCreate={() => void createSession()}
       onSelect={(session) => void selectSession(session)}
     />
     <section className="chat-screen">
-      <ChatHeader connection={connection} />
+      <ChatHeader connection={connection} identity={identity} />
       <ChatViewport
         historyChatEntries={chat.historyChatEntries}
         streamingChatEntries={chat.streamingChatEntries}
@@ -274,8 +438,9 @@ export default function App() {
       <div className="composer-dock">
         {connection.phase === "disconnected" && <ComposerAvailabilityNotice
           connection={connection}
-          onReconnect={() => location.reload()}
+          onReconnect={reconnectCurrentSession}
         />}
+        {identity.agentAvailability === "missing" && <ComposerAgentMissingNotice />}
         {activeInteraction && interactionState && <InteractionPendingPanel
           key={activeInteraction.id}
           interaction={activeInteraction}
@@ -283,18 +448,79 @@ export default function App() {
           onResolve={resolveInteraction}
         />}
         <Composer
-          disabled={!ready}
+          disabled={!availability.promptEnabled}
           running={active}
+          {...(reasoning ? { reasoning } : {})}
+          {...(identity.reasoningCapability ? { reasoningCapability: identity.reasoningCapability } : {})}
+          reasoningBusy={reasoningBusy}
+          onReasoningChange={(profile) => void changeReasoning(profile)}
           onSend={send}
           onCancel={cancel}
         />
       </div>
     </section>
+    {artifactId && <ArtifactPanel fileReferenceId={artifactId} onClose={() => setArtifactId(null)} />}
   </main>;
+
+  function reconnectCurrentSession(): void {
+    void reconnectRef.current?.();
+  }
+
+  async function closeCurrentSession(client = clientRef.current): Promise<void> {
+    const sessionId = useAppStore.getState().chat.sessionId;
+    if (!client || !sessionId) return;
+    try {
+      await client.closeSession(sessionId);
+    } catch (error) {
+      console.warn("关闭 Session 失败", error);
+    }
+  }
+}
+
+type InitialAction = { kind: "load"; sessionId: string } | { kind: "launch"; launchId: string } | { kind: "latest" };
+interface SessionIdentity {
+  agentName: string;
+  modelName: string;
+  agentAvailability: SessionAgentAvailability;
+  reasoningCapability?: ModelReasoningCapability;
+}
+function readInitialAction(): InitialAction {
+  const query = new URLSearchParams(location.search);
+  const pathSessionId = location.pathname.match(/^\/sessions\/([^/]+)\/?$/)?.[1];
+  if (pathSessionId) return { kind: "load", sessionId: decodeURIComponent(pathSessionId) };
+  const sessionId = query.get("sessionId");
+  if (sessionId) return { kind: "load", sessionId };
+  const launchId = query.get("launchId");
+  if (launchId) return { kind: "launch", launchId };
+  return { kind: "latest" };
+}
+
+function replaceSessionUrl(sessionId: string): void {
+  history.replaceState(null, "", `/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+function rememberLaunchSession(launchId: string, sessionId: string): void {
+  sessionStorage.setItem(`mk-launch-session:${launchId}`, sessionId);
+}
+
+function rememberedLaunchSession(launchId: string, sessions: SessionInfo[]): SessionInfo | undefined {
+  const sessionId = sessionStorage.getItem(`mk-launch-session:${launchId}`);
+  return sessionId ? sessions.find((item) => item.sessionId === sessionId) : undefined;
+}
+async function fetchSessionIdentity(sessionId: string): Promise<{ modelStudentId: string; agentId: string }> {
+  const base = import.meta.env.VITE_CONTROL_API_URL ?? "http://127.0.0.1:7331/api/control/v1";
+  const response = await fetch(`${base}/sessions/${encodeURIComponent(sessionId)}`);
+  const value = await response.json() as { data?: { modelStudentId: string; agentId: string }; detail?: string };
+  if (!response.ok || !value.data) throw new Error(value.detail ?? "Session 不存在");
+  return value.data;
 }
 
 function errorMessage(value: unknown): string {
   if (value instanceof Error && value.message.trim()) return value.message;
   if (typeof value === "string" && value.trim()) return value;
   return "发生未知错误";
+}
+
+function thoughtLevelConfigId(options: acp.SessionConfigOption[]): string | undefined {
+  return options.find((option) => option.type === "select" && option.category === "thought_level")?.id;
 }

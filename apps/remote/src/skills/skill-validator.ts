@@ -11,7 +11,7 @@ const MAX_SINGLE_FILE_BYTES = 256 * 1024;
 /** 校验 Agent Skills 标准字段，并把整个目录内容固定为一个可复现 Hash。 */
 export async function validateSkillDirectory(
   root: string,
-  base: Omit<SkillInstallRecord, "id" | "name" | "description" | "rootPath" | "contentHash" | "manifest">,
+  base: Omit<SkillInstallRecord, "name" | "description" | "rootPath" | "contentHash" | "manifest">,
 ): Promise<SkillDefinition> {
   const rootReal = await realpath(root);
   const files = await collectFiles(rootReal);
@@ -28,7 +28,6 @@ export async function validateSkillDirectory(
   }
   return {
     ...base,
-    id: `skill:${manifest.name}`,
     name: manifest.name,
     description: manifest.description,
     rootPath: rootReal,

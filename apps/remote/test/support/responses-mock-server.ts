@@ -46,6 +46,7 @@ const firstReasoningItem = {
   type: "reasoning",
   summary: [{ type: "summary_text", text: "先并行读取两份沙箱资料。" }],
   status: "completed",
+  encrypted_content: "ENCRYPTED_REASONING_SENTINEL_MK_20260813",
 } as const;
 
 const finalReasoningItem = {
@@ -418,6 +419,30 @@ function containsFunctionCallOutput(value: unknown): boolean {
   return Object.values(record).some(containsFunctionCallOutput);
 }
 
+function validContinuation(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  const reasoningIndex = value.findIndex((item) => isRecord(item)
+    && item.type === "reasoning"
+    && item.encrypted_content === firstReasoningItem.encrypted_content);
+  const callAIndex = value.findIndex((item) => isRecord(item)
+    && item.type === "function_call" && item.call_id === readCallA.call_id);
+  const callBIndex = value.findIndex((item) => isRecord(item)
+    && item.type === "function_call" && item.call_id === readCallB.call_id);
+  const outputAIndex = value.findIndex((item) => isRecord(item)
+    && item.type === "function_call_output" && item.call_id === readCallA.call_id);
+  const outputBIndex = value.findIndex((item) => isRecord(item)
+    && item.type === "function_call_output" && item.call_id === readCallB.call_id);
+  return reasoningIndex >= 0
+    && reasoningIndex < callAIndex
+    && callAIndex < callBIndex
+    && callBIndex < outputAIndex
+    && outputAIndex < outputBIndex;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function waitForNextWrite(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -503,7 +528,9 @@ export async function startResponsesMockServer(): Promise<ResponsesMockServer> {
       const events = isFailureScenario(body)
         ? failedEvents()
         : containsFunctionCallOutput(body.input)
-          ? finalRoundEvents()
+          ? validContinuation(body.input)
+            ? finalRoundEvents()
+            : failedEvents()
           : firstRoundEvents();
       await writeEventStream(response, events, eventTypes);
     })().catch((error: unknown) => {

@@ -11,7 +11,6 @@ export interface SkillManifest {
 }
 
 export interface SkillInstallRecord {
-  id: string;
   name: string;
   description: string;
   source:

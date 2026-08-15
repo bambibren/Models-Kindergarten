@@ -33,4 +33,16 @@ describe("demo agent storage", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]?.description).toBe("已编辑");
   });
+
+  it("drops the removed Agent reasoning field from persisted Demo records", () => {
+    const storage = memoryStorage();
+    storage.setItem("models-kindergarten.demo-agents", JSON.stringify([{
+      id: "legacy", name: "旧 Agent", description: "旧数据", modules: createDefaultModules(), defaultReasoningProfile: "deep", updatedAt: "昨天", state: "active",
+    }]));
+    const loaded = loadSavedAgents(storage)[0];
+    expect(loaded).toBeDefined();
+    expect(loaded).not.toHaveProperty("defaultReasoningProfile");
+    if (loaded) saveAgent(storage, loaded);
+    expect(storage.getItem("models-kindergarten.demo-agents")).not.toContain("defaultReasoningProfile");
+  });
 });

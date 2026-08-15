@@ -1,3 +1,4 @@
+import type { TurnState } from "@kindergarten/contracts";
 import {
   idlePromptTurn,
   type InteractionCollection,
@@ -11,102 +12,78 @@ import {
 export type PromptTurnAction =
   | { type: "turn/reset" }
   | { type: "turn/start"; request: PromptRequestState }
+  | { type: "turn/remote-state"; sessionId: string; turn: TurnState }
   | { type: "interaction/enqueue"; interaction: PendingInteractionState }
   | { type: "interaction/remove"; id: string }
-  | {
-      type: "turn/complete";
-      operationId: string;
-      reason: Exclude<import("@agentclientprotocol/sdk").StopReason, "cancelled">;
-    }
+  | { type: "turn/complete"; operationId: string; reason: Exclude<import("@agentclientprotocol/sdk").StopReason, "cancelled"> }
   | { type: "turn/fail"; operationId: string; failure: PromptTurnFailure }
   | { type: "turn/cancel"; operationId: string };
 
-/**
- * 当前 Prompt Turn 的所有合法转换集中在这里。
- * 组件不再组合 running、error、interaction 等零散字段推断业务状态。
- */
-export function promptTurnReducer(
-  state: PromptTurnState,
-  action: PromptTurnAction,
-): PromptTurnState {
+export function promptTurnReducer(state: PromptTurnState, action: PromptTurnAction): PromptTurnState {
   if (action.type === "turn/reset") return idlePromptTurn;
   if (action.type === "turn/start") {
-    return { phase: "running", request: action.request };
+    return { status: "active", phase: "accepted", waitingFor: { permission: 0, input: 0 }, request: action.request, interactions: emptyInteractions() };
   }
+  if (action.type === "turn/remote-state") return reduceRemoteState(state, action.sessionId, action.turn);
   if (action.type === "interaction/enqueue") {
-    if (state.phase !== "running" && state.phase !== "waiting_for_user") return state;
+    if (state.status !== "active") return state;
     const sessionId = interactionSessionId(action.interaction);
     if (sessionId && sessionId !== state.request.sessionId) return state;
-    const interactions = state.phase === "waiting_for_user"
-      ? addInteraction(state.interactions, action.interaction)
-      : addInteraction(emptyInteractions(), action.interaction);
-    return { phase: "waiting_for_user", request: state.request, interactions };
+    return { ...state, interactions: addInteraction(state.interactions, action.interaction) };
   }
   if (action.type === "interaction/remove") {
-    if (state.phase !== "waiting_for_user") return state;
-    const interactions = removeInteraction(state.interactions, action.id);
-    return interactions.order.length > 0
-      ? { ...state, interactions }
-      : { phase: "running", request: state.request };
+    return state.status === "active" ? { ...state, interactions: removeInteraction(state.interactions, action.id) } : state;
   }
   if (!matchesOperation(state, action.operationId)) return state;
   if (action.type === "turn/complete") {
-    return { phase: "completed", request: state.request, reason: action.reason };
+    if (state.status === "completed") return state;
+    if (state.status !== "active") return state;
+    return { status: "completed", request: state.request, reason: action.reason };
   }
   if (action.type === "turn/fail") {
-    return {
-      phase: "failed",
-      request: state.request,
-      failure: action.failure,
-      actions: actionsFor(action.failure),
-    };
+    if (state.status !== "active" && state.status !== "failed") return state;
+    return { status: "failed", request: state.request, failure: action.failure, actions: actionsFor(action.failure) };
   }
-  return { phase: "cancelled", request: state.request };
+  if (state.status !== "active") return state;
+  return { status: "cancelled", request: state.request };
 }
 
-function interactionSessionId(interaction: PendingInteractionState): string | undefined {
-  return "sessionId" in interaction.request && typeof interaction.request.sessionId === "string"
-    ? interaction.request.sessionId
-    : undefined;
-}
-
-function matchesOperation(
-  state: PromptTurnState,
-  operationId: string,
-): state is Extract<PromptTurnState, { request: PromptRequestState }> {
-  return (
-    (state.phase === "running" || state.phase === "waiting_for_user") &&
-    state.request.operationId === operationId
-  );
-}
-
-function actionsFor(failure: PromptTurnFailure): TurnAction[] {
-  return failure.kind === "connection_error"
-    ? [{ type: "reconnect", label: "重新连接" }]
-    : [{ type: "retry_prompt", label: "重试回答" }];
-}
-
-function emptyInteractions(): InteractionCollection {
-  return { order: [], byId: {} };
-}
-
-function addInteraction(
-  state: InteractionCollection,
-  interaction: PendingInteractionState,
-): InteractionCollection {
-  if (state.byId[interaction.id]) return state;
+function reduceRemoteState(state: PromptTurnState, sessionId: string, turn: TurnState): PromptTurnState {
+  if (state.status === "idle" || state.request.sessionId !== sessionId || state.request.turnId !== turn.turnId) return state;
+  if (turn.status === "active") {
+    if (state.status !== "active") return state;
+    return { ...state, phase: turn.phase, waitingFor: turn.waitingFor };
+  }
+  if (turn.status === "completed") return { status: "completed", request: state.request, reason: "end_turn" };
+  if (turn.status === "cancelled") return { status: "cancelled", request: state.request };
+  if (turn.status === "interrupted") return { status: "interrupted", request: state.request, actions: [{ type: "retry_prompt", label: "重试回答" }] };
   return {
-    order: [...state.order, interaction.id],
-    byId: { ...state.byId, [interaction.id]: interaction },
+    status: "failed",
+    request: state.request,
+    failure: { kind: "backend_error", message: "该轮执行失败" },
+    actions: [{ type: "retry_prompt", label: "重试回答" }],
   };
 }
 
-function removeInteraction(
-  state: InteractionCollection,
-  id: string,
-): InteractionCollection {
+function interactionSessionId(interaction: PendingInteractionState): string | undefined {
+  return "sessionId" in interaction.request && typeof interaction.request.sessionId === "string" ? interaction.request.sessionId : undefined;
+}
+
+function matchesOperation(state: PromptTurnState, operationId: string): state is Exclude<PromptTurnState, { status: "idle" }> {
+  return state.status !== "idle" && state.request.operationId === operationId;
+}
+
+function actionsFor(failure: PromptTurnFailure): TurnAction[] {
+  return failure.kind === "connection_error" ? [{ type: "reconnect", label: "重新连接" }] : [{ type: "retry_prompt", label: "重试回答" }];
+}
+
+function emptyInteractions(): InteractionCollection { return { order: [], byId: {} }; }
+function addInteraction(state: InteractionCollection, interaction: PendingInteractionState): InteractionCollection {
+  if (state.byId[interaction.id]) return state;
+  return { order: [...state.order, interaction.id], byId: { ...state.byId, [interaction.id]: interaction } };
+}
+function removeInteraction(state: InteractionCollection, id: string): InteractionCollection {
   if (!state.byId[id]) return state;
-  const byId = { ...state.byId };
-  delete byId[id];
+  const byId = { ...state.byId }; delete byId[id];
   return { order: state.order.filter((value) => value !== id), byId };
 }

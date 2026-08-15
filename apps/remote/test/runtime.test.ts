@@ -13,12 +13,16 @@ import type {
   ModelStudent,
 } from "../src/model/model-provider.js";
 import type { SessionEntry } from "../src/repository/session-types.js";
-import { AgentRuntime, type RunObserver } from "../src/runtime/agent-runtime.js";
+import { AgentRunner, AgentRuntime, type RunObserver } from "../src/runtime/agent-runtime.js";
+import { createSmallModelRepeatedInvalidToolCallGuard } from "../src/runtime/repeated-invalid-tool-call-guard.js";
+import { noopRuntimeObservationSink } from "@kindergarten/runtime-observation";
 import { ModelProviderError } from "../src/model/model-error.js";
 import { ProcessSandbox } from "../src/tools/process-sandbox.js";
 import { FileSandbox } from "../src/tools/sandbox.js";
+import { prepareToolCall } from "../src/tools/tool-call-preparer.js";
 import type { PreparedToolCall, ToolOutcome } from "../src/tools/tool-registry.js";
 import { ToolRegistry } from "../src/tools/tool-registry.js";
+import { ToolCallLedger, ToolRuntime } from "../src/tools/tool-runtime.js";
 import { WebAccess } from "../src/tools/web-access.js";
 
 const dirs: string[] = [];
@@ -136,6 +140,52 @@ describe("V1.6 Agent Runtime", () => {
     expect(names).not.toContain("update_plan");
   });
 
+  it("普通参数错误展开真实 Schema，不猜测或改写模型参数", async () => {
+    const registry = new ToolRegistry(await makeSandbox());
+    const prepared = prepareToolCall(registry, {
+      name: "read_file",
+      arguments: { fileName: "a.txt" },
+    }, "invalid-read");
+    const observer = new TestObserver(true);
+    const result = await new ToolRuntime(registry).executeBatch(
+      [prepared],
+      observer,
+      new ToolCallLedger(),
+      new AbortController().signal,
+    );
+    const raw = result.outcomes[0]?.rawOutput as {
+      validation_errors?: Array<{ keyword?: string; parameter?: string }>;
+      schema_correction?: {
+        expected_schema?: { required?: string[]; additionalProperties?: boolean };
+      };
+      argument_correction?: unknown;
+    };
+
+    expect(raw.validation_errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ keyword: "required", parameter: "path" }),
+      expect.objectContaining({ keyword: "additionalProperties", parameter: "fileName" }),
+    ]));
+    expect(raw.schema_correction?.expected_schema).toMatchObject({
+      required: ["path"],
+      additionalProperties: false,
+    });
+    expect(raw.argument_correction).toBeUndefined();
+  });
+
+  it("无效参数的去重键不受对象字段顺序影响", async () => {
+    const registry = new ToolRegistry(await makeSandbox());
+    const first = prepareToolCall(registry, {
+      name: "read_file",
+      arguments: { fileName: "a.txt", extra: true },
+    }, "invalid-first");
+    const second = prepareToolCall(registry, {
+      name: "read_file",
+      arguments: { extra: true, fileName: "a.txt" },
+    }, "invalid-second");
+
+    expect(first.dedupeKey).toBe(second.dedupeKey);
+  });
+
   it.runIf(process.platform === "darwin")("终端允许沙箱内写入并拒绝沙箱外写入", async () => {
     const sandbox = await makeSandbox();
     const processSandbox = new ProcessSandbox(sandbox);
@@ -170,14 +220,324 @@ describe("V1.6 Agent Runtime", () => {
       new AbortController().signal,
     )).rejects.toMatchObject({ name: "RunFailure", message: "Ollama 不可用" });
   });
+
+  it("系统提示明确每轮必须返回工具调用或非空最终正文", async () => {
+    const sandbox = await makeSandbox();
+    const provider = new CapturingReasoningProvider();
+    const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
+
+    await runtime.run(
+      { text: "说明输出要求", sessionEntries: [] },
+      new TestObserver(true),
+      new AbortController().signal,
+    );
+
+    expect(provider.lastInput?.systemPrompt).not.toContain("test");
+    expect(provider.lastInput?.systemPrompt).toContain("工具调用");
+    expect(provider.lastInput?.systemPrompt).toContain("非空的最终正文");
+    expect(provider.lastInput?.systemPrompt).toContain("thinking");
+    expect(provider.lastInput?.systemPrompt).toContain("【Skill 使用协议】");
+    expect(provider.lastInput?.systemPrompt).toContain("当前 JSON Schema");
+  });
+
+  it("thinking-only 直接失败且不发起额外模型请求", async () => {
+    const sandbox = await makeSandbox();
+    const provider = new ScriptedResponseProvider([
+      [
+        { type: "thinking_delta", text: "我还应该继续处理" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
+
+    await expect(runtime.run(
+      { text: "完成任务", sessionEntries: [] },
+      new TestObserver(true),
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      name: "RunFailure",
+      code: "EMPTY_ASSISTANT_RESPONSE",
+      retryable: true,
+      message: expect.stringContaining("只有思考过程"),
+    });
+    expect(provider.inputs).toHaveLength(1);
+  });
+
+  it("完全空响应直接失败且不发起额外模型请求", async () => {
+    const sandbox = await makeSandbox();
+    const provider = new ScriptedResponseProvider([
+      [{ type: "finish", reason: "stop" }],
+    ]);
+    const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
+
+    await expect(runtime.run(
+      { text: "完成任务", sessionEntries: [] },
+      new TestObserver(true),
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      name: "RunFailure",
+      code: "EMPTY_ASSISTANT_RESPONSE",
+      retryable: true,
+      message: expect.stringContaining("没有返回工具调用或最终正文"),
+    });
+    expect(provider.inputs).toHaveLength(1);
+  });
+
+  it("被截断的正文不能被误判为完成", async () => {
+    const sandbox = await makeSandbox();
+    const provider = new ScriptedResponseProvider([
+      [
+        { type: "text_delta", text: "尚未写完的回答" },
+        { type: "finish", reason: "length" },
+      ],
+    ]);
+    const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
+
+    await expect(runtime.run(
+      { text: "完成任务", sessionEntries: [] },
+      new TestObserver(true),
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      name: "RunFailure",
+      code: "MODEL_OUTPUT_TRUNCATED",
+      retryable: true,
+    });
+    expect(provider.inputs).toHaveLength(1);
+  });
+
+  it("非空拒绝正文仍是可展示的正常最终答复", async () => {
+    const sandbox = await makeSandbox();
+    const provider = new ScriptedResponseProvider([
+      [
+        { type: "text_delta", text: "抱歉，我不能协助完成这个请求。" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    const observer = new TestObserver(true);
+    const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
+
+    const result = await runtime.run(
+      { text: "完成任务", sessionEntries: [] },
+      observer,
+      new AbortController().signal,
+    );
+
+    expect(result.reason).toBe("stop");
+    expect(observer.textOutput).toBe("抱歉，我不能协助完成这个请求。");
+    expect(provider.inputs).toHaveLength(1);
+  });
+
+  it("没有 Agent resolver 时按 auto 跟随 ModelStudent 能力默认值", async () => {
+    const sandbox = await makeSandbox();
+    const provider = new CapturingReasoningProvider();
+    const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
+    await runtime.run(
+      { text: "使用默认思考强度", sessionEntries: [] },
+      new TestObserver(true),
+      new AbortController().signal,
+    );
+    expect(provider.lastInput?.reasoning).toMatchObject({
+      requestedProfile: "auto",
+      resolvedProfile: "deep",
+      source: "model_default",
+      native: { effort: "high" },
+    });
+  });
+
+  it("Provider cancelled 后丢弃已累积 Tool Call，不产生任何工具副作用", async () => {
+    const sandbox = await makeSandbox();
+    const observer = new TestObserver(true);
+    const runtime = AgentRuntime.fromRegistry(new CancelledToolProvider(), new ToolRegistry(sandbox));
+    const result = await runtime.run(
+      { text: "不要在取消后写文件", sessionEntries: [] },
+      observer,
+      new AbortController().signal,
+    );
+
+    expect(result.reason).toBe("cancelled");
+    expect(observer.toolStartCount).toBe(0);
+    expect(observer.permissionCount).toBe(0);
+    expect(observer.outcomes).toHaveLength(0);
+    await expect(readFile(join(sandbox.root, "cancelled.txt"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("小模型跨三个模型轮提交字段顺序不同但同值的错误参数后结束 Turn", async () => {
+    const sandbox = await makeSandbox();
+    const observer = new TestObserver(true);
+    const runner = new AgentRunner(
+      new InvalidArgumentsProvider("small"),
+      new ToolRuntime(new ToolRegistry(sandbox)),
+      new ContextAssembler(),
+      noopRuntimeObservationSink,
+      undefined,
+      createSmallModelRepeatedInvalidToolCallGuard,
+    );
+
+    await expect(runner.run(
+      { text: "读取文件", sessionEntries: [] },
+      observer,
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      name: "RunFailure",
+      code: "TOOL_ARGUMENT_RETRY_LIMIT",
+      retryable: false,
+    });
+    expect(observer.outcomes).toHaveLength(3);
+    expect(observer.outcomes.every((item) => item.error?.code === "invalid_arguments")).toBe(true);
+  });
+
+  it("大模型收到相同参数错误提示但不启用重复调用终止节点", async () => {
+    const sandbox = await makeSandbox();
+    const observer = new TestObserver(true);
+    const runner = new AgentRunner(
+      new InvalidArgumentsProvider("large", 3),
+      new ToolRuntime(new ToolRegistry(sandbox)),
+      new ContextAssembler(),
+      noopRuntimeObservationSink,
+      undefined,
+      createSmallModelRepeatedInvalidToolCallGuard,
+    );
+
+    const result = await runner.run(
+      { text: "读取文件", sessionEntries: [] },
+      observer,
+      new AbortController().signal,
+    );
+
+    expect(result.reason).toBe("stop");
+    expect(result.usage.modelRequests).toBe(4);
+    expect(observer.outcomes).toHaveLength(3);
+    expect(observer.outcomes.every((item) => item.error?.code === "invalid_arguments")).toBe(true);
+    expect(observer.textOutput).toContain("已停止尝试错误参数");
+  });
 });
+
+class InvalidArgumentsProvider implements ModelProvider {
+  readonly student: ModelStudent;
+  private round = 0;
+
+  constructor(
+    sizeClass: "small" | "large",
+    private readonly invalidRounds = Number.POSITIVE_INFINITY,
+  ) {
+    this.student = {
+      id: "invalid-arguments",
+      name: "Invalid Arguments",
+      sizeClass,
+      provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
+      generationDefaults: {},
+    };
+  }
+
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+
+  async *stream(): AsyncIterable<ModelEvent> {
+    this.round += 1;
+    if (this.round > this.invalidRounds) {
+      yield { type: "text_delta", text: "已停止尝试错误参数" };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+    yield {
+      type: "tool_calls",
+      calls: [{
+        name: "read_file",
+        arguments: this.round === 1
+          ? { fileName: "a.txt", extra: true }
+          : { extra: true, fileName: "a.txt" },
+      }],
+    };
+    yield { type: "finish", reason: "stop" };
+  }
+}
+
+class CancelledToolProvider implements ModelProvider {
+  readonly student: ModelStudent = {
+    id: "cancelled-tool",
+    name: "Cancelled Tool",
+    sizeClass: "large",
+    provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
+    generationDefaults: {},
+  };
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+  async *stream(): AsyncIterable<ModelEvent> {
+    yield {
+      type: "tool_calls",
+      calls: [{
+        id: "cancelled-write",
+        index: 0,
+        name: "write_file",
+        arguments: { path: "cancelled.txt", content: "不应写入" },
+      }],
+    };
+    yield { type: "finish", reason: "cancelled" };
+  }
+}
+
+class CapturingReasoningProvider implements ModelProvider {
+  readonly student: ModelStudent = {
+    id: "reasoning-default",
+    name: "Reasoning Default",
+    sizeClass: "large",
+    provider: { kind: "openai-compatible", model: "fixture", baseUrl: "http://127.0.0.1" },
+    generationDefaults: {},
+  };
+  readonly reasoningCapability: import("@kindergarten/contracts").ModelReasoningCapability = {
+    schemaVersion: 1,
+    control: "effort_levels",
+    adjustable: true,
+    supportedProfiles: ["balanced", "deep"],
+    defaultProfile: "deep",
+  };
+  lastInput?: ModelInput;
+  nativeReasoning(profile: "balanced" | "deep") {
+    return { effort: profile === "deep" ? "high" : "medium" };
+  }
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+  async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
+    this.lastInput = structuredClone(input);
+    yield { type: "text_delta", text: "已完成" };
+    yield { type: "finish", reason: "stop" };
+  }
+}
+
+class ScriptedResponseProvider implements ModelProvider {
+  readonly student: ModelStudent = {
+    id: "scripted-response",
+    name: "Scripted Response",
+    sizeClass: "large",
+    provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
+    generationDefaults: {},
+  };
+  readonly inputs: ModelInput[] = [];
+
+  constructor(private readonly rounds: ModelEvent[][]) {}
+
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+
+  async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
+    this.inputs.push(structuredClone(input));
+    const events = this.rounds[this.inputs.length - 1] ?? [];
+    for (const event of events) yield structuredClone(event);
+  }
+}
 
 class FailedProvider implements ModelProvider {
   readonly student: ModelStudent = {
     id: "failed",
     name: "Failed",
+    sizeClass: "large",
     provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
-    agentConfig: { systemPrompt: "test" },
+    generationDefaults: {},
   };
   serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
@@ -191,8 +551,9 @@ class RepeatingProvider implements ModelProvider {
   readonly student: ModelStudent = {
     id: "repeat",
     name: "Repeat",
+    sizeClass: "large",
     provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
-    agentConfig: { systemPrompt: "test" },
+    generationDefaults: {},
   };
 
   serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
@@ -247,13 +608,14 @@ class TestObserver implements RunObserver {
   contextSummaries: ContextSummary[] = [];
   textOutput = "";
   permissionCount = 0;
+  toolStartCount = 0;
 
   constructor(private readonly permission: boolean) {}
   async context(summary: ContextSummary): Promise<void> { this.contextSummaries.push(summary); }
   async text(_round: number, value: string): Promise<void> { this.textOutput += value; }
   async thought(): Promise<void> {}
   async roundComplete(): Promise<void> {}
-  async toolStart(_call: PreparedToolCall): Promise<void> {}
+  async toolStart(_call: PreparedToolCall): Promise<void> { this.toolStartCount += 1; }
   async toolFinish(_call: PreparedToolCall, _status: "pending" | "in_progress" | "completed" | "failed", outcome: ToolOutcome): Promise<void> {
     this.outcomes.push(outcome);
   }

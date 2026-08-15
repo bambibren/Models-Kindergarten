@@ -16,6 +16,7 @@ interface PendingTrace {
   sessionId: string;
   turnId: string;
   variant: TurnTraceDocument["variant"];
+  resolvedReasoning: TurnTraceDocument["resolvedReasoning"];
   startedAt: number;
   modelRounds: ModelRoundTrace[];
   toolCalls: ToolCallTrace[];
@@ -33,6 +34,7 @@ export class EvaluationTraceExporter implements RuntimeObservationSink {
   private readonly pending = new Map<string, PendingTrace>();
   private readonly uploads = new Set<Promise<void>>();
   private readonly endpoint: URL;
+  private readonly completed = new Map<string, TurnTraceDocument>();
 
   constructor(
     baseUrl: string,
@@ -49,6 +51,7 @@ export class EvaluationTraceExporter implements RuntimeObservationSink {
         sessionId: event.sessionId,
         turnId: event.turnId,
         variant: structuredClone(event.variant),
+        resolvedReasoning: structuredClone(event.resolvedReasoning),
         startedAt: event.startedAt,
         modelRounds: [],
         toolCalls: [],
@@ -66,6 +69,7 @@ export class EvaluationTraceExporter implements RuntimeObservationSink {
         id: event.roundId,
         index: event.index,
         startedAt: event.startedAt,
+        resolvedReasoning: structuredClone(event.resolvedReasoning),
         context: structuredClone(event.context),
       });
       return;
@@ -80,6 +84,8 @@ export class EvaluationTraceExporter implements RuntimeObservationSink {
       if (!round) return;
       if (event.inputTokens !== undefined) round.context.inputTokens = event.inputTokens;
       if (event.outputTokens !== undefined) round.outputTokens = event.outputTokens;
+      if (event.cachedInputTokens !== undefined) round.cachedInputTokens = event.cachedInputTokens;
+      if (event.reasoningOutputTokens !== undefined) round.reasoningOutputTokens = event.reasoningOutputTokens;
       return;
     }
     if (event.type === "model_round_completed") {
@@ -124,6 +130,7 @@ export class EvaluationTraceExporter implements RuntimeObservationSink {
       trace.errors.push({ scope: event.scope, message: event.message, at: event.at });
       return;
     }
+    if (event.type === "capability_generation_changed") return;
 
     this.pending.delete(event.runId);
     const document: TurnTraceDocument = {
@@ -133,6 +140,7 @@ export class EvaluationTraceExporter implements RuntimeObservationSink {
       ...(event.stopReason ? { stopReason: event.stopReason } : {}),
       completedAt: event.completedAt,
     };
+    this.completed.set(turnKey(document.sessionId, document.turnId), structuredClone(document));
     const upload = this.upload(document).finally(() => this.uploads.delete(upload));
     this.uploads.add(upload);
   }
@@ -140,6 +148,11 @@ export class EvaluationTraceExporter implements RuntimeObservationSink {
   /** 测试和进程关闭时可等待在途上传；正常 Prompt 不等待这个 Promise。 */
   async flush(): Promise<void> {
     await Promise.all([...this.uploads]);
+  }
+
+  trace(sessionId: string, turnId: string): TurnTraceDocument | undefined {
+    const value = this.completed.get(turnKey(sessionId, turnId));
+    return value ? structuredClone(value) : undefined;
   }
 
   private async upload(document: TurnTraceDocument): Promise<void> {
@@ -159,6 +172,10 @@ export class EvaluationTraceExporter implements RuntimeObservationSink {
       );
     }
   }
+}
+
+function turnKey(sessionId: string, turnId: string): string {
+  return `${sessionId}\u0000${turnId}`;
 }
 
 function findRound(trace: PendingTrace, roundId: string): ModelRoundTrace | undefined {

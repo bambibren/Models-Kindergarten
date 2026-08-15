@@ -1,9 +1,9 @@
 # Models Kindergarten 技术方案与演进路线
 
 > 当前实现基线：V1.6 Conventional Single-Agent Runtime + MCP/Agent Skills
-> 当前目标：在不改变 ACP Chat 主链的前提下，打通标准化外部能力与渐进知识包链路。
+> 当前目标：D2P-1 Demo 产品化；在不改变 ACP Chat 主链的前提下，落地 Agent/Session/Skill/MCP/File/Experiment/人工评分闭环。权威计划见 [Demo 产品化实施计划](superpowers/plans/2026-08-11-demo-to-production-implementation.md)。
 
-## 1. V1.6 产品边界
+## 1. D2P-1 产品边界
 
 ```text
 User → React Chat → ACP Client ⇄ Remote ACP Agent
@@ -62,7 +62,7 @@ UI 投影层
 
 ## 4. Runtime 循环与去重
 
-Runtime 不再使用模型次数、Tool 次数、运行时长或连续失败数等通用预算强制结束 Prompt Turn。用户取消通过 AbortSignal 立即停止；模型不再提出 Tool 时，以模型 finish reason 完成。
+Runtime 不使用模型请求轮数、Tool 次数或运行时长等笼统预算截断正常工作。用户取消通过 AbortSignal 立即停止；模型不再提出 Tool 时，以模型 finish reason 完成。当前只保留既有的小模型无效参数重复调用守卫，不再设置单 Turn 的模型请求轮次上限。
 
 ToolCallLedger 使用 `toolName + canonicalJson(arguments)` 作为精确 `dedupeKey`：首次调用执行；后续相同调用不重复产生副作用，而是把先前状态和输出结构化返回给模型。网络瞬时重试只发生在同一次 Tool/Provider 调用内部。
 
@@ -80,20 +80,23 @@ ToolCallLedger 使用 `toolName + canonicalJson(arguments)` 作为精确 `dedupe
 
 Plan 能力完全不做：没有 `update_plan`、PlanState、PlanStore、ACP Plan UI、Planner/Executor 或 Workflow/DAG。
 
-## 6. Turn Evaluation 最小链路
+## 6. Turn Evaluation 与 Context Experiment
 
 AgentRunner 在关键执行边界向只读 Observation Port 发布事件。Exporter 按 `runId` 聚合终态 Trace，并异步通过 HTTP 发送给 Evaluation Service。Chat Web 只在 Turn 完成后生成带 `sessionId + turnId` 的导航链接，不读取评测数据。
 
-Evaluation 当前只计算客观字段：完成状态、Model Round、Tool 调用与成败、重复调用、上下文与输出 Token、上下文截断、首 Token 延迟、总耗时、错误及权限违规。不包含 Dataset、Judge、总分和模型对比。
+Evaluation Service 计算客观 Runtime metrics：完成状态、Model Round、Tool 调用与成败、重复调用、上下文与输出 Token、上下文截断、首 Token 延迟、总耗时、错误及权限违规。
+
+D2P-1 用这些事实确定性计算“执行”分，并由人工分别标注理解、规划和输出。每次实验全部 lane 完成后，Remote 调用当前 ModelStudent 生成一次 `annotation_worksheet_v1`：合并需求项、从每条回答及 Tool 过程提取 Workflow、把每条结果切成稳定分段。该调用关闭 Provider 推理模式，只做结构化整理，不返回 verdict、分数、排名或 winner；服务器会校验分段覆盖和原文 hash。四维等权形成总分、雷达图、排名和 winner；任一人工维度未完成时 scorecard 保持 draft。不得引入 Dataset Judge 或让模型替用户评分。
 
 ## 7. ACP 不变量
 
 - 一个浏览器页面只有一个 ACP connection owner；
 - 一个 Session 同时最多一个 Prompt；
-- `load` 完整回放，`resume` 零回放；
+- `load` 完整回放；`resume` 默认零回放，携带当前 Turn 游标时只补齐断线增量；
+- WebSocket 意外断开不取消 Runtime，也不自动重连；用户点击既有重连按钮后建立新连接并 resume。停止按钮只 cancel 当前 Turn，正常离开会话页 close Session；
 - Handler 只向当前 AgentContext 输出，不跨 WebSocket 广播；
 - Message、Thought、Tool 使用各自标准 ID；
-- PromptResponse 是 Web 当前流式投影的整体提交边界；
+- 正常连接由 PromptResponse 提交流式投影；断线恢复后由权威 Turn 终态提交；
 - Permission 是安全授权，Elicitation 是信息补充。
 
 ## 8. 验收范围
@@ -108,7 +111,17 @@ Evaluation 当前只计算客观字段：完成状态、Model Round、Tool 调�
 - Session V1/V2→V3 迁移、原子提交、Load/Resume；
 - typecheck、test、build 和真实页面链路。
 
-## 9. 后续演进
+## 9. D2P-1 交付顺序
+
+1. 共享领域合同、原子 Store 和 Control API 安全壳；
+2. Agent 与固定绑定 Session、每 Turn 动态能力解析；
+3. Skill/MCP/FileReference 产品域；
+4. Context Experiment、人工量表和 Runtime execution score；
+5. 正式 Web/Evaluation Web 路由、跨应用 E2E 和逐路由切换。
+
+OpenAI 官方、自定义 Responses 与硅基流动 Chat Completions 已接入统一 ProviderPreset/ProtocolAdapter 入园闭环；Ollama 管理入园、Anthropic Messages 和模型目录发现仍留白。小说真实创作、Bearer Token 小说 MCP 和自动评分继续留白，首页只保留不可点击的小说调研卡片。
+
+## 10. 后续演进
 
 V1.6 之后按独立闭环选择，不默认一次全部进入：
 

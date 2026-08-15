@@ -4,7 +4,12 @@
  * 原始 cause 留在 Remote，供日志和调试使用。
  */
 export class RunFailure extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(
+    message: string,
+    readonly code = "INTERNAL_ERROR",
+    readonly retryable = true,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = "RunFailure";
   }
@@ -16,7 +21,7 @@ export class RunFailure extends Error {
  */
 export function toRunFailure(cause: unknown): RunFailure {
   if (cause instanceof RunFailure) return cause;
-  return new RunFailure(errorMessage(cause), { cause });
+  return new RunFailure(errorMessage(cause), "INTERNAL_ERROR", true, { cause });
 }
 
 function errorMessage(cause: unknown): string {

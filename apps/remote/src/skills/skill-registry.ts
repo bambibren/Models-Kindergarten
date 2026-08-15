@@ -4,9 +4,9 @@ import type { SkillLockStore } from "./skill-lock-store.js";
 import type { SkillDefinition, SkillInstallRecord, SkillRoot } from "./skill-types.js";
 import { assertSkillResource, validateSkillDirectory } from "./skill-validator.js";
 
-/** Registry 只负责发现和只读加载；安装与 Git 网络操作由 SkillInstaller 单独承担。 */
+/** Registry 只负责已安装 Skill 的索引与只读加载；不处理来源发现、下载或发布。 */
 export class SkillRegistry {
-  private readonly byId = new Map<string, SkillDefinition>();
+  private readonly byName = new Map<string, SkillDefinition>();
 
   constructor(
     private readonly roots: SkillRoot[],
@@ -43,35 +43,39 @@ export class SkillRegistry {
         if ([...next.values()].some((item) => item.name === skill.name)) {
           throw new Error(`多个作用域存在同名 Skill: ${skill.name}`);
         }
-        next.set(skill.id, skill);
+        next.set(skill.name, skill);
       }
     }
-    this.byId.clear();
-    for (const [id, skill] of next) this.byId.set(id, skill);
+    this.byName.clear();
+    for (const [name, skill] of next) this.byName.set(name, skill);
+  }
+
+  async refresh(): Promise<void> {
+    await this.initialize();
   }
 
   all(): SkillInstallRecord[] {
-    return [...this.byId.values()].map(withoutInstructions);
+    return [...this.byName.values()].map(withoutInstructions);
   }
 
-  selected(ids: string[]): SkillInstallRecord[] {
-    return ids.map((id) => withoutInstructions(this.require(id)));
+  selected(names: string[]): SkillInstallRecord[] {
+    return names.map((name) => withoutInstructions(this.require(name)));
   }
 
-  instructions(id: string, allowedIds: Set<string>): { content: string; record: SkillInstallRecord } {
-    this.assertAllowed(id, allowedIds);
-    const skill = this.require(id);
+  instructions(name: string, allowedNames: Set<string>): { content: string; record: SkillInstallRecord } {
+    this.assertAllowed(name, allowedNames);
+    const skill = this.require(name);
     return { content: skill.instructions, record: withoutInstructions(skill) };
   }
 
   async readResource(
-    id: string,
+    name: string,
     relativePath: string,
-    allowedIds: Set<string>,
+    allowedNames: Set<string>,
   ): Promise<{ content: string; path: string; record: SkillInstallRecord }> {
-    this.assertAllowed(id, allowedIds);
+    this.assertAllowed(name, allowedNames);
     if (relativePath === "SKILL.md") throw new Error("请使用 activate_skill 读取 SKILL.md");
-    const skill = this.require(id);
+    const skill = this.require(name);
     const path = await assertSkillResource(skill.rootPath, relativePath);
     return {
       content: await readFile(path, "utf8"),
@@ -80,13 +84,13 @@ export class SkillRegistry {
     };
   }
 
-  private assertAllowed(id: string, allowedIds: Set<string>): void {
-    if (!allowedIds.has(id)) throw new Error(`当前 AgentVersion 未绑定 Skill: ${id}`);
+  private assertAllowed(name: string, allowedNames: Set<string>): void {
+    if (!allowedNames.has(name)) throw new Error(`当前 Agent 未绑定 Skill: ${name}`);
   }
 
-  private require(id: string): SkillDefinition {
-    const skill = this.byId.get(id);
-    if (!skill) throw new Error(`Skill 不存在: ${id}`);
+  private require(name: string): SkillDefinition {
+    const skill = this.byName.get(name);
+    if (!skill) throw new Error(`Skill 不存在: ${name}`);
     return skill;
   }
 }

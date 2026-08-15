@@ -10,6 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.3.0",
+    "@kindergarten/contracts": "workspace:*",
     "@kindergarten/evaluation-contract": "workspace:*",
     "lucide-react": "^1.28.0",
     "react": "19.2.8",

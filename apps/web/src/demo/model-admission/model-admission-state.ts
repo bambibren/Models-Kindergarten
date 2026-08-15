@@ -3,6 +3,19 @@ import type {
   DemoModelStudent,
   DemoProviderProtocol,
 } from "../demo-types.js";
+import {
+  readModelReasoningCapability,
+  type ModelReasoningCapability,
+} from "@kindergarten/contracts";
+
+type StoredDemoModelCapabilities = Omit<DemoModelCapabilities, "reasoningControl"> & {
+  /** 旧版 Demo 存储没有这个字段；读取时会补成 fixed。 */
+  reasoningControl?: unknown;
+};
+
+type StoredDemoModelStudent = Omit<DemoModelStudent, "capabilities"> & {
+  capabilities: StoredDemoModelCapabilities;
+};
 
 export type ModelAdmissionProviderId = "ollama" | "siliconflow" | "custom_responses";
 
@@ -57,6 +70,22 @@ const fullCapabilities: DemoModelCapabilities = {
   toolCalls: "supported",
   reasoning: "supported",
   usage: "supported",
+  reasoningControl: { schemaVersion: 1, control: "effort_levels", adjustable: true, supportedProfiles: ["fast", "balanced", "deep", "max"], defaultProfile: "balanced" },
+};
+
+const qwenOllamaCapabilities: DemoModelCapabilities = {
+  streaming: "supported",
+  toolCalls: "supported",
+  reasoning: "supported",
+  usage: "supported",
+  reasoningControl: {
+    schemaVersion: 1,
+    control: "toggle",
+    adjustable: true,
+    supportedProfiles: ["fast", "balanced"],
+    defaultProfile: "balanced",
+    native: { parameter: "think", values: [false, true] },
+  },
 };
 
 const ollamaModels: DiscoveredDemoModel[] = [
@@ -64,7 +93,7 @@ const ollamaModels: DiscoveredDemoModel[] = [
     id: "qwen3:8b",
     name: "Qwen3 8B",
     description: "本机已安装 · 推荐演示模型",
-    capabilities: fullCapabilities,
+    capabilities: qwenOllamaCapabilities,
   },
   {
     id: "deepseek-r1:8b",
@@ -75,6 +104,7 @@ const ollamaModels: DiscoveredDemoModel[] = [
       toolCalls: "unverified",
       reasoning: "supported",
       usage: "supported",
+      reasoningControl: { schemaVersion: 1, control: "fixed", adjustable: false, supportedProfiles: ["deep"], defaultProfile: "deep" },
     },
   },
 ];
@@ -84,7 +114,13 @@ const siliconFlowModels: DiscoveredDemoModel[] = [
     id: "Qwen/Qwen3-8B",
     name: "Qwen3 8B",
     description: "硅基流动 · 8B 参数",
-    capabilities: fullCapabilities,
+    capabilities: {
+      streaming: "supported",
+      toolCalls: "supported",
+      reasoning: "unverified",
+      usage: "supported",
+      reasoningControl: { schemaVersion: 1, control: "fixed", adjustable: false, supportedProfiles: ["balanced"], defaultProfile: "balanced" },
+    },
   },
   {
     id: "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
@@ -95,6 +131,7 @@ const siliconFlowModels: DiscoveredDemoModel[] = [
       toolCalls: "unverified",
       reasoning: "supported",
       usage: "supported",
+      reasoningControl: { schemaVersion: 1, control: "fixed", adjustable: false, supportedProfiles: ["deep"], defaultProfile: "deep" },
     },
   },
 ];
@@ -176,7 +213,7 @@ export function simulateAdmissionTest(draft: ModelAdmissionDraft): ModelAdmissio
       id: draft.modelId.trim(),
       name: draft.modelId.trim(),
       description: "自定义 Responses API · 用户指定模型",
-      capabilities: { ...fullCapabilities },
+      capabilities: cloneCapabilities(fullCapabilities),
     }],
   };
 }
@@ -198,7 +235,7 @@ export function buildDemoModelStudent(
     protocol: option.protocol,
     baseUrl: normalizeBaseUrl(draft.baseUrl),
     ...(draft.providerId === "ollama" ? {} : { credentialHint: maskCredential(draft.apiKey) }),
-    capabilities: { ...model.capabilities },
+    capabilities: cloneCapabilities(model.capabilities),
     score: null,
     state: "待评测",
   };
@@ -252,10 +289,10 @@ function maskCredential(apiKey: string): string {
 }
 
 function cloneModels(models: DiscoveredDemoModel[]): DiscoveredDemoModel[] {
-  return models.map((model) => ({ ...model, capabilities: { ...model.capabilities } }));
+  return models.map((model) => ({ ...model, capabilities: cloneCapabilities(model.capabilities) }));
 }
 
-function sanitizeStudent(student: DemoModelStudent): DemoModelStudent {
+function sanitizeStudent(student: StoredDemoModelStudent): DemoModelStudent {
   return {
     id: student.id,
     name: student.name,
@@ -264,15 +301,15 @@ function sanitizeStudent(student: DemoModelStudent): DemoModelStudent {
     protocol: student.protocol,
     baseUrl: student.baseUrl,
     ...(student.credentialHint ? { credentialHint: student.credentialHint } : {}),
-    capabilities: { ...student.capabilities },
+    capabilities: normalizeCapabilities(student.capabilities),
     score: student.score,
     state: student.state,
   };
 }
 
-function isDemoModelStudent(value: unknown): value is DemoModelStudent {
+function isDemoModelStudent(value: unknown): value is StoredDemoModelStudent {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<DemoModelStudent>;
+  const candidate = value as Partial<StoredDemoModelStudent>;
   return typeof candidate.id === "string"
     && typeof candidate.name === "string"
     && typeof candidate.model === "string"
@@ -289,17 +326,56 @@ function isProtocol(value: unknown): value is DemoProviderProtocol {
   return value === "ollama_native" || value === "openai_chat_completions" || value === "openai_responses";
 }
 
-function isCapabilities(value: unknown): value is DemoModelCapabilities {
+function isCapabilities(value: unknown): value is StoredDemoModelCapabilities {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<DemoModelCapabilities>;
+  const candidate = value as Partial<StoredDemoModelCapabilities>;
   return isCapabilityState(candidate.streaming)
     && isCapabilityState(candidate.toolCalls)
     && isCapabilityState(candidate.reasoning)
-    && isCapabilityState(candidate.usage);
+    && isCapabilityState(candidate.usage)
+    && (candidate.reasoningControl === undefined || isReasoningCapability(candidate.reasoningControl));
 }
 
-function isCapabilityState(value: unknown): value is DemoModelCapabilities[keyof DemoModelCapabilities] {
+function isCapabilityState(value: unknown): value is DemoModelCapabilities["streaming"] {
   return value === "supported" || value === "unsupported" || value === "unverified";
+}
+
+function normalizeCapabilities(capabilities: StoredDemoModelCapabilities): DemoModelCapabilities {
+  return {
+    streaming: capabilities.streaming,
+    toolCalls: capabilities.toolCalls,
+    reasoning: capabilities.reasoning,
+    usage: capabilities.usage,
+    reasoningControl: capabilities.reasoningControl === undefined
+      ? legacyReasoningCapability()
+      : readModelReasoningCapability(capabilities.reasoningControl),
+  };
+}
+
+function cloneCapabilities(capabilities: DemoModelCapabilities): DemoModelCapabilities {
+  return {
+    ...capabilities,
+    reasoningControl: readModelReasoningCapability(capabilities.reasoningControl),
+  };
+}
+
+function legacyReasoningCapability(): ModelReasoningCapability {
+  return {
+    schemaVersion: 1,
+    control: "fixed",
+    adjustable: false,
+    supportedProfiles: ["balanced"],
+    defaultProfile: "balanced",
+  };
+}
+
+function isReasoningCapability(value: unknown): boolean {
+  try {
+    readModelReasoningCapability(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function slug(value: string): string {

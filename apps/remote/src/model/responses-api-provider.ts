@@ -1,5 +1,10 @@
 import { ModelProviderError } from "./model-error.js";
 import type {
+  ConcreteReasoningProfile,
+  ModelReasoningCapability,
+} from "@kindergarten/contracts";
+import { readModelReasoningCapability } from "@kindergarten/contracts";
+import type {
   ModelContextFragment,
   ModelContextSerialization,
   ModelEvent,
@@ -11,9 +16,49 @@ import type {
   ModelToolDefinition,
   ModelUsage,
 } from "./model-provider.js";
+import {
+  assertContinuationTargetsStudent,
+  createProviderOpaqueContinuation,
+  readProviderOpaqueContinuation,
+  type JsonObject,
+  type ProviderOpaqueContinuation,
+} from "./provider-continuation.js";
+import {
+  GlobalFetchHttpTransport,
+  PinnedHttpTransport,
+  type HttpEndpointResolver,
+  type OutboundHttpTransport,
+} from "./pinned-http-transport.js";
 
 export interface ResponsesApiProviderOptions {
   readBearerToken(): string | Promise<string>;
+  /**
+   * 入园体检后持久化的真实能力。未知自定义模型不允许凭名称猜测。
+   * 真实自定义连接必须提供；旧 fixture 只能显式打开 allowLegacyOfficialPreset。
+   */
+  reasoning?: ResponsesReasoningConfiguration;
+  /** 只供旧的本地协议 fixture；真实自定义连接必须传入入园体检快照。 */
+  allowLegacyOfficialPreset?: boolean;
+  /** 每次实际请求和每一跳显式重定向前调用，供 Remote 注入 DNS/地址策略。 */
+  endpointGuard?: (url: URL) => void | Promise<void>;
+  /**
+   * 生产自定义端点必须注入：一次返回审核 URL 与公网地址票据，并把该地址绑定到 socket lookup，
+   * 从而消除安全检查后由 global fetch 再次 DNS 的重绑定窗口。
+   */
+  endpointResolver?: HttpEndpointResolver;
+  /** 默认拒绝重定向；显式开启时仍只允许保留 POST 的 307/308，最大 3 跳。 */
+  maxRedirects?: number;
+}
+
+export interface ResponsesReasoningConfiguration {
+  capability: ModelReasoningCapability;
+  efforts: Partial<Record<ConcreteReasoningProfile, string>>;
+}
+
+export interface ResponsesProbeStreamOptions {
+  maxOutputTokens?: number;
+  toolChoice?: "none" | "auto" | { type: "function"; name: string };
+  onTerminalResponse?: (response: Readonly<Record<string, unknown>>) => void;
 }
 
 interface FunctionCallState {
@@ -30,15 +75,19 @@ interface SseEvent {
   data: string;
 }
 
-/**
- * OpenAI Responses 兼容层的最小核心；尚未接入 ModelStudent resolver。
- *
- * 当前实现固定使用 store=false，并以显式消息和 function_call_output 做无状态续轮。
- * 它不会保存或回放 encrypted reasoning items；需要 OpenAI ZDR 下完整推理续接时，
- * 必须另行增加 Provider 私有的 opaque continuation，不能把 summary 当作推理状态回传。
- */
+const MAX_SSE_LINE_BYTES = 1024 * 1024;
+const MAX_SSE_EVENT_BYTES = 2 * 1024 * 1024;
+const MAX_SSE_STREAM_BYTES = 64 * 1024 * 1024;
+const MAX_HTTP_ERROR_BODY_BYTES = 64 * 1024;
+
+/** OpenAI Responses 兼容层；store=false 下通过完整 output items 显式续接。 */
 export class ResponsesApiProvider implements ModelProvider {
   private readonly readBearerToken: ResponsesApiProviderOptions["readBearerToken"];
+  private readonly endpointGuard: NonNullable<ResponsesApiProviderOptions["endpointGuard"]>;
+  private readonly httpTransport: OutboundHttpTransport;
+  private readonly maxRedirects: number;
+  readonly reasoningCapability: ModelReasoningCapability;
+  private readonly reasoningEfforts: Readonly<Partial<Record<ConcreteReasoningProfile, string>>>;
 
   constructor(
     readonly student: ModelStudent,
@@ -48,6 +97,27 @@ export class ResponsesApiProvider implements ModelProvider {
       throw new Error("ResponsesApiProvider 只能接收 openai-compatible ModelStudent");
     }
     this.readBearerToken = options.readBearerToken;
+    this.endpointGuard = options.endpointGuard ?? (() => undefined);
+    this.httpTransport = options.endpointResolver
+      ? new PinnedHttpTransport(options.endpointResolver)
+      : new GlobalFetchHttpTransport();
+    this.maxRedirects = readMaxRedirects(options.maxRedirects);
+    const reasoning = options.reasoning
+      ?? (options.allowLegacyOfficialPreset ? officialReasoningPreset(student.provider.model) : undefined);
+    if (!reasoning) {
+      throw new Error(
+        `自定义 Responses 模型 ${student.provider.model} 缺少入园体检产生的 reasoning 能力配置`,
+      );
+    }
+    validateReasoningConfiguration(reasoning);
+    this.reasoningCapability = readModelReasoningCapability(reasoning.capability);
+    this.reasoningEfforts = Object.freeze({ ...reasoning.efforts });
+  }
+
+  nativeReasoning(profile: ConcreteReasoningProfile): Record<string, string> {
+    const effort = this.reasoningEfforts[profile];
+    if (!effort) throw new Error(`Responses 模型不支持推理档位: ${profile}`);
+    return { effort };
   }
 
   serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
@@ -60,7 +130,7 @@ export class ResponsesApiProvider implements ModelProvider {
         value = fragment.tools.map(toResponsesTool);
         break;
       case "messages":
-        value = fragment.messages.flatMap(toResponsesInputItems);
+        value = fragment.messages.flatMap((message) => toResponsesDisclosureItems(this.student, message));
         break;
       case "omitted":
         value = { sent: false, sourceIds: fragment.sourceIds };
@@ -74,25 +144,48 @@ export class ResponsesApiProvider implements ModelProvider {
     };
   }
 
+  serializeInput(input: ModelInput): ModelContextSerialization {
+    return {
+      provider: this.student.provider.kind,
+      model: this.student.provider.model,
+      format: "json",
+      value: JSON.stringify(toResponsesDisclosureRequest(this.student, input), null, 2),
+    };
+  }
+
   async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
+    yield* this.streamRequest(input, signal, {});
+  }
+
+  /** 入园体检专用；复用正式 SSE/终态解析，但允许限制输出并强制无副作用探针 Tool。 */
+  async *streamProbe(
+    input: ModelInput,
+    signal: AbortSignal,
+    options: ResponsesProbeStreamOptions,
+  ): AsyncIterable<ModelEvent> {
+    yield* this.streamRequest(input, signal, options);
+  }
+
+  private async *streamRequest(
+    input: ModelInput,
+    signal: AbortSignal,
+    options: ResponsesProbeStreamOptions,
+  ): AsyncIterable<ModelEvent> {
     const token = await this.loadToken();
     let response: Response;
     try {
-      response = await fetch(responsesUrl(this.student.provider.baseUrl), {
-        method: "POST",
-        headers: {
-          accept: "text/event-stream",
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(toResponsesRequest(this.student, input)),
+      response = await this.fetchResponse(
+        responsesApiUrl(this.student.provider.baseUrl),
+        JSON.stringify(toResponsesRequest(this.student, input, options)),
+        token,
         signal,
-      });
+      );
     } catch (error) {
       if (isAbort(error) || signal.aborted) throw error;
+      if (error instanceof ModelProviderError) throw error;
       throw new ModelProviderError(
         "dependency_unavailable",
-        "无法连接 Responses API",
+        `无法连接 Responses API${error instanceof Error ? `: ${short(error.message, 160)}` : ""}`,
         true,
         { cause: error },
       );
@@ -120,10 +213,8 @@ export class ResponsesApiProvider implements ModelProvider {
 
     for await (const message of readSse(response.body)) {
       if (message.data === "[DONE]") {
-        if (!terminal) {
-          terminal = true;
-          yield { type: "finish", reason: "stop" };
-        }
+        // [DONE] 只是传输层尾帧；只有 response.completed/incomplete/cancelled
+        // 才能证明 response.output 已完整到达并可安全续接。
         continue;
       }
 
@@ -179,11 +270,21 @@ export class ResponsesApiProvider implements ModelProvider {
       if (type === "response.completed" || type === "response.incomplete") {
         const responseValue = recordValue(event.response);
         if (responseValue) {
+          options.onTerminalResponse?.(responseValue);
           for (const call of callsFromResponse(responseValue, calls, itemIndexes)) {
             yield { type: "tool_calls", calls: [call] };
           }
           const usage = readUsage(responseValue.usage);
           if (usage) yield { type: "usage", ...usage };
+          const continuation = responseContinuation(this.student, responseValue);
+          if (!continuation && calls.size > 0) {
+            throw new ModelProviderError(
+              "invalid_model_response",
+              "Responses Tool Call 缺少可用于 store=false 续接的 response.output",
+              false,
+            );
+          }
+          if (continuation) yield { type: "provider_continuation", continuation };
         }
         terminal = true;
         yield {
@@ -198,10 +299,10 @@ export class ResponsesApiProvider implements ModelProvider {
         continue;
       }
       if (type === "response.failed") {
-        throw responseFailure(event);
+        throw responseFailure(event, token);
       }
       if (type === "error") {
-        throw eventFailure(event);
+        throw eventFailure(event, token);
       }
     }
 
@@ -235,20 +336,162 @@ export class ResponsesApiProvider implements ModelProvider {
     }
     return token;
   }
+
+  private async fetchResponse(
+    initialUrl: URL,
+    body: string,
+    token: string,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    let url = initialUrl;
+    for (let redirects = 0; ; redirects += 1) {
+      await this.endpointGuard(new URL(url));
+      const response = await this.httpTransport.request(url, {
+        method: "POST",
+        headers: {
+          accept: "text/event-stream",
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body,
+        signal,
+      });
+      if (!isRedirectStatus(response.status)) return response;
+      if ((response.status !== 307 && response.status !== 308) || redirects >= this.maxRedirects) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new ModelProviderError(
+          "model_request_failed",
+          `Responses API 返回不允许的重定向 (${response.status})`,
+          false,
+        );
+      }
+      const location = response.headers.get("location");
+      await response.body?.cancel().catch(() => undefined);
+      if (!location) {
+        throw new ModelProviderError(
+          "invalid_model_response",
+          "Responses API 重定向缺少 Location",
+          false,
+        );
+      }
+      url = new URL(location, url);
+    }
+  }
 }
 
-function toResponsesRequest(student: ModelStudent, input: ModelInput): Record<string, unknown> {
+function toResponsesRequest(
+  student: ModelStudent,
+  input: ModelInput,
+  options: ResponsesProbeStreamOptions = {},
+): Record<string, unknown> {
+  const reasoning = responsesReasoning(student, input);
+  const acceptsTemperature = !reasoning || reasoning.effort === "none";
   return {
     model: student.provider.model,
-    instructions: student.agentConfig.systemPrompt,
-    input: input.messages.flatMap(toResponsesInputItems),
+    instructions: input.systemPrompt,
+    input: input.messages.flatMap((message) => toResponsesInputItems(student, message)),
     tools: input.tools.map(toResponsesTool),
     stream: true,
     store: false,
-    ...(student.agentConfig.temperature !== undefined
-      ? { temperature: student.agentConfig.temperature }
+    include: ["reasoning.encrypted_content"],
+    ...(options.maxOutputTokens !== undefined
+      ? { max_output_tokens: options.maxOutputTokens }
+      : {}),
+    ...(options.toolChoice !== undefined
+      ? { tool_choice: structuredClone(options.toolChoice) }
+      : {}),
+    ...(reasoning ? { reasoning } : {}),
+    ...(acceptsTemperature && student.generationDefaults.temperature !== undefined
+      ? { temperature: student.generationDefaults.temperature }
       : {}),
   };
+}
+
+function toResponsesDisclosureRequest(
+  student: ModelStudent,
+  input: ModelInput,
+): Record<string, unknown> {
+  const request = toResponsesRequest(student, input);
+  return {
+    ...request,
+    input: input.messages.flatMap((message) => toResponsesDisclosureItems(student, message)),
+  };
+}
+
+function responsesReasoning(
+  student: ModelStudent,
+  input: ModelInput,
+): { effort: string; summary?: "auto" } | undefined {
+  if (input.reasoning === "disabled") return { effort: "none" };
+  if (input.reasoning === undefined) return undefined;
+  assertSnapshotTargetsStudent(student, input.reasoning);
+  const effort = input.reasoning.native.effort;
+  if (typeof effort !== "string" || effort.length === 0) {
+    throw new ModelProviderError(
+      "model_request_failed",
+      "Responses 推理快照缺少 native.effort",
+      false,
+    );
+  }
+  return { effort, summary: "auto" };
+}
+
+function assertSnapshotTargetsStudent(
+  student: ModelStudent,
+  snapshot: Exclude<ModelInput["reasoning"], "disabled" | undefined>,
+): void {
+  if (
+    snapshot.providerKind !== student.provider.kind ||
+    snapshot.model !== student.provider.model
+  ) {
+    throw new ModelProviderError(
+      "model_request_failed",
+      "推理快照与当前 Responses ModelStudent 不匹配",
+      false,
+    );
+  }
+}
+
+function officialReasoningPreset(model: string): ResponsesReasoningConfiguration | undefined {
+  if (model !== "gpt-5.5" && !/^gpt-5\.5-\d{4}-\d{2}-\d{2}$/.test(model)) return undefined;
+  return {
+    capability: {
+      schemaVersion: 1,
+      control: "effort_levels",
+      adjustable: true,
+      supportedProfiles: ["fast", "balanced", "deep", "max"],
+      defaultProfile: "balanced",
+      native: {
+        parameter: "reasoning.effort",
+        values: ["low", "medium", "high", "xhigh"],
+      },
+    },
+    efforts: {
+      fast: "low",
+      balanced: "medium",
+      deep: "high",
+      max: "xhigh",
+    },
+  };
+}
+
+function validateReasoningConfiguration(config: ResponsesReasoningConfiguration): void {
+  const capability = readModelReasoningCapability(config.capability);
+  if (capability.control !== "effort_levels" && capability.control !== "fixed") {
+    throw new Error("Responses reasoning 只接受 fixed 或 effort_levels 能力");
+  }
+  if (capability.native?.parameter !== "reasoning.effort") {
+    throw new Error("Responses reasoning native.parameter 必须是 reasoning.effort");
+  }
+  for (const profile of capability.supportedProfiles) {
+    const effort = config.efforts[profile];
+    if (typeof effort !== "string" || effort.length === 0) {
+      throw new Error(`Responses reasoning 档位 ${profile} 缺少原生 effort 映射`);
+    }
+    if (capability.native.values && !capability.native.values.includes(effort)) {
+      throw new Error(`Responses reasoning 档位 ${profile} 映射到未声明的 effort: ${effort}`);
+    }
+  }
 }
 
 function toResponsesTool(tool: ModelToolDefinition): Record<string, unknown> {
@@ -260,7 +503,10 @@ function toResponsesTool(tool: ModelToolDefinition): Record<string, unknown> {
   };
 }
 
-function toResponsesInputItems(message: ModelMessage): Record<string, unknown>[] {
+function toResponsesInputItems(
+  student: ModelStudent,
+  message: ModelMessage,
+): Record<string, unknown>[] {
   if (message.role === "tool") {
     if (!message.toolCallId) {
       throw new ModelProviderError(
@@ -274,6 +520,39 @@ function toResponsesInputItems(message: ModelMessage): Record<string, unknown>[]
       call_id: message.toolCallId,
       output: message.content,
     }];
+  }
+
+  if (message.role === "assistant" && message.providerOpaqueContinuation) {
+    const continuation = message.providerOpaqueContinuation
+      ? readProviderOpaqueContinuation(message.providerOpaqueContinuation)
+      : undefined;
+    if (continuation) assertContinuationTargetsStudent(continuation, student, "openai_responses");
+    const continuationItems = continuation
+      ? readResponsesContinuationItems(continuation)
+      : undefined;
+    const items: Record<string, unknown>[] = continuation
+      ? structuredClone(continuationItems ?? [])
+      : message.content ? [{ role: "assistant", content: message.content }] : [];
+    const continuedCallIds = continuationItems
+      ? new Set(responsesContinuationFunctionCallIds(continuationItems))
+      : new Set<string>();
+    for (const call of message.toolCalls ?? []) {
+      if (!call.id) {
+        throw new ModelProviderError(
+          "invalid_model_response",
+          "Assistant Tool Call 缺少 id，无法续接 Responses 请求",
+          false,
+        );
+      }
+      if (continuedCallIds.has(call.id)) continue;
+      items.push({
+        type: "function_call",
+        call_id: call.id,
+        name: call.name,
+        arguments: JSON.stringify(call.arguments),
+      });
+    }
+    return items;
   }
 
   if (message.role === "assistant" && message.toolCalls?.length) {
@@ -301,7 +580,86 @@ function toResponsesInputItems(message: ModelMessage): Record<string, unknown>[]
   return [{ role: message.role, content: message.content }];
 }
 
-function responsesUrl(baseUrl: string): URL {
+function toResponsesDisclosureItems(
+  student: ModelStudent,
+  message: ModelMessage,
+): Record<string, unknown>[] {
+  const items = toResponsesInputItems(student, message);
+  if (!message.providerOpaqueContinuation) return items;
+  return items.map((item) => {
+    if (item.type === "function_call") {
+      return {
+        type: item.type,
+        ...(typeof item.call_id === "string" ? { call_id: item.call_id } : {}),
+        ...(typeof item.name === "string" ? { name: item.name } : {}),
+        providerOpaque: true,
+      };
+    }
+    return {
+      type: typeof item.type === "string" ? item.type : "unknown",
+      providerOpaque: true,
+      byteLength: Buffer.byteLength(JSON.stringify(item), "utf8"),
+    };
+  });
+}
+
+function responseContinuation(
+  student: ModelStudent,
+  response: Record<string, unknown>,
+): ProviderOpaqueContinuation | undefined {
+  if (!Array.isArray(response.output) || response.output.length === 0) return undefined;
+  try {
+    if (!response.output.every((item) => isRecord(item))) {
+      throw new Error("response.output item 必须是 JSON 对象");
+    }
+    const items = response.output as JsonObject[];
+    return createProviderOpaqueContinuation({
+      modelStudentId: student.id,
+      providerKind: student.provider.kind,
+      protocol: "openai_responses",
+      model: student.provider.model,
+      format: "openai-responses-output-v1",
+      payload: { items },
+      correlation: {
+        toolCallIds: responsesContinuationFunctionCallIds(items),
+      },
+    });
+  } catch (error) {
+    throw new ModelProviderError(
+      "invalid_model_response",
+      "Responses API response.output 不是可持久化的 JSON items",
+      false,
+      { cause: error },
+    );
+  }
+}
+
+function readResponsesContinuationItems(
+  continuation: ProviderOpaqueContinuation,
+): JsonObject[] {
+  if (continuation.format !== "openai-responses-output-v1") {
+    throw new Error("Responses continuation format 不受支持");
+  }
+  const payload = continuation.payload;
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.items) ||
+    !payload.items.every((item) => isRecord(item))
+  ) {
+    throw new Error("Responses continuation payload.items 必须是 JSON 对象数组");
+  }
+  return structuredClone(payload.items) as JsonObject[];
+}
+
+function responsesContinuationFunctionCallIds(items: JsonObject[]): string[] {
+  return items.flatMap((item) =>
+    item.type === "function_call" && typeof item.call_id === "string"
+      ? [item.call_id]
+      : [],
+  );
+}
+
+export function responsesApiUrl(baseUrl: string): URL {
   let url: URL;
   try {
     url = new URL(baseUrl);
@@ -317,6 +675,18 @@ function responsesUrl(baseUrl: string): URL {
   url.search = "";
   url.hash = "";
   return url;
+}
+
+function readMaxRedirects(value: number | undefined): number {
+  if (value === undefined) return 0;
+  if (!Number.isInteger(value) || value < 0 || value > 3) {
+    throw new Error("Responses maxRedirects 必须是 0 到 3 的整数");
+  }
+  return value;
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
 function seedFunctionCall(
@@ -453,24 +823,26 @@ function readUsage(value: unknown): ModelUsage | undefined {
   };
 }
 
-function responseFailure(event: Record<string, unknown>): ModelProviderError {
+function responseFailure(event: Record<string, unknown>, token: string): ModelProviderError {
   const response = recordValue(event.response);
   const error = recordValue(response?.error);
   const code = stringValue(error?.code);
   const message = stringValue(error?.message) ?? "Responses API 返回失败状态";
+  const safeCode = code ? redact(code, token) : undefined;
   return new ModelProviderError(
     "model_request_failed",
-    `Responses API${code ? ` (${code})` : ""}: ${short(message, 300)}`,
+    `Responses API${safeCode ? ` (${safeCode})` : ""}: ${redact(message, token)}`,
     retryableCode(code),
   );
 }
 
-function eventFailure(event: Record<string, unknown>): ModelProviderError {
+function eventFailure(event: Record<string, unknown>, token: string): ModelProviderError {
   const code = stringValue(event.code);
   const message = stringValue(event.message) ?? "Responses API 返回错误事件";
+  const safeCode = code ? redact(code, token) : undefined;
   return new ModelProviderError(
     "model_request_failed",
-    `Responses API${code ? ` (${code})` : ""}: ${short(message, 300)}`,
+    `Responses API${safeCode ? ` (${safeCode})` : ""}: ${redact(message, token)}`,
     retryableCode(code),
   );
 }
@@ -505,8 +877,13 @@ function parseSseJson(message: SseEvent): Record<string, unknown> {
 async function* readSse(body: ReadableStream<Uint8Array>): AsyncIterable<SseEvent> {
   let event: string | undefined;
   let data: string[] = [];
+  let eventBytes = 0;
 
   for await (const line of readLines(body)) {
+    eventBytes += Buffer.byteLength(line, "utf8") + 1;
+    if (eventBytes > MAX_SSE_EVENT_BYTES) {
+      throw responseSizeError("单个 SSE Event", MAX_SSE_EVENT_BYTES);
+    }
     if (line === "") {
       if (data.length > 0) {
         yield {
@@ -516,6 +893,7 @@ async function* readSse(body: ReadableStream<Uint8Array>): AsyncIterable<SseEven
       }
       event = undefined;
       data = [];
+      eventBytes = 0;
       continue;
     }
     if (line.startsWith(":")) continue;
@@ -540,6 +918,7 @@ async function* readLines(body: ReadableStream<Uint8Array>): AsyncIterable<strin
   const decoder = new TextDecoder();
   let pending = "";
   let finished = false;
+  let streamBytes = 0;
 
   try {
     while (true) {
@@ -548,19 +927,36 @@ async function* readLines(body: ReadableStream<Uint8Array>): AsyncIterable<strin
         pending += decoder.decode();
         finished = true;
       } else {
+        streamBytes += part.value.byteLength;
+        if (streamBytes > MAX_SSE_STREAM_BYTES) {
+          throw responseSizeError("SSE 流", MAX_SSE_STREAM_BYTES);
+        }
         pending += decoder.decode(part.value, { stream: true });
       }
 
       while (true) {
         const separator = nextLineSeparator(pending, finished);
         if (!separator) break;
-        yield pending.slice(0, separator.index);
+        const line = pending.slice(0, separator.index);
+        if (Buffer.byteLength(line, "utf8") > MAX_SSE_LINE_BYTES) {
+          throw responseSizeError("SSE 单行", MAX_SSE_LINE_BYTES);
+        }
+        yield line;
         pending = pending.slice(separator.index + separator.length);
+      }
+
+      if (Buffer.byteLength(pending, "utf8") > MAX_SSE_LINE_BYTES) {
+        throw responseSizeError("SSE 单行", MAX_SSE_LINE_BYTES);
       }
 
       if (finished) break;
     }
-    if (pending) yield pending;
+    if (pending) {
+      if (Buffer.byteLength(pending, "utf8") > MAX_SSE_LINE_BYTES) {
+        throw responseSizeError("SSE 单行", MAX_SSE_LINE_BYTES);
+      }
+      yield pending;
+    }
   } finally {
     if (!finished) {
       try {
@@ -592,14 +988,99 @@ function nextLineSeparator(
 
 async function readErrorBody(response: Response): Promise<string> {
   try {
-    return short((await response.text()).trim(), 300);
+    if (!response.body) return "";
+    return short((await readTextAtMost(response.body, MAX_HTTP_ERROR_BODY_BYTES)).trim(), 300);
   } catch {
     return "";
   }
 }
 
+async function readTextAtMost(
+  body: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let result = "";
+  let used = 0;
+  let finished = false;
+  try {
+    while (used < maxBytes) {
+      const part = await reader.read();
+      if (part.done) {
+        result += decoder.decode();
+        finished = true;
+        break;
+      }
+      const remaining = maxBytes - used;
+      const accepted = part.value.byteLength <= remaining
+        ? part.value
+        : part.value.subarray(0, remaining);
+      used += accepted.byteLength;
+      result += decoder.decode(accepted, { stream: accepted.byteLength === part.value.byteLength });
+      if (accepted.byteLength < part.value.byteLength) break;
+    }
+    if (!finished) result += decoder.decode();
+    return result;
+  } finally {
+    if (!finished) {
+      try { await reader.cancel(); } catch { /* 错误正文只是诊断信息。 */ }
+    }
+    reader.releaseLock();
+  }
+}
+
+function responseSizeError(scope: string, maxBytes: number): ModelProviderError {
+  return new ModelProviderError(
+    "invalid_model_response",
+    `Responses API ${scope} 超过 ${maxBytes} bytes 上限`,
+    false,
+  );
+}
+
 function redact(value: string, token: string): string {
-  return token ? value.split(token).join("[REDACTED]") : value;
+  let redacted = token ? value.split(token).join("[REDACTED]") : value;
+  try {
+    redacted = JSON.stringify(redactSensitiveJson(JSON.parse(redacted) as unknown));
+  } catch {
+    for (const name of SENSITIVE_FIELDS) {
+      redacted = redacted.replace(
+        new RegExp(
+          `(^|[\\s{[(,;])(["']?${escapeRegExp(name)}["']?\\s*[:=]\\s*)`
+            + `(?:"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|[^,;\\r\\n}\\]]*)`,
+          "gim",
+        ),
+        "$1$2[REDACTED]",
+      );
+    }
+  }
+  return short(redacted, 300);
+}
+
+const SENSITIVE_FIELDS = [
+  "encrypted_content",
+  "authorization",
+  "api_key",
+  "apiKey",
+  "access_token",
+  "refresh_token",
+  "secret",
+  "password",
+] as const;
+
+function redactSensitiveJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSensitiveJson);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    key,
+    SENSITIVE_FIELDS.some((name) => name.toLocaleLowerCase() === key.toLocaleLowerCase())
+      ? "[REDACTED]"
+      : redactSensitiveJson(item),
+  ]));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function short(value: string, length: number): string {
