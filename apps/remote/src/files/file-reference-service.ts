@@ -6,7 +6,8 @@ import { ApiProblemError } from "../server/api-problem.js";
 import { FileSandbox } from "../tools/sandbox.js";
 import type { FileReferenceRepository } from "./file-reference-repository.js";
 
-const STATIC_HTML_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
+// 脚本在无 allow-same-origin 的 iframe 中运行；CSP 允许页面资源，但继续封死嵌套页面、插件和表单提交。
+const INTERACTIVE_HTML_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: data: https:; style-src 'unsafe-inline' blob: data: https:; img-src blob: data: https:; font-src blob: data: https:; media-src blob: data: https:; worker-src blob:; connect-src blob: data: https:; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
 
 export class FileReferenceService {
   constructor(
@@ -67,7 +68,7 @@ export class FileReferenceService {
     if (file.previewKind === "markdown") return { file, content: { kind: "markdown", markdown: content.toString("utf8") } };
     if (file.previewKind === "text") return { file, content: { kind: "text", text: content.toString("utf8") } };
     if (file.previewKind === "static_html") {
-      return { file, content: { kind: "static_html", html: sanitizeStaticHtml(content.toString("utf8")), csp: STATIC_HTML_CSP } };
+      return { file, content: { kind: "static_html", html: content.toString("utf8"), csp: INTERACTIVE_HTML_CSP } };
     }
     if (file.previewKind === "image" || file.previewKind === "pdf") {
       return { file, content: { kind: file.previewKind, contentUrl: `/api/control/v1/files/${file.fileReferenceId}/content` } };
@@ -113,14 +114,4 @@ function fileFormat(path: string): Pick<FileReference, "mimeType" | "previewKind
   }
   if (extension === ".pdf") return { mimeType: "application/pdf", previewKind: "pdf" };
   return { mimeType: "application/octet-stream", previewKind: "unsupported" };
-}
-
-export function sanitizeStaticHtml(value: string): string {
-  return value
-    .replace(/<(script|iframe|object|embed|form|input|button|textarea|select|option|link|meta|base)\b[\s\S]*?<\/\1\s*>/gi, "")
-    .replace(/<(script|iframe|object|embed|form|input|button|textarea|select|option|link|meta|base)\b[^>]*\/?>/gi, "")
-    .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(/\s+(href|src|action|formaction)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(/@import\s+[^;]+;?/gi, "")
-    .replace(/url\s*\([^)]*\)/gi, "none");
 }

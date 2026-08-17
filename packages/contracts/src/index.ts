@@ -5,6 +5,7 @@ import type { SessionResumeMeta } from "./session-resume.js";
 
 export * from "./reasoning.js";
 export * from "./model-admission.js";
+export * from "./product-config.js";
 export * from "./session-resume.js";
 
 export { META_KEY } from "./common.js";

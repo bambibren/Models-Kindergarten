@@ -3,13 +3,15 @@ import { basename, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { GitRepository } from "../git/git-repository.js";
 import type { SkillLockStore } from "./skill-lock-store.js";
 import type { SkillInstallRecord, SkillInstallRequest } from "./skill-types.js";
-import { validateSkillDirectory } from "./skill-validator.js";
+import { assertSafeSkillName, validateSkillDirectory } from "./skill-validator.js";
+import { stageSkillResourceBundle } from "./skill-resource-bundle.js";
 
 /** 安装器在隔离目录完成校验后再原子发布；不会执行 Skill 自带脚本。 */
 export class SkillInstaller {
   constructor(
     private readonly installRoot: string,
     private readonly lock: SkillLockStore,
+    private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
   async install(
@@ -22,7 +24,9 @@ export class SkillInstaller {
     try {
       const staged = request.source.kind === "local"
         ? await this.stageLocal(request.source.path, quarantine)
-        : await this.stageGit(request.source, quarantine);
+        : request.source.kind === "git"
+          ? await this.stageGit(request.source, quarantine)
+          : await this.stageResource(request.source.url, quarantine);
       const provisional = await validateSkillDirectory(staged.path, {
         source: staged.source,
         scope: "user",
@@ -62,7 +66,7 @@ export class SkillInstaller {
   }
 
   async uninstall(name: string): Promise<void> {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("Skill name 无效");
+    assertSafeSkillName(name);
     await rm(resolve(this.installRoot, name), { recursive: true, force: true });
     await this.lock.remove(name);
   }
@@ -110,6 +114,14 @@ export class SkillInstaller {
         commit,
         ...(subdirectory !== "." ? { subdir: subdirectory } : {}),
       },
+    };
+  }
+
+  private async stageResource(url: string, quarantine: string) {
+    const staged = await stageSkillResourceBundle(url, quarantine, this.fetchImpl);
+    return {
+      path: staged.path,
+      source: { kind: "resource" as const, url, contentHash: staged.contentHash },
     };
   }
 }

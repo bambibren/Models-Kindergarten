@@ -19,6 +19,8 @@ export interface ModelStudentSummary {
     usage: boolean;
     reasoning: import("./reasoning.js").ModelReasoningCapability;
   };
+  /** 用户显式配置的正整数 token 上限；未知时缺省。 */
+  contextWindowTokens?: number;
   lastCheckedAt?: string;
   statusMessage?: string;
   deletable?: boolean;

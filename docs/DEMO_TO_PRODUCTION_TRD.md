@@ -417,7 +417,7 @@ Runtime 的完成状态、Tool 成功率、错误/权限违规/重复调用、�
 - 所有可产出本地文件的内置工具都只能在 `SessionWorkspaceResolver.forSession(sessionId)` 返回的沙箱运行；FileSandbox 与 ProcessSandbox 共享同一 Session scope。
 - 写入成功后创建不可变 `FileReference`，工具内容返回 `resource_link`，URI 使用不含真实路径的 `mk-file://{fileReferenceId}`。白话说：模型生成 `landing.html` 或 `README.md` 后，聊天里只得到一个随机文件 ID；用户点击文件卡片，右侧面板再凭这个 ID 请求并显示该文件，而不是把电脑真实路径交给浏览器。
 - Web 识别该 URI 后通过 Control API 按 ID 获取元数据或安全预览；外部 `https:` resource link 仍遵循外链策略。
-- Markdown 由安全 renderer 渲染；HTML 服务端注入严格 CSP、移除危险外链，并在无 `allow-scripts` 的 sandbox iframe 中显示。
+- Markdown 由安全 renderer 渲染；HTML 服务端注入严格 CSP，并在仅有 `allow-scripts` 的 sandbox iframe 中显示。不得加入 `allow-same-origin`、`allow-forms`、`allow-popups` 或顶层导航权限。
 - 预览不执行 shell，不允许 `file://`，不允许跨 owner/session 读取。
 
 ### 8.9 “我的”资源管理

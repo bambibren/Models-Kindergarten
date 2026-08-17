@@ -31,7 +31,8 @@ export function registerSkillRoutes(router: ControlRouter, service: SkillInstall
 }
 
 function sourceLabel(source: import("@kindergarten/contracts").SkillSource): string {
-  return source.kind === "github_tree" ? `${source.repository}/${source.subdirectory}` : source.sourceId;
+  if (source.kind === "github_tree") return `${source.repository}/${source.subdirectory}`;
+  return source.kind === "resource_bundle" ? source.url : source.sourceId;
 }
 
 function record(value: unknown): value is Record<string, unknown> {

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileReferenceRepository } from "../../src/files/file-reference-repository.js";
-import { FileReferenceService, sanitizeStaticHtml } from "../../src/files/file-reference-service.js";
+import { FileReferenceService } from "../../src/files/file-reference-service.js";
 import { FileSandbox } from "../../src/tools/sandbox.js";
 
 const dirs: string[] = [];
@@ -22,10 +22,21 @@ describe("FileReferenceService", () => {
     await expect(service.get(file!.fileReferenceId, "another-owner")).rejects.toMatchObject({ code: "FILE_REFERENCE_FORBIDDEN" });
   });
 
-  it("HTML 预览去除脚本、事件、表单和外链资源", () => {
-    const html = sanitizeStaticHtml(`<html><head><link href="https://evil/style.css"><style>@import 'https://evil';a{background:url(https://evil/x)}</style></head><body onload="steal()"><script>alert(1)</script><form action="https://evil"><input></form><img src="https://evil/x"></body></html>`);
-    expect(html).not.toMatch(/script|onload|form|input|https:\/\/evil|@import/i);
-    expect(html).toContain("<img>");
+  it("HTML 预览保留脚本与交互元素，并通过 CSP 保持隔离边界", async () => {
+    const { service, workspaces } = await setup();
+    const sandbox = new FileSandbox(join(workspaces, "session-a"));
+    await sandbox.initialize();
+    const html = `<button id="run">运行</button><script>document.querySelector('#run').onclick = () => document.body.dataset.executed = 'yes'</script>`;
+    await sandbox.writeText("interactive.html", html);
+    const [file] = await service.createFromPaths("local-admin", "session-a", "turn-a", ["interactive.html"]);
+    const preview = await service.preview(file!.fileReferenceId);
+
+    expect(preview.content).toMatchObject({ kind: "static_html", html });
+    if (preview.content.kind !== "static_html") throw new Error("预览类型错误");
+    expect(preview.content.csp).toContain("script-src 'unsafe-inline'");
+    expect(preview.content.csp).toContain("frame-src 'none'");
+    expect(preview.content.csp).toContain("object-src 'none'");
+    expect(preview.content.csp).toContain("form-action 'none'");
   });
 
   it("不接受穿越 Session workspace 的路径", async () => {

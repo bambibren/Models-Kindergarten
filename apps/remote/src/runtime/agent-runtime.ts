@@ -44,7 +44,7 @@ import type { TurnScope } from "./turn-scope.js";
 import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.js";
 import type { ModelContextSerialization } from "../model/model-provider.js";
 import { resolveReasoning } from "../reasoning/reasoning-resolver.js";
-import type { TurnActivePhase, TurnWaitingState } from "@kindergarten/contracts";
+import type { TurnActivePhase } from "@kindergarten/contracts";
 import type { RepeatedInvalidToolCallGuardFactory } from "./repeated-invalid-tool-call-guard.js";
 import {
   configuredSkillContextVersion,
@@ -68,7 +68,7 @@ export interface RunInput {
 
 export interface RunObserver {
   context(summary: ContextSummary): Promise<void>;
-  phase?(phase: TurnActivePhase, waitingFor?: TurnWaitingState): Promise<void>;
+  phase?(phase: TurnActivePhase): Promise<void>;
   turnSnapshot?(facts: RuntimeTurnSnapshot): Promise<void>;
   capabilitySnapshot?(generation: number, hash: string, snapshot: RuntimeCapabilitySnapshot): Promise<void>;
   modelRoundStarted?(facts: RuntimeModelRoundSnapshot): Promise<void>;
@@ -633,7 +633,6 @@ function sumUsageField<K extends keyof ModelUsage>(
 
 class ObservedRunObserver implements RunObserver {
   private roundId = "";
-  private readonly waitingFor: TurnWaitingState = { permission: 0, input: 0 };
 
   constructor(
     private readonly delegate: RunObserver,
@@ -643,7 +642,7 @@ class ObservedRunObserver implements RunObserver {
 
   enterRound(roundId: string): void { this.roundId = roundId; }
   context(summary: ContextSummary): Promise<void> { return this.delegate.context(summary); }
-  phase(phase: TurnActivePhase, waitingFor?: TurnWaitingState): Promise<void> { return this.delegate.phase?.(phase, waitingFor) ?? Promise.resolve(); }
+  phase(phase: TurnActivePhase): Promise<void> { return this.delegate.phase?.(phase) ?? Promise.resolve(); }
   turnSnapshot(facts: RuntimeTurnSnapshot): Promise<void> { return this.delegate.turnSnapshot?.(facts) ?? Promise.resolve(); }
   capabilitySnapshot(generation: number, hash: string, snapshot: RuntimeCapabilitySnapshot): Promise<void> { return this.delegate.capabilitySnapshot?.(generation, hash, snapshot) ?? Promise.resolve(); }
   modelRoundStarted(facts: RuntimeModelRoundSnapshot): Promise<void> { return this.delegate.modelRoundStarted?.(facts) ?? Promise.resolve(); }
@@ -694,37 +693,20 @@ class ObservedRunObserver implements RunObserver {
   }
 
   async requestPermission(call: PreparedToolCall): Promise<boolean> {
-    await this.changeWaiting("permission", 1);
-    try {
-      const allowed = await this.delegate.requestPermission(call);
-      this.observations.emit({
-        type: "permission_decided",
-        runId: this.runId,
-        toolCallId: call.id,
-        required: true,
-        decision: allowed ? "allowed" : "denied",
-        decidedAt: Date.now(),
-      });
-      return allowed;
-    } finally {
-      await this.changeWaiting("permission", -1);
-    }
+    const allowed = await this.delegate.requestPermission(call);
+    this.observations.emit({
+      type: "permission_decided",
+      runId: this.runId,
+      toolCallId: call.id,
+      required: true,
+      decision: allowed ? "allowed" : "denied",
+      decidedAt: Date.now(),
+    });
+    return allowed;
   }
 
   async askUser(question: string, toolCallId: string): Promise<string> {
-    await this.changeWaiting("input", 1);
-    try {
-      return await this.delegate.askUser(question, toolCallId);
-    } finally {
-      await this.changeWaiting("input", -1);
-    }
-  }
-
-  private async changeWaiting(kind: keyof TurnWaitingState, delta: 1 | -1): Promise<void> {
-    const next = this.waitingFor[kind] + delta;
-    if (next < 0) throw new Error(`Turn waitingFor.${kind} 计数下溢`);
-    this.waitingFor[kind] = next;
-    await this.phase("tool_execution", { ...this.waitingFor });
+    return this.delegate.askUser(question, toolCallId);
   }
 }
 

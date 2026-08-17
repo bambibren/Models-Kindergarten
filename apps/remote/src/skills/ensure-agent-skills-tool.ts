@@ -12,9 +12,6 @@ import {
   type ToolExecutionContext,
   type ToolResult,
 } from "../tools/tool-registry.js";
-import {
-  explicitGitHubSkillUrlCandidates,
-} from "./github-skill-source.js";
 import type { SkillInstallationService } from "./skill-installation-service.js";
 
 const NAME = "ensure_agent_skills";
@@ -31,7 +28,7 @@ export class EnsureAgentSkillsToolProvider implements RuntimeToolProvider {
     private readonly scope: TurnScope,
     private readonly currentUserMessage: string,
   ) {
-    this.providedUrls = explicitGitHubSkillUrlCandidates(currentUserMessage).map((item) => item.providedUrl);
+    this.providedUrls = service.explicitSourceUrlCandidates(currentUserMessage).map((item) => item.providedUrl);
     this.allowedModes = explicitlyRequestsUpdate(currentUserMessage) ? ["ensure", "update"] : ["ensure"];
     this.definitions = this.providedUrls.length > 0 ? definitions(this.providedUrls, this.allowedModes) : [];
   }
@@ -89,7 +86,9 @@ export class EnsureAgentSkillsToolProvider implements RuntimeToolProvider {
       job = await this.service.ensureForTurn(input, this.scope, this.currentUserMessage);
     } catch (error) {
       if (error instanceof ApiProblemError) {
-        const category = error.retryable ? "network" : "validation";
+        const category = error.code === "SKILL_SOURCE_URL_LIMIT_EXCEEDED"
+          ? "resource_limit"
+          : error.retryable ? "network" : "validation";
         const publicError = { code: error.code, category, message: error.message };
         throw new ToolExecutionError(error.code, category, error.message, error.retryable, { error: publicError }, { cause: error });
       }
@@ -145,7 +144,7 @@ function definitions(
     type: "function",
     function: {
       name: NAME,
-      description: "安装、复用并绑定当前用户消息中明确给出的 GitHub Skill 地址。成功后 Runtime 会在下一模型轮提供更新后的 Skill 目录和工具 Schema；本工具不读取完整 SKILL.md。source_urls 必须从候选值中原样复制，不得推断、补全、缩短或改写。.git 后缀合法；/tree/{ref}/{path} 也是合法的具体目录地址，两者语义不同。下载失败表示参数已经验证通过，不要修改 URL。",
+      description: "安装、复用并绑定当前用户消息中明确给出的 Skill 来源地址，支持 GitHub Skill 与已配置的 MK 静态资源链接。成功后 Runtime 会在下一模型轮提供更新后的 Skill 目录和工具 Schema；本工具不读取完整 SKILL.md。source_urls 必须从候选值中原样复制，不得推断、补全、缩短、切换源站或改写。下载失败表示参数已经验证通过，不要修改 URL。",
       parameters: {
         type: "object",
         properties: {
@@ -155,7 +154,7 @@ function definitions(
             maxItems: providedUrls.length,
             uniqueItems: true,
             items: { type: "string", enum: providedUrls },
-            description: "只复制候选中的完整地址；不要删除 .git，不要缩短 /tree/... 地址。",
+            description: "只复制候选中的完整地址；不要修改协议、主机、端口或路径。",
           },
           mode: { type: "string", enum: allowedModes, description: "普通安装或复用使用 ensure；只有用户明确要求更新时才可使用 update。" },
         },
@@ -179,6 +178,6 @@ function validStringArray(value: unknown): string[] | undefined {
 }
 
 function explicitlyRequestsUpdate(message: string): boolean {
-  const withoutUrls = message.replace(/https:\/\/github\.com\/[^\s<>()"']+/gi, " ");
+  const withoutUrls = message.replace(/https?:\/\/[^\s<>()"']+/gi, " ");
   return /(?:更新|升级|最新版|update)/i.test(withoutUrls);
 }

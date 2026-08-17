@@ -1,20 +1,22 @@
 import { randomUUID } from "node:crypto";
-import type {
-  EnsureAgentSkillsInput,
-  SkillInstallJob,
-  SkillInstallJobItem,
-  SkillInstallation,
-  SkillSource,
-  PublicErrorCode,
+import {
+  PRODUCT_CONFIG,
+  type PublicErrorCode,
+  type EnsureAgentSkillsInput,
+  type SkillInstallJob,
+  type SkillInstallJobItem,
+  type SkillInstallation,
+  type SkillSource,
 } from "@kindergarten/contracts";
 import type { AgentService } from "../agent/agent-service.js";
 import { ApiProblemError } from "../server/api-problem.js";
 import type { TurnScope } from "../runtime/turn-scope.js";
-import { explicitGitHubSkillUrls, parseGitHubSkillUrl, sameGitHubSource } from "./github-skill-source.js";
+import { parseGitHubSkillUrl } from "./github-skill-source.js";
 import type { SkillDiscoveryPort } from "./skill-discovery.js";
 import type { SkillInstallationRepository } from "./skill-installation-repository.js";
 import type { SkillRegistry } from "./skill-registry.js";
 import type { SkillInstallRecord } from "./skill-types.js";
+import { SkillSourceUrlPolicy, type ExplicitSkillSourceUrl } from "./skill-source-url.js";
 
 export class SkillInstallationService {
   private readonly readyIds = new Set<string>();
@@ -24,6 +26,7 @@ export class SkillInstallationService {
     private readonly installer: SkillInstallerPort,
     private readonly registry: SkillRegistry,
     private readonly agents: AgentService,
+    private readonly sourcePolicy = new SkillSourceUrlPolicy(),
   ) {}
 
   async importExisting(ownerId = "local-admin"): Promise<void> {
@@ -32,11 +35,11 @@ export class SkillInstallationService {
     const registeredNames = new Set(registered.map((skill) => skill.name));
     const persisted = await this.repository.listInstallations();
 
-    // GitHub Skill 目录若已从磁盘移除，对应安装记录与 Agent 绑定也必须失效。
+    // 远端 Skill 目录若已从磁盘移除，对应安装记录与 Agent 绑定也必须失效。
     for (const stale of persisted.filter((item) =>
       item.ownerId === ownerId &&
       item.state !== "uninstalled" &&
-      item.source.kind === "github_tree" &&
+      remoteSource(item.source) &&
       !registeredNames.has(item.skillName))) {
       await this.agents.removeSkillBindings(stale.skillInstallationId, ownerId);
       await this.repository.removeInstallation(stale.skillInstallationId);
@@ -96,7 +99,7 @@ export class SkillInstallationService {
   async uninstall(id: string, ownerId = "local-admin"): Promise<{ removedAgentBindings: string[] }> {
     const installation = await this.get(id, ownerId);
     const installed = this.registry.all().find((item) => item.name === installation.skillName);
-    if (installed ? installed.scope !== "user" : installation.source.kind !== "github_tree") {
+    if (installed ? installed.scope !== "user" : !remoteSource(installation.source)) {
       throw new ApiProblemError(409, "CONFLICT", "系统内置或项目 Skill 不可删除", false);
     }
 
@@ -112,7 +115,11 @@ export class SkillInstallationService {
 
   private isDeletable(installation: SkillInstallation): boolean {
     const installed = this.registry.all().find((item) => item.name === installation.skillName);
-    return installed ? installed.scope === "user" : installation.source.kind === "github_tree";
+    return installed ? installed.scope === "user" : remoteSource(installation.source);
+  }
+
+  explicitSourceUrlCandidates(message: string): ExplicitSkillSourceUrl[] {
+    return this.sourcePolicy.explicitCandidates(message);
   }
 
   readyInstallationIdsSync(): string[] {
@@ -136,7 +143,7 @@ export class SkillInstallationService {
     bind: { bindToAgentOnComplete: boolean; agentId?: string },
     ownerId = "local-admin",
   ): Promise<SkillInstallJob> {
-    sourceUrls.forEach(parseGitHubSkillUrl);
+    sourceUrls.forEach((url) => this.sourcePolicy.parse(url));
     const job = await this.createJob(sourceUrls, { kind: "manual" }, bind.bindToAgentOnComplete, ownerId);
     void this.run(job.jobId, "ensure", bind.agentId).catch(() => undefined);
     return job;
@@ -148,8 +155,8 @@ export class SkillInstallationService {
     currentUserMessage: string,
   ): Promise<SkillInstallJob> {
     const input = parseEnsureInput(raw);
-    const explicit = new Set(explicitGitHubSkillUrls(currentUserMessage));
-    const canonicalUrls = input.sourceUrls.map((url) => parseGitHubSkillUrl(url).sourceUrl);
+    const explicit = new Set(this.sourcePolicy.explicitUrls(currentUserMessage));
+    const canonicalUrls = input.sourceUrls.map((url) => this.sourcePolicy.parse(url).sourceUrl);
     const unauthorized = canonicalUrls.find((url) => !explicit.has(url));
     if (unauthorized) {
       throw new ApiProblemError(400, "SKILL_SOURCE_NOT_USER_PROVIDED", `只能安装当前用户消息中明确给出的 Skill URL: ${unauthorized}`, false);
@@ -174,7 +181,7 @@ export class SkillInstallationService {
     if (previous.state !== "failed" && previous.state !== "interrupted") {
       throw new ApiProblemError(409, "CONFLICT", "只有失败或中断的 Skill 安装任务可以重试", false);
     }
-    const urls = previous.items.map((item) => item.source.kind === "github_tree" ? sourceUrl(item.source) : undefined);
+    const urls = previous.items.map((item) => item.source.kind === "approved_local" ? undefined : this.sourcePolicy.sourceUrl(item.source));
     if (urls.some((item) => !item)) throw new ApiProblemError(409, "CONFLICT", "该任务来源不支持重试", false);
     const job = await this.createJob(urls as string[], previous.origin, previous.bindToAgentOnComplete, ownerId);
     const agentId = previous.origin.kind === "turn" ? previous.origin.agentId : undefined;
@@ -188,12 +195,24 @@ export class SkillInstallationService {
     bindToAgentOnComplete: boolean,
     ownerId: string,
   ): Promise<SkillInstallJob> {
-    if (sourceUrls.length < 1 || sourceUrls.length > 10) {
-      throw new ApiProblemError(400, "VALIDATION_FAILED", "一次只能提供 1-10 个 Skill 来源地址", false);
+    if (sourceUrls.length < 1) {
+      throw new ApiProblemError(400, "VALIDATION_FAILED", "至少提供 1 个 Skill URL", false);
     }
-    const sources: Array<Extract<SkillSource, { kind: "github_tree" }>> = [];
+    if (sourceUrls.length > PRODUCT_CONFIG.skill.maxSourceUrlsPerJob) {
+      throw new ApiProblemError(
+        400,
+        "SKILL_SOURCE_URL_LIMIT_EXCEEDED",
+        `单次 Skill 安装最多接收 ${PRODUCT_CONFIG.skill.maxSourceUrlsPerJob} 个 URL；本次提供了 ${sourceUrls.length} 个`,
+        false,
+      );
+    }
+    const sources: Array<Exclude<SkillSource, { kind: "approved_local" }>> = [];
     for (const url of sourceUrls) {
-      const parsed = parseGitHubSkillUrl(url);
+      const parsed = this.sourcePolicy.parse(url);
+      if (parsed.kind === "resource") {
+        sources.push(parsed.source);
+        continue;
+      }
       try {
         sources.push(...await this.discovery.discoverGitHub(parsed.source));
       } catch (error) {
@@ -263,39 +282,55 @@ export class SkillInstallationService {
     ownerId: string,
     mode: "ensure" | "update",
   ): Promise<SkillInstallJobItem> {
-    if (item.source.kind !== "github_tree") throw new Error("只支持 GitHub Skill 来源");
+    if (item.source.kind === "approved_local") throw new Error("安装任务不接受本地派生来源");
     const source = item.source;
     const existing = (await this.list(ownerId)).find((candidate) => {
-      if (candidate.source.kind !== "github_tree") return false;
-      return sameGitHubSource(candidate.source, source);
+      return this.sourcePolicy.sameSource(candidate.source, source);
     });
     if (existing && mode === "ensure") {
       return { ...item, state: "ready", skillInstallationId: existing.skillInstallationId, disposition: "reused" };
     }
-    const parsed = parseGitHubSkillUrl(sourceUrl(item.source));
     let installed: SkillInstallRecord;
     try {
-      installed = await this.installer.install({
-        approved: true,
-        source: {
-          kind: "git",
-          url: parsed.cloneUrl,
-          ref: item.source.resolvedCommit ?? item.source.requestedRef,
-          subdir: item.source.subdirectory,
-        },
-      }, { replaceExisting: Boolean(existing && mode === "update") });
+      if (source.kind === "github_tree") {
+        const parsed = parseGitHubSkillUrl(this.sourcePolicy.sourceUrl(source));
+        installed = await this.installer.install({
+          approved: true,
+          source: {
+            kind: "git",
+            url: parsed.cloneUrl,
+            ref: source.resolvedCommit ?? source.requestedRef,
+            subdir: source.subdirectory,
+          },
+        }, { replaceExisting: Boolean(existing && mode === "update") });
+      } else {
+        installed = await this.installer.install({
+          approved: true,
+          source: { kind: "resource", url: source.url },
+        }, { replaceExisting: Boolean(existing && mode === "update") });
+      }
     } catch (error) {
       if (/Skill 已安装/.test(publicMessage(error))) {
         throw new ApiProblemError(409, "SKILL_SOURCE_NAME_CONFLICT", "同名 Skill 已由另一个来源安装", false);
       }
       if (isGitHubFetchFailure(error)) {
-        throw githubConnectionProblem(item.source.repository);
+        if (source.kind === "github_tree") throw githubConnectionProblem(source.repository);
       }
+      if (isResourceFetchFailure(error)) throw resourceConnectionProblem(source.kind === "resource_bundle" ? source.url : "");
       throw error;
     }
     await this.registry.refresh();
     const id = existing?.skillInstallationId ?? randomUUID();
     const now = new Date().toISOString();
+    const persistedSource: Exclude<SkillSource, { kind: "approved_local" }> = source.kind === "github_tree"
+      ? {
+          ...source,
+          ...(installed.source.kind === "git" ? { resolvedCommit: installed.source.commit } : {}),
+        }
+      : {
+          ...source,
+          resolvedContentHash: installed.contentHash,
+        };
     await this.repository.putInstallation({
       schemaVersion: 1,
       skillInstallationId: id,
@@ -303,17 +338,14 @@ export class SkillInstallationService {
       skillName: installed.name,
       displayName: installed.name,
       state: "ready",
-      source: {
-        ...item.source,
-        ...(installed.source.kind === "git" ? { resolvedCommit: installed.source.commit } : {}),
-      },
+      source: persistedSource,
       contentHash: installed.contentHash,
       installedPathRef: `skill-root:${id}`,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
     this.readyIds.add(id);
-    return { ...item, state: "ready", skillInstallationId: id, disposition: existing ? "updated" : "installed" };
+    return { ...item, source: persistedSource, state: "ready", skillInstallationId: id, disposition: existing ? "updated" : "installed" };
   }
 }
 
@@ -333,11 +365,6 @@ function parseEnsureInput(value: EnsureAgentSkillsInput): EnsureAgentSkillsInput
   return { sourceUrls: [...new Set(value.sourceUrls)], mode: value.mode };
 }
 
-function sourceUrl(source: Extract<SkillSource, { kind: "github_tree" }>): string {
-  if (source.requestedRef === "HEAD" && source.subdirectory === ".") return source.repository;
-  return `${source.repository}/tree/${encodeURIComponent(source.requestedRef)}/${source.subdirectory.split("/").map(encodeURIComponent).join("/")}`;
-}
-
 function toPublicSource(skill: SkillInstallRecord): SkillSource {
   if (skill.source.kind === "git") {
     return {
@@ -347,6 +374,9 @@ function toPublicSource(skill: SkillInstallRecord): SkillSource {
       resolvedCommit: skill.source.commit,
       subdirectory: skill.source.subdir ?? ".",
     };
+  }
+  if (skill.source.kind === "resource") {
+    return { kind: "resource_bundle", url: skill.source.url, resolvedContentHash: skill.source.contentHash };
   }
   return { kind: "approved_local", sourceId: skill.name };
 }
@@ -364,11 +394,28 @@ function isGitHubFetchFailure(error: unknown): boolean {
   return /could not resolve host|failed to connect|connection timed out|operation timed out|curl \d+|early eof|expected flush after ref listing|connection reset/i.test(message);
 }
 
+function isResourceFetchFailure(error: unknown): boolean {
+  return /SKILL_RESOURCE_DOWNLOAD_FAILED/.test(publicMessage(error));
+}
+
+function remoteSource(source: SkillSource): source is Exclude<SkillSource, { kind: "approved_local" }> {
+  return source.kind === "github_tree" || source.kind === "resource_bundle";
+}
+
 function githubConnectionProblem(repository: string): ApiProblemError {
   return new ApiProblemError(
     502,
     "SKILL_JOB_INTERRUPTED",
     `GitHub 仓库地址格式已验证（.git 后缀合法）；连接 ${repository}.git 下载失败或超时，操作已终止，请稍后重新提交安装`,
+    true,
+  );
+}
+
+function resourceConnectionProblem(url: string): ApiProblemError {
+  return new ApiProblemError(
+    502,
+    "SKILL_JOB_INTERRUPTED",
+    `连接 Skill 静态资源 ${url} 下载失败或超时，操作已终止，请确认资源服务正在运行后重试`,
     true,
   );
 }

@@ -39,6 +39,9 @@ describe("ModelAdmissionService", () => {
     const installed = await setup.service.install({ testId: tested.testId });
     const student = await setup.repository.getStudent(installed.modelStudentId);
     const connection = student ? await setup.repository.getConnection(student.connectionId) : undefined;
+    expect(tested).not.toHaveProperty("contextWindowTokens");
+    expect(installed).not.toHaveProperty("contextWindowTokens");
+    expect(student).not.toHaveProperty("contextWindowTokens");
     expect(connection).toMatchObject({ presetId: "openai", protocol: "openai_responses" });
   });
 
@@ -71,19 +74,43 @@ describe("ModelAdmissionService", () => {
     expect(setup.prober.seen?.apiKey).toBe(raw.apiKey);
     expect(await readFile(setup.testsFile, "utf8")).not.toContain(raw.apiKey);
 
-    const installed = await setup.service.install({ testId: tested.testId, displayName: "大聪明" });
+    expect(tested).not.toHaveProperty("contextWindowTokens");
+    const installed = await setup.service.install({
+      testId: tested.testId,
+      displayName: "大聪明",
+      contextWindowTokens: 1_050_000,
+    });
     expect(installed).toMatchObject({
       displayName: "大聪明",
       providerKind: "openai-compatible",
       status: "ready",
       deletable: true,
+      contextWindowTokens: 1_050_000,
       supports: { toolCalls: true },
     });
     expect(installed.supports.reasoning.supportedProfiles).toEqual(["fast", "balanced", "deep", "max"]);
     const provider = setup.catalog.requireProvider(installed.modelStudentId);
+    expect(provider.student.contextWindowTokens).toBe(1_050_000);
     expect(provider.nativeReasoning?.("max")).toEqual({ effort: "xhigh" });
     expect(setup.secrets.values.size).toBe(1);
     expect(await readFile(setup.catalogFile, "utf8")).not.toContain(raw.apiKey);
+    expect(await setup.repository.getStudent(installed.modelStudentId)).toMatchObject({
+      contextWindowTokens: 1_050_000,
+    });
+
+    const restoredCatalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
+    const restoredService = serviceFor(
+      setup.repository,
+      setup.secrets,
+      setup.prober,
+      restoredCatalog,
+      setup.policy,
+    );
+    await expect(restoredService.restoreInstalled()).resolves.toEqual([
+      expect.objectContaining({ contextWindowTokens: 1_050_000 }),
+    ]);
+    expect(restoredCatalog.requireProvider(installed.modelStudentId).student.contextWindowTokens)
+      .toBe(1_050_000);
   });
 
   it("安装时单独保存用户选择的模型默认档位，不改写体检快照", async () => {
@@ -348,6 +375,9 @@ function serviceFor(
     id: student.modelStudentId,
     name: student.displayName,
     sizeClass: student.sizeClass,
+    ...(student.contextWindowTokens === undefined
+      ? {}
+      : { contextWindowTokens: student.contextWindowTokens }),
     provider: { kind: "openai-compatible", model: student.model, baseUrl: connection.baseUrl },
     generationDefaults: { reasoningProfile: student.generationDefaults.reasoningProfile },
   }, {

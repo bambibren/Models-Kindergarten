@@ -1,8 +1,8 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import type { ContextSummary } from "@kindergarten/contracts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { PRODUCT_CONFIG, type ContextSummary } from "@kindergarten/contracts";
 import { ContextAssembler } from "../src/conversation/context-assembler.js";
 import type {
   ModelContextFragment,
@@ -27,11 +27,12 @@ import { WebAccess } from "../src/tools/web-access.js";
 
 const dirs: string[] = [];
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 describe("V1.6 Agent Runtime", () => {
-  it("成功工具被重复提议时只执行一次，并把缓存结果继续交给模型", async () => {
+  it("成功工具被重复提议时每次都真实执行，不复用之前结果", async () => {
     const sandbox = await makeSandbox();
     const provider = new RepeatingProvider("write_file", {
       path: "repeat.txt",
@@ -53,14 +54,14 @@ describe("V1.6 Agent Runtime", () => {
       outputTokens: 40,
     });
     expect(result.usage.rounds).toHaveLength(4);
-    expect(observer.permissionCount).toBe(1);
+    expect(observer.permissionCount).toBe(3);
     expect(observer.outcomes.map((item) => item.status)).toEqual([
       "success",
-      "duplicate_blocked",
-      "duplicate_blocked",
+      "success",
+      "success",
     ]);
     expect(await readFile(join(sandbox.root, "repeat.txt"), "utf8")).toBe("只写一次");
-    expect(observer.textOutput).toContain("模型已读取去重结果");
+    expect(observer.textOutput).toContain("模型已完成重复调用");
     expect(observer.contextSummaries).toHaveLength(1);
     expect(observer.contextSummaries[0]?.items.map((item) => item.kind)).toEqual([
       "system_instruction",
@@ -71,7 +72,7 @@ describe("V1.6 Agent Runtime", () => {
     expect(JSON.stringify(observer.contextSummaries[0])).not.toContain("重复写入");
   });
 
-  it("权限拒绝后相同命令不会再次询问或执行", async () => {
+  it("权限拒绝后相同命令再次调用仍独立请求授权", async () => {
     const sandbox = await makeSandbox();
     const provider = new RepeatingProvider("run_command", {
       command: "printf forbidden > denied.txt",
@@ -86,11 +87,11 @@ describe("V1.6 Agent Runtime", () => {
     );
 
     expect(result.reason).toBe("stop");
-    expect(observer.permissionCount).toBe(1);
+    expect(observer.permissionCount).toBe(3);
     expect(observer.outcomes.map((item) => item.status)).toEqual([
       "denied",
-      "duplicate_blocked",
-      "duplicate_blocked",
+      "denied",
+      "denied",
     ]);
     await expect(readFile(join(sandbox.root, "denied.txt"), "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
@@ -138,6 +139,32 @@ describe("V1.6 Agent Runtime", () => {
       "ask_user",
     ]);
     expect(names).not.toContain("update_plan");
+  });
+
+  it("写文件权限原样遵守 Agent 配置，终端仍保持强制询问", async () => {
+    const sandbox = await makeSandbox();
+    const write = (permission: "allow" | "ask" | "deny") => new ToolRegistry(
+      sandbox,
+      undefined,
+      undefined,
+      new Map([
+        ["write_file", { enabled: true, permission }],
+        ["run_command", { enabled: true, permission: "allow" as const }],
+      ]),
+    );
+
+    for (const permission of ["allow", "ask", "deny"] as const) {
+      expect(write(permission).prepare({
+        id: `write-${permission}`,
+        name: "write_file",
+        arguments: { path: "index.html", content: "ok" },
+      }, "fallback").permission).toBe(permission);
+    }
+    expect(write("ask").prepare({
+      id: "command",
+      name: "run_command",
+      arguments: { command: "pwd" },
+    }, "fallback").permission).toBe("always_ask");
   });
 
   it("普通参数错误展开真实 Schema，不猜测或改写模型参数", async () => {
@@ -209,6 +236,22 @@ describe("V1.6 Agent Runtime", () => {
       "http://127.0.0.1:11434/api/tags",
       new AbortController().signal,
     )).rejects.toThrow("私有网络");
+  });
+
+  it("web_fetch 响应过大时返回真实的资源限制错误", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("oversized", {
+      headers: { "content-length": String(PRODUCT_CONFIG.tools.web.maxFetchBytes + 1) },
+    })));
+
+    await expect(new WebAccess().fetch(
+      "https://8.8.8.8/resource",
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      code: "web_response_too_large",
+      category: "resource_limit",
+      message: `网页响应超过 ${PRODUCT_CONFIG.tools.web.maxFetchBytes} 字节资源上限`,
+      retryable: false,
+    });
   });
 
   it("Provider 失败在 Runner 边界转换成保留原因的 RunFailure", async () => {
@@ -570,7 +613,7 @@ class RepeatingProvider implements ModelProvider {
   async *stream(_input: ModelInput): AsyncIterable<ModelEvent> {
     this.rounds += 1;
     if (this.rounds > 3) {
-      yield { type: "text_delta", text: "模型已读取去重结果" };
+      yield { type: "text_delta", text: "模型已完成重复调用" };
       yield { type: "usage", inputTokens: 100 + this.rounds, outputTokens: 10 };
       yield { type: "finish", reason: "stop" };
       return;

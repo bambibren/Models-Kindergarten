@@ -1,4 +1,11 @@
-import type { ActiveTurnState, TerminalTurnState, TurnActivePhase, TurnState, TurnWaitingState } from "@kindergarten/contracts";
+import {
+  waitingForInteractions,
+  type ActiveTurnState,
+  type TerminalTurnState,
+  type TurnActivePhase,
+  type TurnPendingInteraction,
+  type TurnState,
+} from "@kindergarten/contracts";
 
 const transitions: Record<TurnActivePhase, TurnActivePhase[]> = {
   accepted: ["accepted", "preparing_context", "finalizing"],
@@ -8,23 +15,56 @@ const transitions: Record<TurnActivePhase, TurnActivePhase[]> = {
   finalizing: ["finalizing"],
 };
 
-export const emptyTurnWaiting: TurnWaitingState = { permission: 0, input: 0 };
-
 export function initialTurnState(turnId: string): ActiveTurnState {
-  return { schemaVersion: 1, turnId, status: "active", phase: "accepted", waitingFor: { ...emptyTurnWaiting } };
+  return {
+    schemaVersion: 1,
+    turnId,
+    status: "active",
+    phase: "accepted",
+    waitingFor: { permission: 0, input: 0 },
+    pendingInteractions: [],
+  };
 }
 
 export function transitionActiveTurn(
   current: TurnState,
   phase: TurnActivePhase,
-  waitingFor: TurnWaitingState = emptyTurnWaiting,
 ): ActiveTurnState {
   if (current.status !== "active") throw new Error(`Turn 已结束，不能转换活动阶段: ${current.turnId}`);
   if (!transitions[current.phase].includes(phase)) {
     throw new Error(`Turn 阶段转换无效: ${current.phase} -> ${phase}`);
   }
-  assertWaiting(phase, waitingFor);
-  return { schemaVersion: 1, turnId: current.turnId, status: "active", phase, waitingFor: { ...waitingFor } };
+  if (phase !== "tool_execution" && current.pendingInteractions.length > 0) {
+    throw new Error(`Turn 仍有 pending interaction，不能进入 ${phase}`);
+  }
+  return activeState(current, phase, current.pendingInteractions);
+}
+
+export function addPendingTurnInteraction(
+  current: TurnState,
+  interaction: TurnPendingInteraction,
+): ActiveTurnState {
+  if (current.status !== "active") throw new Error(`Turn 已结束，不能新增 interaction: ${current.turnId}`);
+  if (current.phase !== "tool_execution") throw new Error(`只有 tool_execution 可以等待用户: ${current.phase}`);
+  if (current.pendingInteractions.some((item) => item.interactionId === interaction.interactionId)) {
+    throw new Error(`Turn interaction 已存在: ${interaction.interactionId}`);
+  }
+  return activeState(current, current.phase, [...current.pendingInteractions, structuredClone(interaction)]);
+}
+
+export function removePendingTurnInteraction(
+  current: TurnState,
+  interactionId: string,
+): ActiveTurnState {
+  if (current.status !== "active") throw new Error(`Turn 已结束，不能完成 interaction: ${current.turnId}`);
+  if (!current.pendingInteractions.some((item) => item.interactionId === interactionId)) {
+    throw new Error(`Turn interaction 不存在: ${interactionId}`);
+  }
+  return activeState(
+    current,
+    current.phase,
+    current.pendingInteractions.filter((item) => item.interactionId !== interactionId),
+  );
 }
 
 export function finishTurnState(
@@ -41,11 +81,17 @@ export function interruptTurnState(current: TurnState): Extract<TerminalTurnStat
   return { schemaVersion: 1, turnId: current.turnId, status: "interrupted" };
 }
 
-function assertWaiting(phase: TurnActivePhase, waiting: TurnWaitingState): void {
-  if (!Number.isInteger(waiting.permission) || waiting.permission < 0 || !Number.isInteger(waiting.input) || waiting.input < 0) {
-    throw new Error("Turn waitingFor 必须是非负整数");
-  }
-  if (phase !== "tool_execution" && (waiting.permission !== 0 || waiting.input !== 0)) {
-    throw new Error(`只有 tool_execution 可以等待用户: ${phase}`);
-  }
+function activeState(
+  current: ActiveTurnState,
+  phase: TurnActivePhase,
+  pendingInteractions: TurnPendingInteraction[],
+): ActiveTurnState {
+  return {
+    schemaVersion: 1,
+    turnId: current.turnId,
+    status: "active",
+    phase,
+    waitingFor: waitingForInteractions(pendingInteractions),
+    pendingInteractions: structuredClone(pendingInteractions),
+  };
 }

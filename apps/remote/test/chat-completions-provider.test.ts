@@ -323,7 +323,7 @@ describe("ChatCompletionsProvider", () => {
     }, controller.signal))).rejects.toMatchObject({ name: "AbortError" });
   });
 
-  it("长历史经过每轮原子重预算，SiliconFlow 两轮请求始终不超过 10 条", async () => {
+  it("SiliconFlow 不使用伪造的固定消息条数限制", async () => {
     const mock = await startChatCompletionsMockServer();
     const dir = await mkdtemp(join(tmpdir(), "mk-chat-message-limit-"));
     try {
@@ -346,9 +346,8 @@ describe("ChatCompletionsProvider", () => {
         if (!Array.isArray(messages)) throw new Error("mock request messages missing");
         return messages as Array<Record<string, unknown>>;
       });
-      expect(outbound[0]?.length).toBeLessThanOrEqual(8);
-      expect(outbound[1]?.length).toBeLessThanOrEqual(10);
-      expect(outbound.every((messages) => messages.length <= 10)).toBe(true);
+      expect(outbound[0]?.length).toBeGreaterThan(10);
+      expect(outbound[1]?.length).toBeGreaterThan(10);
       expect(outbound[1]).toEqual(expect.arrayContaining([
         expect.objectContaining({ role: "user", content: "use the available tools" }),
         expect.objectContaining({ role: "assistant", tool_calls: expect.any(Array) }),

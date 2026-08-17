@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import { AgentRepository } from "../../src/agent/agent-repository.js";
 import { AgentService } from "../../src/agent/agent-service.js";
 import { FixtureProvider } from "../../src/model/fixture-provider.js";
@@ -35,6 +36,9 @@ describe("SessionLaunchService reasoning override", () => {
       .rejects.toThrow("reasoningProfileOverride 格式无效");
     expect(await service.create({ ...base, reasoningProfileOverride: "deep" }))
       .toMatchObject({ reasoningProfileOverride: "deep" });
-    expect(await service.create(base)).not.toHaveProperty("reasoningProfileOverride");
+    const created = await service.create(base);
+    expect(created).not.toHaveProperty("reasoningProfileOverride");
+    expect(Date.parse(created.expiresAt) - Date.parse(created.createdAt))
+      .toBe(PRODUCT_CONFIG.sessionLaunch.draftTtlMs);
   });
 });

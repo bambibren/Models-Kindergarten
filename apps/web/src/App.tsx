@@ -1,7 +1,9 @@
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import type * as acp from "@agentclientprotocol/sdk";
-import type { ModelReasoningCapability, ReasoningProfile } from "@kindergarten/contracts";
+import type { ModelReasoningCapability, ReasoningProfile, TurnState } from "@kindergarten/contracts";
 import { AcpWebClient } from "./acp/acp-client.js";
 import { ChatViewport } from "./components/chat/ChatViewport.js";
 import { Composer } from "./components/composer/Composer.js";
@@ -12,6 +14,7 @@ import { SessionSidebar } from "./components/layout/SessionSidebar.js";
 import {
   isPromptTurnActive,
   type PendingInteractionState,
+  type PromptTurnState,
   type TurnAction,
 } from "./prompt-turn/prompt-turn-types.js";
 import { useAppStore } from "./store/app-store.js";
@@ -20,6 +23,7 @@ import { ArtifactPanel } from "./product/ArtifactPanel.js";
 import { projectReasoningConfig } from "./reasoning/reasoning-config.js";
 import { isMissingAgentError, projectSessionAvailability, type SessionAgentAvailability } from "./session/session-identity.js";
 import { sessionResumeMeta } from "./chat/chat-resume.js";
+import { clampArtifactWidth, defaultArtifactWidth } from "./session/artifact-split-pane.js";
 
 const ACP_URL = import.meta.env.VITE_ACP_URL ?? "ws://127.0.0.1:7331/acp";
 const REMOTE_CWD = "/workspace";
@@ -36,14 +40,55 @@ export default function App() {
   const [configOptions, setConfigOptions] = useState<acp.SessionConfigOption[]>([]);
   const [reasoningBusy, setReasoningBusy] = useState(false);
   const [artifactId, setArtifactId] = useState<string | null>(null);
+  const [artifactWidth, setArtifactWidth] = useState(520);
+  const [narrowView, setNarrowView] = useState<"artifact" | "chat">("artifact");
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const artifactWidthRef = useRef(artifactWidth);
+  const artifactDragRef = useRef<{ pointerId: number; workspaceLeft: number; workspaceWidth: number } | null>(null);
 
   useEffect(() => {
     const open = (event: Event) => {
       const id = (event as CustomEvent<unknown>).detail;
-      if (typeof id === "string" && id.length > 0) setArtifactId(id);
+      if (typeof id !== "string" || id.length === 0) return;
+      const containerWidth = workspaceRef.current?.clientWidth;
+      if (containerWidth) {
+        const width = defaultArtifactWidth(containerWidth);
+        artifactWidthRef.current = width;
+        setArtifactWidth(width);
+      }
+      setArtifactId(id);
+      setNarrowView("artifact");
     };
     window.addEventListener("mk-open-file-reference", open);
     return () => window.removeEventListener("mk-open-file-reference", open);
+  }, []);
+
+  useEffect(() => {
+    const stop = (event: PointerEvent) => {
+      const drag = artifactDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      artifactDragRef.current = null;
+      document.body.classList.remove("artifact-resizing");
+      setArtifactWidth(artifactWidthRef.current);
+    };
+    const move = (event: PointerEvent) => {
+      const drag = artifactDragRef.current;
+      const workspace = workspaceRef.current;
+      if (!drag || !workspace || event.pointerId !== drag.pointerId) return;
+      const width = clampArtifactWidth(event.clientX - drag.workspaceLeft, drag.workspaceWidth);
+      artifactWidthRef.current = width;
+      workspace.style.setProperty("--artifact-width", `${width}px`);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      artifactDragRef.current = null;
+      document.body.classList.remove("artifact-resizing");
+    };
   }, []);
 
   useEffect(() => {
@@ -76,10 +121,28 @@ export default function App() {
           }),
           onTurnState: (value) => {
             const before = store().promptTurn;
+            if (value.sessionId !== store().chat.sessionId) {
+              console.warn("[turn-machine] ignored state for inactive session", {
+                sessionId: value.sessionId,
+                activeSessionId: store().chat.sessionId,
+                turnId: value.turn.turnId,
+                remote: remoteTurnLogFacts(value.turn),
+              });
+              return;
+            }
             store().dispatchPromptTurn({
               type: "turn/remote-state",
               sessionId: value.sessionId,
               turn: value.turn,
+              restoredText: restoredTurnPrompt(store().chat, value.turn.turnId),
+            });
+            const after = store().promptTurn;
+            console.warn("[turn-machine] remote transition", {
+              sessionId: value.sessionId,
+              turnId: value.turn.turnId,
+              remote: remoteTurnLogFacts(value.turn),
+              before: turnLogFacts(before),
+              after: turnLogFacts(after),
             });
             if (
               value.turn.status !== "active" &&
@@ -91,10 +154,23 @@ export default function App() {
             }
           },
           onInteraction: (interaction) => {
+            const before = store().promptTurn;
             store().dispatchPromptTurn({ type: "interaction/enqueue", interaction });
+            console.warn("[turn-machine] interaction enqueued", {
+              interactionId: interaction.id,
+              kind: interaction.kind,
+              before: turnLogFacts(before),
+              after: turnLogFacts(store().promptTurn),
+            });
           },
           onInteractionResolved: (id) => {
+            const before = store().promptTurn;
             store().dispatchPromptTurn({ type: "interaction/remove", id });
+            console.warn("[turn-machine] interaction removed", {
+              interactionId: id,
+              before: turnLogFacts(before),
+              after: turnLogFacts(store().promptTurn),
+            });
           },
           onClose: () => {
             if (disposed || current !== client) return;
@@ -198,10 +274,7 @@ export default function App() {
       void closeCurrentSession(current).finally(() => { location.href = target.href; });
     };
     const pagehide = () => {
-      const client = current;
-      const sessionId = store().chat.sessionId;
-      if (client && sessionId) void client.closeSession(sessionId).catch(() => undefined);
-      client?.close();
+      current?.close();
     };
 
     reconnectRef.current = () => connect("resume");
@@ -289,6 +362,7 @@ export default function App() {
           agentName: "Agent 已删除",
           modelName: model?.displayName ?? session.modelStudentId,
           agentAvailability: "missing",
+          ...(model?.contextWindowTokens !== undefined ? { contextWindowTokens: model.contextWindowTokens } : {}),
           ...(model ? { reasoningCapability: model.supports.reasoning } : {}),
         });
         return;
@@ -297,6 +371,7 @@ export default function App() {
         agentName: agent.name,
         modelName: model?.displayName ?? session.modelStudentId,
         agentAvailability: "available",
+        ...(model?.contextWindowTokens !== undefined ? { contextWindowTokens: model.contextWindowTokens } : {}),
         ...(model ? { reasoningCapability: model.supports.reasoning } : {}),
       });
     } catch (error) { console.error("读取 Session 身份失败", error); }
@@ -418,8 +493,23 @@ export default function App() {
     identity.agentAvailability,
   );
   const reasoning = projectReasoningConfig(configOptions, identity.reasoningCapability);
+  const workspaceStyle = { "--artifact-width": `${artifactWidth}px` } as CSSProperties;
 
-  return <main className={`app-shell ${artifactId ? "with-artifact" : ""}`}>
+  function startArtifactResize(event: ReactPointerEvent<HTMLDivElement>): void {
+    const workspace = workspaceRef.current;
+    if (!workspace || event.button !== 0) return;
+    event.preventDefault();
+    const rect = workspace.getBoundingClientRect();
+    artifactDragRef.current = {
+      pointerId: event.pointerId,
+      workspaceLeft: rect.left,
+      workspaceWidth: rect.width,
+    };
+    document.body.classList.add("artifact-resizing");
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  return <main className="app-shell">
     <SessionSidebar
       sessions={sessions}
       activeId={chat.sessionId}
@@ -427,39 +517,54 @@ export default function App() {
       onCreate={() => void createSession()}
       onSelect={(session) => void selectSession(session)}
     />
-    <section className="chat-screen">
-      <ChatHeader connection={connection} identity={identity} />
-      <ChatViewport
-        historyChatEntries={chat.historyChatEntries}
-        streamingChatEntries={chat.streamingChatEntries}
-        promptTurn={promptTurn}
-        onTurnAction={handleTurnAction}
-      />
-      <div className="composer-dock">
-        {connection.phase === "disconnected" && <ComposerAvailabilityNotice
-          connection={connection}
-          onReconnect={reconnectCurrentSession}
-        />}
-        {identity.agentAvailability === "missing" && <ComposerAgentMissingNotice />}
-        {activeInteraction && interactionState && <InteractionPendingPanel
-          key={activeInteraction.id}
-          interaction={activeInteraction}
-          queued={interactionState.order.length}
-          onResolve={resolveInteraction}
-        />}
-        <Composer
-          disabled={!availability.promptEnabled}
-          running={active}
-          {...(reasoning ? { reasoning } : {})}
-          {...(identity.reasoningCapability ? { reasoningCapability: identity.reasoningCapability } : {})}
-          reasoningBusy={reasoningBusy}
-          onReasoningChange={(profile) => void changeReasoning(profile)}
-          onSend={send}
-          onCancel={cancel}
-        />
+    <section className={`session-main ${artifactId ? "has-artifact" : ""}`}>
+      {artifactId && <div aria-label="窄屏视图" className="session-narrow-switch">
+        <button className={narrowView === "artifact" ? "active" : ""} type="button" onClick={() => setNarrowView("artifact")}>产物</button>
+        <button className={narrowView === "chat" ? "active" : ""} type="button" onClick={() => setNarrowView("chat")}>聊天</button>
+      </div>}
+      <div className={`session-workspace narrow-${narrowView}`} ref={workspaceRef} style={workspaceStyle}>
+        {artifactId && <ArtifactPanel fileReferenceId={artifactId} onClose={() => setArtifactId(null)} />}
+        {artifactId && <div
+          aria-label="调整产物与聊天宽度"
+          aria-orientation="vertical"
+          className="artifact-resizer"
+          onPointerDown={startArtifactResize}
+          role="separator"
+        ><ChevronLeft size={10} /><ChevronRight size={10} /></div>}
+        <section className="chat-screen">
+          <ChatHeader connection={connection} identity={identity} />
+          <ChatViewport
+            historyChatEntries={chat.historyChatEntries}
+            streamingChatEntries={chat.streamingChatEntries}
+            promptTurn={promptTurn}
+            onTurnAction={handleTurnAction}
+          />
+          <div className="composer-dock">
+            {connection.phase === "disconnected" && <ComposerAvailabilityNotice
+              connection={connection}
+              onReconnect={reconnectCurrentSession}
+            />}
+            {identity.agentAvailability === "missing" && <ComposerAgentMissingNotice />}
+            {activeInteraction && interactionState && <InteractionPendingPanel
+              key={activeInteraction.id}
+              interaction={activeInteraction}
+              queued={interactionState.order.length}
+              onResolve={resolveInteraction}
+            />}
+            <Composer
+              disabled={!availability.promptEnabled}
+              running={active}
+              {...(reasoning ? { reasoning } : {})}
+              {...(identity.reasoningCapability ? { reasoningCapability: identity.reasoningCapability } : {})}
+              reasoningBusy={reasoningBusy}
+              onReasoningChange={(profile) => void changeReasoning(profile)}
+              onSend={send}
+              onCancel={cancel}
+            />
+          </div>
+        </section>
       </div>
     </section>
-    {artifactId && <ArtifactPanel fileReferenceId={artifactId} onClose={() => setArtifactId(null)} />}
   </main>;
 
   function reconnectCurrentSession(): void {
@@ -482,6 +587,7 @@ interface SessionIdentity {
   agentName: string;
   modelName: string;
   agentAvailability: SessionAgentAvailability;
+  contextWindowTokens?: number;
   reasoningCapability?: ModelReasoningCapability;
 }
 function readInitialAction(): InitialAction {
@@ -523,4 +629,48 @@ function errorMessage(value: unknown): string {
 
 function thoughtLevelConfigId(options: acp.SessionConfigOption[]): string | undefined {
   return options.find((option) => option.type === "select" && option.category === "thought_level")?.id;
+}
+
+function turnLogFacts(state: PromptTurnState) {
+  if (state.status === "idle") return { status: state.status };
+  return {
+    status: state.status,
+    sessionId: state.request.sessionId,
+    turnId: state.request.turnId,
+    ...(state.status === "active"
+      ? {
+          phase: state.phase,
+          waitingFor: state.waitingFor,
+          pendingInteractionIds: state.pendingInteractions.map((interaction) => interaction.interactionId),
+          interactionCount: state.interactions.order.length,
+        }
+      : {}),
+  };
+}
+
+function remoteTurnLogFacts(state: TurnState) {
+  return state.status === "active"
+    ? {
+        status: state.status,
+        phase: state.phase,
+        waitingFor: state.waitingFor,
+        pendingInteractions: state.pendingInteractions.map((interaction) => ({
+          interactionId: interaction.interactionId,
+          kind: interaction.kind,
+          toolCallId: interaction.kind === "permission" ? interaction.toolCall.toolCallId : interaction.toolCallId,
+          ...(interaction.kind === "permission" ? { toolName: interaction.toolCall.name } : {}),
+        })),
+      }
+    : { status: state.status };
+}
+
+function restoredTurnPrompt(chat: ReturnType<typeof useAppStore.getState>["chat"], turnId: string): string {
+  for (const collection of [chat.streamingChatEntries, chat.historyChatEntries]) {
+    for (let index = collection.order.length - 1; index >= 0; index -= 1) {
+      const entry = collection.byId[collection.order[index]!];
+      if (entry?.type !== "message" || entry.role !== "user" || entry.turnId !== turnId) continue;
+      return entry.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("");
+    }
+  }
+  return "";
 }

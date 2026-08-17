@@ -2,6 +2,7 @@ import { FileCode2, FileText, X } from "lucide-react";
 import { Streamdown } from "streamdown";
 import { cjk } from "@streamdown/cjk";
 import type { DemoArtifact } from "../demo-types.js";
+import { HtmlPreviewFrame } from "../../components/artifacts/HtmlPreviewFrame.js";
 
 export function ArtifactPanel({ artifact, onClose }: { artifact: DemoArtifact; onClose: () => void }) {
   return <section className="mk-demo-artifact-panel">
@@ -12,7 +13,7 @@ export function ArtifactPanel({ artifact, onClose }: { artifact: DemoArtifact; o
     <div className="mk-demo-artifact-body">
       {artifact.kind === "markdown"
         ? <article className="mk-demo-markdown-preview"><Streamdown plugins={{ cjk }}>{artifact.content}</Streamdown></article>
-        : <iframe sandbox="" srcDoc={artifact.content} title={`${artifact.name} 静态预览`} />}
+        : <HtmlPreviewFrame html={artifact.content} title={`${artifact.name} 交互预览`} />}
     </div>
   </section>;
 }

@@ -8,7 +8,7 @@ import type {
 } from "@kindergarten/contracts";
 
 export type ModelAdmissionPhase = "loading" | "editing" | "testing" | "verified" | "installing" | "failed";
-export type ModelAdmissionField = "displayName" | "baseUrl" | "model" | "apiKey";
+export type ModelAdmissionField = "displayName" | "baseUrl" | "model" | "apiKey" | "contextWindowTokens";
 export type ModelAdmissionFieldErrors = Partial<Record<ModelAdmissionField, string>>;
 
 export interface ModelAdmissionDraft {
@@ -17,6 +17,7 @@ export interface ModelAdmissionDraft {
   baseUrl: string;
   model: string;
   apiKey: string;
+  contextWindowTokens: string;
 }
 
 export interface ModelAdmissionViewState {
@@ -31,7 +32,7 @@ export interface ModelAdmissionViewState {
 export function createModelAdmissionState(): ModelAdmissionViewState {
   return {
     phase: "loading",
-    draft: { presetId: "", displayName: "", baseUrl: "", model: "", apiKey: "" },
+    draft: { presetId: "", displayName: "", baseUrl: "", model: "", apiKey: "", contextWindowTokens: "" },
     fieldErrors: {},
   };
 }
@@ -69,6 +70,7 @@ export function selectModelAdmissionPreset(
       baseUrl: preset.baseUrl.mode === "editable" ? preset.baseUrl.defaultValue ?? "" : "",
       model: "",
       apiKey: "",
+      contextWindowTokens: state.draft.contextWindowTokens,
     },
     fieldErrors: {},
   };
@@ -93,6 +95,15 @@ export function updateModelAdmissionDisplayName(
 ): ModelAdmissionViewState {
   const { displayName: _ignored, ...fieldErrors } = state.fieldErrors;
   return { ...state, draft: { ...state.draft, displayName }, fieldErrors };
+}
+
+/** 上下文窗口是用户独立填写的展示数据，不参与连接事实或能力体检。 */
+export function updateModelAdmissionContextWindowTokens(
+  state: ModelAdmissionViewState,
+  contextWindowTokens: string,
+): ModelAdmissionViewState {
+  const { contextWindowTokens: _ignored, ...fieldErrors } = state.fieldErrors;
+  return { ...state, draft: { ...state.draft, contextWindowTokens }, fieldErrors };
 }
 
 export function beginModelAdmissionTest(state: ModelAdmissionViewState): ModelAdmissionViewState {
@@ -133,11 +144,20 @@ export function buildModelStudentInstallInput(state: ModelAdmissionViewState): M
   if (state.test?.state !== "succeeded" || !snapshot || !profile || !snapshot.reasoning.capability.supportedProfiles.includes(profile)) {
     throw new Error("请先完成模型体检并选择模型默认思考设置");
   }
+  const contextWindowTokens = parseOptionalContextWindowTokens(state.draft.contextWindowTokens);
   return {
     testId: state.test.testId,
     displayName: state.draft.displayName.trim(),
     defaultReasoningProfile: profile,
+    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
   };
+}
+
+export function validateOptionalContextWindowTokens(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? undefined : "请输入正整数，或留空。";
 }
 
 export function validateModelAdmissionDraft(
@@ -191,11 +211,18 @@ export function visibleModelAdmissionErrors(
   serverErrors: ModelAdmissionFieldErrors,
 ): ModelAdmissionFieldErrors {
   const visible: ModelAdmissionFieldErrors = {};
-  for (const field of ["displayName", "baseUrl", "model", "apiKey"] as const) {
+  for (const field of ["displayName", "baseUrl", "model", "apiKey", "contextWindowTokens"] as const) {
     if (draft[field].length > 0 && validationErrors[field]) visible[field] = validationErrors[field];
     if (serverErrors[field]) visible[field] = serverErrors[field];
   }
   return visible;
+}
+
+function parseOptionalContextWindowTokens(value: string): number | undefined {
+  const error = validateOptionalContextWindowTokens(value);
+  if (error) throw new Error("上下文窗口必须是正整数，或留空。");
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : Number(trimmed);
 }
 
 export function selectedModelProviderPreset(

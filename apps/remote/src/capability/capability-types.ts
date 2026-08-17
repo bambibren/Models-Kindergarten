@@ -21,7 +21,7 @@ export interface McpServerCapabilitySnapshot {
 export interface SkillCapabilitySnapshot {
   name: string;
   contentHash: string;
-  source: "builtin" | "project" | "user" | "git";
+  source: "builtin" | "project" | "user" | "git" | "resource";
 }
 
 /**

@@ -13,6 +13,7 @@ export type PublicErrorCode =
   | "CAPABILITY_STALE"
   | "SKILL_SOURCE_NOT_ALLOWED"
   | "SKILL_SOURCE_NOT_USER_PROVIDED"
+  | "SKILL_SOURCE_URL_LIMIT_EXCEEDED"
   | "SKILL_SOURCE_NAME_CONFLICT"
   | "SKILL_VALIDATION_FAILED"
   | "SKILL_JOB_INTERRUPTED"
@@ -71,16 +72,17 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function requiredString(
   record: Record<string, unknown>,
   key: string,
-  options: { max?: number; allowEmpty?: boolean } = {},
+  options: { max?: number; allowEmpty?: boolean; preserveWhitespace?: boolean } = {},
 ): string {
   const value = record[key];
   if (typeof value !== "string") throw new Error(`${key} 必须是字符串`);
   const normalized = value.trim();
   if (!options.allowEmpty && normalized.length === 0) throw new Error(`${key} 不能为空`);
-  if (options.max !== undefined && normalized.length > options.max) {
+  const result = options.preserveWhitespace ? value : normalized;
+  if (options.max !== undefined && result.length > options.max) {
     throw new Error(`${key} 不能超过 ${options.max} 个字符`);
   }
-  return normalized;
+  return result;
 }
 
 export function optionalString(

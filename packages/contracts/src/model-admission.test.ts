@@ -55,10 +55,25 @@ describe("自定义 Responses 模型入园合同", () => {
       testId: "test",
       displayName: "大聪明",
       defaultReasoningProfile: "max",
-    })).toEqual({ testId: "test", displayName: "大聪明", defaultReasoningProfile: "max" });
+      contextWindowTokens: 262_144,
+    })).toEqual({
+      testId: "test",
+      displayName: "大聪明",
+      defaultReasoningProfile: "max",
+      contextWindowTokens: 262_144,
+    });
+    expect(parseModelStudentInstallInput({ testId: "test" })).toEqual({ testId: "test" });
     expect(() => parseModelStudentInstallInput({ testId: "test", defaultReasoningProfile: "auto" }))
       .toThrow("fast、balanced、deep 或 max");
   });
+
+  it.each([0, -1, 1.5, "262144", Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
+    "拒绝非正整数上下文上限: %s",
+    (contextWindowTokens) => {
+      expect(() => parseModelStudentInstallInput({ testId: "test", contextWindowTokens }))
+        .toThrow("contextWindowTokens 必须是正整数");
+    },
+  );
 
   it("读取并深校验端点体检产生的 reasoning 映射", () => {
     const value = readResponsesCapabilityProbe({

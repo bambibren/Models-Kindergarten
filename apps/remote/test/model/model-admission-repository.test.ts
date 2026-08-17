@@ -14,13 +14,16 @@ describe("ModelAdmissionRepository", () => {
     const catalogFile = join(dir, "catalog.json");
     const repository = new ModelAdmissionRepository(join(dir, "tests.json"), catalogFile);
     const connection = connectionRecord();
-    const student = studentRecord();
+    const student = { ...studentRecord(), contextWindowTokens: 262_144 };
 
     await repository.install(connection, student);
     expect(await repository.installed()).toEqual([{ connection, student }]);
     expect(repository.connectionView(connection)).not.toHaveProperty("credentialRef");
     const persisted = await readFile(catalogFile, "utf8");
     expect(persisted).toContain("models-kindergarten/provider-connections/connection-1");
+    expect(JSON.parse(persisted)).toMatchObject({
+      records: [expect.anything(), expect.objectContaining({ contextWindowTokens: 262_144 })],
+    });
     expect(persisted).not.toContain("super-secret");
   });
 
@@ -113,6 +116,7 @@ describe("ModelAdmissionRepository", () => {
       reasoning: { nativeByProfile: { max: { effort: "xhigh" } } },
     });
     expect(installed?.student.generationDefaults).toEqual({ reasoningProfile: "balanced" });
+    expect(installed?.student).not.toHaveProperty("contextWindowTokens");
     await repository.persistMigrations();
     const migrated = JSON.parse(await readFile(catalogFile, "utf8")) as { records: Array<Record<string, unknown>> };
     expect(migrated.records[1]).toMatchObject({ generationDefaults: { reasoningProfile: "balanced" } });

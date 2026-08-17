@@ -15,7 +15,7 @@
 - 每个 session 同时最多一个 prompt；
 - 新增协议行为必须有测试。
 - 文件 Tool 必须经过 `FileSandbox`；禁止绕过路径、大小和符号链接校验；
-- 写入必须使用 ACP permission，AskUser 必须使用 ACP elicitation，二者不得混用。
+- 写入必须经过 `PermissionGate` 并遵守 Agent permission 配置，默认使用 ACP permission；AskUser 必须使用 ACP elicitation，二者不得混用。
 - MCP 与 Skills 只能从 Remote Runtime 接入；不得改变 Browser 与 Remote 的 ACP 边界；
 - MCP Tool 和 Skill Script 必须经过 ToolRuntime，不能直接从 AgentRunner 执行；
 - MCP/Skill 配置、Secret、运行状态和能力快照必须分离，Secret 不得进入日志、Session 或评测 Trace。

@@ -1,6 +1,7 @@
 import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import { createHash } from "node:crypto";
 import { relative } from "node:path";
+import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.js";
 import type { ModelToolCall, ModelToolDefinition, ModelToolSchema } from "../model/model-provider.js";
 import { ProcessSandbox } from "./process-sandbox.js";
@@ -18,6 +19,7 @@ export type ToolErrorCategory =
   | "timeout"
   | "network"
   | "execution"
+  | "resource_limit"
   | "dependency_unavailable";
 
 export interface ToolExactArgumentCorrection {
@@ -159,7 +161,8 @@ export class ToolRegistry implements ToolRegistryPort {
     }
     if (name === "web_search") {
       const query = stringArg(call.arguments, "query");
-      const maxResults = optionalNumberArg(call.arguments, "max_results") ?? 5;
+      const maxResults = optionalNumberArg(call.arguments, "max_results") ??
+        PRODUCT_CONFIG.tools.web.defaultSearchResults;
       return prepared(id, name, `搜索 ${short(query, 60)}`, "search", {
         query,
         max_results: maxResults,
@@ -253,7 +256,7 @@ export class ToolRegistry implements ToolRegistryPort {
     const configured = this.bindings?.get(name)?.permission;
     if (configured === "deny") return "deny";
     if (required === "always_ask") return "always_ask";
-    if (required === "ask") return "ask";
+    if (required === "ask") return configured ?? "ask";
     return configured ?? required;
   }
 }
@@ -310,7 +313,7 @@ export function modelEnvelope(
     ...(ok ? { result: value } : { error: value }),
     ...(text ? { text } : {}),
     instruction: instructionOverride ?? (ok
-      ? "The tool operation completed. Do not repeat it unless the input must change."
+      ? "The tool operation completed."
       : "The tool operation did not complete. Do not repeat identical arguments."),
   });
 }
@@ -326,14 +329,20 @@ const definitions: ModelToolDefinition[] = [
     path: { type: "string", description: "沙箱内相对 POSIX 路径" },
     content: { type: "string", description: "完整文件内容" },
   }, ["path", "content"]),
-  definition("run_command", "在受限 macOS 沙箱中运行终端命令。每次执行都需要用户授权，不要重复相同命令。", {
+  definition("run_command", "在受限 macOS 沙箱中运行终端命令。每次执行都需要用户授权。", {
     command: { type: "string", description: "要运行的单条 shell 命令" },
     cwd: { type: "string", description: "沙箱内相对工作目录，默认 ." },
-    timeout_ms: { type: "integer", description: "超时毫秒，最大 30000" },
+    timeout_ms: {
+      type: "integer",
+      description: `超时毫秒，最大 ${PRODUCT_CONFIG.tools.process.maxTimeoutMs}`,
+    },
   }, ["command"]),
   definition("web_search", "搜索公开网页并返回标题和 URL。", {
     query: { type: "string", description: "搜索关键词" },
-    max_results: { type: "integer", description: "返回结果数，1 到 10" },
+    max_results: {
+      type: "integer",
+      description: `返回结果数，${PRODUCT_CONFIG.tools.web.minSearchResults} 到 ${PRODUCT_CONFIG.tools.web.maxSearchResults}`,
+    },
   }, ["query"]),
   definition("web_fetch", "读取一个公开 http/https 网页的正文，拒绝本机和私有网络地址。", {
     url: { type: "string", description: "公开网页 URL" },

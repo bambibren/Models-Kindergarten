@@ -200,6 +200,9 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid #343431; outli
 .phase-failed .activity-status, .phase-failed .activity-icon { color: #b65b53; }
 .activity-trigger[data-state="open"] .disclosure-chevron { transform: rotate(180deg); }
 .disclosure-chevron { color: #a0a19b; transition: transform .18s ease; }
+.tool-artifact-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 1px 8px 5px 27px; }
+.tool-artifact-actions button { padding: 4px 9px; border: 1px solid #d8d9d3; border-radius: 999px; color: #555852; background: #fff; font-size: 11px; cursor: pointer; }
+.tool-artifact-actions button:hover { border-color: #bfc1b8; color: #30332e; background: #f7f7f4; }
 .activity-content { overflow: hidden; color: #666862; font-size: 12px; }
 .activity-content[data-state="open"] { animation: content-open .18s ease-out; }
 @keyframes content-open { from { height: 0; opacity: 0; } to { height: var(--radix-collapsible-content-height); opacity: 1; } }

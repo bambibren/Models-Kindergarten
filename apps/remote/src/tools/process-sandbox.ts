@@ -2,12 +2,9 @@ import { spawn } from "node:child_process";
 import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { relative, resolve, sep } from "node:path";
+import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import type { FileSandbox } from "./sandbox.js";
 import { ToolExecutionError } from "./tool-error.js";
-
-const MAX_OUTPUT_BYTES = 64 * 1024;
-const DEFAULT_TIMEOUT_MS = 15_000;
-const MAX_TIMEOUT_MS = 30_000;
 
 export interface CommandResult {
   command: string;
@@ -29,7 +26,15 @@ export class ProcessSandbox {
     requestedTimeout: number | undefined,
     signal: AbortSignal,
   ): Promise<CommandResult> {
-    if (!command.trim() || command.length > 2_000) throw new Error("command 长度无效");
+    if (!command.trim()) throw new Error("command 不能为空");
+    if (command.length > PRODUCT_CONFIG.tools.process.commandMaxCharacters) {
+      throw new ToolExecutionError(
+        "command_too_long",
+        "resource_limit",
+        `命令超过 ${PRODUCT_CONFIG.tools.process.commandMaxCharacters} 个字符资源上限`,
+        false,
+      );
+    }
     if (process.platform !== "darwin") {
       throw new Error("当前终端沙箱只支持 macOS sandbox-exec");
     }
@@ -39,9 +44,17 @@ export class ProcessSandbox {
       ? this.files.preview(cwdInput)
       : this.files.root;
     assertInside(this.files.root, cwd);
-    const timeoutMs = Math.min(
-      MAX_TIMEOUT_MS,
-      Math.max(100, requestedTimeout ?? DEFAULT_TIMEOUT_MS),
+    if (requestedTimeout !== undefined && requestedTimeout > PRODUCT_CONFIG.tools.process.maxTimeoutMs) {
+      throw new ToolExecutionError(
+        "command_timeout_limit_exceeded",
+        "resource_limit",
+        `命令请求超时 ${requestedTimeout}ms，超过 ${PRODUCT_CONFIG.tools.process.maxTimeoutMs}ms 资源上限`,
+        false,
+      );
+    }
+    const timeoutMs = Math.max(
+      PRODUCT_CONFIG.tools.process.minTimeoutMs,
+      requestedTimeout ?? PRODUCT_CONFIG.tools.process.defaultTimeoutMs,
     );
     const profile = sandboxProfile(await realpath(this.files.root));
     const args = ["-p", profile, "/bin/zsh", "-lc", command];
@@ -61,7 +74,7 @@ export class ProcessSandbox {
         current: Buffer<ArrayBufferLike>,
         chunk: Buffer<ArrayBufferLike>,
       ): Buffer<ArrayBufferLike> => {
-        const remaining = MAX_OUTPUT_BYTES - current.length;
+        const remaining = PRODUCT_CONFIG.tools.process.maxOutputBytes - current.length;
         if (remaining <= 0) {
           truncated = true;
           return current;

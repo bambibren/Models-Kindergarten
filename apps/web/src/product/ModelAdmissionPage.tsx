@@ -36,8 +36,10 @@ import {
   selectModelAdmissionPreset,
   selectedModelProviderPreset,
   updateModelAdmissionConnection,
+  updateModelAdmissionContextWindowTokens,
   updateModelAdmissionDefaultReasoningProfile,
   updateModelAdmissionDisplayName,
+  validateOptionalContextWindowTokens,
   validateModelAdmissionDraft,
   visibleModelAdmissionErrors,
   type ModelAdmissionFieldErrors,
@@ -55,7 +57,11 @@ export function ModelAdmissionPage() {
     [presets, state.draft.presetId],
   );
   const validation = useMemo(() => validateModelAdmissionDraft(state.draft, preset), [state.draft, preset]);
-  const errors = visibleModelAdmissionErrors(state.draft, validation.errors, state.fieldErrors);
+  const contextWindowError = validateOptionalContextWindowTokens(state.draft.contextWindowTokens);
+  const errors = visibleModelAdmissionErrors(state.draft, {
+    ...validation.errors,
+    ...(contextWindowError ? { contextWindowTokens: contextWindowError } : {}),
+  }, state.fieldErrors);
   const busy = state.phase === "testing" || state.phase === "installing";
   const hasVerifiedTest = state.test?.state === "succeeded"
     && Boolean(state.test.snapshot)
@@ -121,7 +127,7 @@ export function ModelAdmissionPage() {
   }
 
   async function install() {
-    if (!hasVerifiedTest || !state.test || busy) return;
+    if (!hasVerifiedTest || !state.test || busy || contextWindowError) return;
     setState((current) => {
       const { error: _error, ...next } = current;
       return { ...next, phase: "installing" };
@@ -217,6 +223,22 @@ export function ModelAdmissionPage() {
                 onChange={(event) => changeConnection({ model: event.target.value })}
               /></div>
             </AdmissionField>
+            <AdmissionField label="上下文窗口（tokens，可选）" error={errors.contextWindowTokens} help="留空表示不填写；MK 不会探测、预填或推断这个数值。" inputId="model-context-window-tokens">
+              <div className="product-admission-input"><Gauge size={14} /><input
+                aria-invalid={Boolean(errors.contextWindowTokens)}
+                aria-describedby="model-context-window-tokens-description"
+                disabled={busy}
+                id="model-context-window-tokens"
+                inputMode="numeric"
+                max={Number.MAX_SAFE_INTEGER}
+                min={1}
+                placeholder="输入正整数"
+                step={1}
+                type="number"
+                value={state.draft.contextWindowTokens}
+                onChange={(event) => setState((current) => updateModelAdmissionContextWindowTokens(current, event.target.value))}
+              /></div>
+            </AdmissionField>
             <AdmissionField label={preset?.auth.apiKeyLabel ?? "API Key"} error={errors.apiKey} help="凭据格式由服务商决定；MK 不根据前缀判断服务商或能力。" inputId="model-api-key">
               <div className="product-admission-secret"><KeyRound size={14} /><input
                 aria-invalid={Boolean(errors.apiKey)}
@@ -239,7 +261,7 @@ export function ModelAdmissionPage() {
             <span className={state.phase === "failed" ? "failed" : ""}>{actionMessage(state)}</span>
             {hasVerifiedTest && state.phase !== "installing" && <button disabled={busy} type="button" onClick={() => void testConnection()}><RefreshCw size={14} />重新体检</button>}
             {hasVerifiedTest || state.phase === "installing"
-              ? <button disabled={busy} type="button" onClick={() => void install()}><Check size={14} />{state.phase === "installing" ? "正在入园" : state.phase === "failed" ? "重试入园" : "确认入园"}</button>
+              ? <button disabled={busy || Boolean(contextWindowError)} type="button" onClick={() => void install()}><Check size={14} />{state.phase === "installing" ? "正在入园" : state.phase === "failed" ? "重试入园" : "确认入园"}</button>
               : <button disabled={busy || !validation.valid} type="submit"><Activity size={14} />{state.phase === "testing" ? "正在体检" : "测试连接与能力"}</button>}
           </footer>
         </form>
@@ -339,7 +361,7 @@ function controlFieldErrors(error: unknown): ModelAdmissionFieldErrors {
   const result: ModelAdmissionFieldErrors = {};
   for (const item of error.fieldErrors) {
     const field = item.path.replace(/^\/?/, "").split(/[./]/).at(-1);
-    if (field === "displayName" || field === "baseUrl" || field === "model" || field === "apiKey") result[field] = item.message;
+    if (field === "displayName" || field === "baseUrl" || field === "model" || field === "apiKey" || field === "contextWindowTokens") result[field] = item.message;
   }
   return result;
 }

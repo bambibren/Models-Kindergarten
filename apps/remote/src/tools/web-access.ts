@@ -1,11 +1,8 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import { DependencyCircuits } from "../resilience/circuit-breaker.js";
 import { ToolExecutionError } from "./tool-error.js";
-
-const MAX_FETCH_BYTES = 512 * 1024;
-const MAX_MODEL_TEXT = 24_000;
-const REQUEST_TIMEOUT_MS = 12_000;
 
 export interface WebSearchResult {
   title: string;
@@ -38,7 +35,23 @@ export class WebAccess implements WebToolClient {
     maxResults: number,
     signal: AbortSignal,
   ): Promise<WebSearchResult[]> {
-    if (!query.trim() || query.length > 500) throw new Error("query 长度无效");
+    if (!query.trim()) throw new Error("query 不能为空");
+    if (query.length > PRODUCT_CONFIG.tools.web.queryMaxCharacters) {
+      throw new ToolExecutionError(
+        "web_query_too_long",
+        "resource_limit",
+        `搜索词超过 ${PRODUCT_CONFIG.tools.web.queryMaxCharacters} 个字符资源上限`,
+        false,
+      );
+    }
+    if (maxResults > PRODUCT_CONFIG.tools.web.maxSearchResults) {
+      throw new ToolExecutionError(
+        "web_search_result_limit_exceeded",
+        "resource_limit",
+        `搜索结果请求数 ${maxResults}，超过 ${PRODUCT_CONFIG.tools.web.maxSearchResults} 条资源上限`,
+        false,
+      );
+    }
     const url = new URL(this.searchEndpoint);
     url.searchParams.set("q", query);
     const response = await this.request(url, signal, {
@@ -47,7 +60,11 @@ export class WebAccess implements WebToolClient {
       },
     });
     const html = await response.text();
-    return parseBing(html).slice(0, clamp(maxResults, 1, 10));
+    return parseBing(html).slice(0, clamp(
+      maxResults,
+      PRODUCT_CONFIG.tools.web.minSearchResults,
+      PRODUCT_CONFIG.tools.web.maxSearchResults,
+    ));
   }
 
   async fetch(input: string, signal: AbortSignal): Promise<WebFetchResult> {
@@ -62,8 +79,9 @@ export class WebAccess implements WebToolClient {
     return {
       url: response.headers.get("x-kindergarten-final-url") ?? input,
       contentType,
-      text: text.slice(0, MAX_MODEL_TEXT),
-      truncated: bytes.length >= MAX_FETCH_BYTES || text.length > MAX_MODEL_TEXT,
+      text: text.slice(0, PRODUCT_CONFIG.tools.web.maxModelTextCharacters),
+      truncated: bytes.length >= PRODUCT_CONFIG.tools.web.maxFetchBytes ||
+        text.length > PRODUCT_CONFIG.tools.web.maxModelTextCharacters,
     };
   }
 
@@ -73,9 +91,9 @@ export class WebAccess implements WebToolClient {
     init: RequestInit = {},
   ): Promise<Response> {
     let url = initial;
-    for (let redirect = 0; redirect <= 5; redirect += 1) {
+    for (let redirect = 0; redirect <= PRODUCT_CONFIG.tools.web.maxRedirects; redirect += 1) {
       await assertPublicUrl(url);
-      const combined = AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
+      const combined = AbortSignal.any([signal, AbortSignal.timeout(PRODUCT_CONFIG.tools.web.requestTimeoutMs)]);
       const breaker = this.circuits.get(`http-origin:${url.origin}`);
       let response: Response;
       try {
@@ -113,13 +131,18 @@ export class WebAccess implements WebToolClient {
       }
       if (!response.ok) throw new Error(`网页请求失败 (${response.status})`);
       const length = Number(response.headers.get("content-length") ?? "0");
-      if (length > MAX_FETCH_BYTES) {
+      if (length > PRODUCT_CONFIG.tools.web.maxFetchBytes) {
         await response.body?.cancel();
-        throw new Error(`网页超过 ${MAX_FETCH_BYTES} 字节限制`);
+        throw responseTooLarge(PRODUCT_CONFIG.tools.web.maxFetchBytes);
       }
-      return limitResponse(response, MAX_FETCH_BYTES, url.href);
+      return limitResponse(response, PRODUCT_CONFIG.tools.web.maxFetchBytes, url.href);
     }
-    throw new Error("网页重定向次数过多");
+    throw new ToolExecutionError(
+      "web_redirect_limit_exceeded",
+      "resource_limit",
+      `网页重定向超过 ${PRODUCT_CONFIG.tools.web.maxRedirects} 次资源上限`,
+      false,
+    );
   }
 }
 
@@ -161,7 +184,7 @@ async function limitResponse(response: Response, maxBytes: number, finalUrl: str
     total += value.length;
     if (total > maxBytes) {
       await reader.cancel();
-      throw new Error(`网页超过 ${maxBytes} 字节限制`);
+      throw responseTooLarge(maxBytes);
     }
     chunks.push(value);
   }
@@ -175,6 +198,16 @@ async function limitResponse(response: Response, maxBytes: number, finalUrl: str
     statusText: response.statusText,
     headers,
   });
+}
+
+function responseTooLarge(maxBytes: number): ToolExecutionError {
+  return new ToolExecutionError(
+    "web_response_too_large",
+    "resource_limit",
+    `网页响应超过 ${maxBytes} 字节资源上限`,
+    false,
+    { maxBytes },
+  );
 }
 
 function parseBing(html: string): WebSearchResult[] {

@@ -105,6 +105,52 @@ describe("SessionRepository V4", () => {
     });
   });
 
+  it("允许在 Turn 终态后补齐已执行文件 Tool 的派生预览引用", async () => {
+    const repository = new SessionRepository(await tempDir(), legacyDefaults);
+    const session = await repository.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
+    await repository.startTurn(session.id, "turn-file", { promptEntryId: "message-file" });
+    await repository.transitionTurn(session.id, "turn-file", "finalizing");
+    await repository.finishTurn(session.id, "turn-file", "failed", {
+      error: { code: "MODEL_FAILED", message: "写入后的模型轮失败", retryable: false },
+    });
+    const entry = {
+      type: "tool_call" as const,
+      turnId: "turn-file",
+      toolCallId: "write-file",
+      title: "写入 index.html",
+      name: "write_file",
+      kind: "edit" as const,
+      status: "completed" as const,
+      rawInput: { path: "index.html" },
+      rawOutput: { path: "/workspace/index.html" },
+      modelContent: "ok",
+      outcomeStatus: "success" as const,
+      content: [{
+        type: "content" as const,
+        content: {
+          type: "resource_link" as const,
+          name: "index.html",
+          uri: "mk-file://file_1234567890abcdef1234567890abcdef",
+        },
+      }],
+      locations: [],
+      createdAt: "2026-08-17T00:00:00.000Z",
+    };
+
+    const turn = await repository.attachTurnFileReferences(
+      session.id,
+      "turn-file",
+      [entry],
+      ["file_1234567890abcdef1234567890abcdef"],
+    );
+
+    expect(turn).toMatchObject({
+      state: { status: "failed" },
+      fileReferenceIds: ["file_1234567890abcdef1234567890abcdef"],
+    });
+    expect((await repository.get(session.id)).sessionEntries).toContainEqual(entry);
+  });
+
   it("原子保存用户消息与 Turn，并在重启恢复时保留消息、收敛运行状态", async () => {
     const repository = new SessionRepository(await tempDir(), legacyDefaults);
     const session = await repository.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });

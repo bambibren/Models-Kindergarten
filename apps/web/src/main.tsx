@@ -14,6 +14,23 @@ import "./styles.css";
 const root = document.getElementById("root");
 if (!root) throw new Error("找不到 #root");
 
+window.addEventListener("error", (event) => {
+  console.error("[web-runtime] uncaught error", {
+    message: event.message,
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+    stack: event.error instanceof Error ? event.error.stack : undefined,
+  });
+});
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  console.error("[web-runtime] unhandled rejection", {
+    message: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
+});
+
 // Demo 路径不挂载真实 App，避免创建第二个 ACP connection owner。
 const application = route();
 

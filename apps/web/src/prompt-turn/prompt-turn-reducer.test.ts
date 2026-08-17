@@ -15,8 +15,54 @@ const request: PromptRequestState = {
 };
 
 describe("prompt turn reducer", () => {
+  it("全量 load 回放活动 TurnState 时，从 idle 恢复统一状态机并接收授权交互", () => {
+    let state = promptTurnReducer(idlePromptTurn, {
+      type: "turn/remote-state",
+      sessionId: "session-restored",
+      turn: {
+        schemaVersion: 1,
+        turnId: "turn-restored",
+        status: "active",
+        phase: "tool_execution",
+        waitingFor: { permission: 1, input: 0 },
+        pendingInteractions: [pendingPermission("restored")],
+      },
+      restoredText: "恢复前的用户请求",
+    });
+    expect(state).toMatchObject({
+      status: "active",
+      phase: "tool_execution",
+      waitingFor: { permission: 1, input: 0 },
+      request: { sessionId: "session-restored", turnId: "turn-restored", text: "恢复前的用户请求" },
+    });
+
+    state = promptTurnReducer(state, {
+      type: "interaction/enqueue",
+      interaction: {
+        ...permission("restored"),
+        request: { ...permission("restored").request, sessionId: "session-restored" },
+      },
+    });
+    expect(state).toMatchObject({
+      status: "active",
+      interactions: { order: ["permission:restored"] },
+    });
+  });
+
   it("用 order + byId 保存多个并发交互，并在全部处理后恢复 running", () => {
     let state = promptTurnReducer(idlePromptTurn, { type: "turn/start", request });
+    state = promptTurnReducer(state, {
+      type: "turn/remote-state",
+      sessionId: request.sessionId,
+      turn: {
+        schemaVersion: 1,
+        turnId: request.turnId,
+        status: "active",
+        phase: "tool_execution",
+        waitingFor: { permission: 2, input: 0 },
+        pendingInteractions: [pendingPermission("permission-1"), pendingPermission("permission-2")],
+      },
+    });
     state = promptTurnReducer(state, {
       type: "interaction/enqueue",
       interaction: permission("permission-1"),
@@ -28,11 +74,11 @@ describe("prompt turn reducer", () => {
 
     expect(state.status).toBe("active");
     if (state.status !== "active") throw new Error("状态错误");
-    expect(state.interactions.order).toEqual(["permission-1", "permission-2"]);
+    expect(state.interactions.order).toEqual(["permission:permission-1", "permission:permission-2"]);
 
-    state = promptTurnReducer(state, { type: "interaction/remove", id: "permission-1" });
+    state = promptTurnReducer(state, { type: "interaction/remove", id: "permission:permission-1" });
     expect(state.status).toBe("active");
-    state = promptTurnReducer(state, { type: "interaction/remove", id: "permission-2" });
+    state = promptTurnReducer(state, { type: "interaction/remove", id: "permission:permission-2" });
     expect(state).toMatchObject({ status: "active", request, interactions: { order: [] } });
   });
 
@@ -101,7 +147,19 @@ describe("prompt turn reducer", () => {
 
   it("会话总量仅在 Prompt Turn 非活动状态展示", () => {
     const running = promptTurnReducer(idlePromptTurn, { type: "turn/start", request });
-    const waiting = promptTurnReducer(running, {
+    const pending = promptTurnReducer(running, {
+      type: "turn/remote-state",
+      sessionId: request.sessionId,
+      turn: {
+        schemaVersion: 1,
+        turnId: request.turnId,
+        status: "active",
+        phase: "tool_execution",
+        waitingFor: { permission: 1, input: 0 },
+        pendingInteractions: [pendingPermission("permission-1")],
+      },
+    });
+    const waiting = promptTurnReducer(pending, {
       type: "interaction/enqueue",
       interaction: permission("permission-1"),
     });
@@ -131,11 +189,12 @@ describe("prompt turn reducer", () => {
   });
 });
 
-function permission(id: string) {
+function permission(toolCallId: string) {
+  const id = `permission:${toolCallId}`;
   const request: acp.RequestPermissionRequest = {
     sessionId: "session-1",
     toolCall: {
-      toolCallId: id,
+      toolCallId,
       title: "写入文件",
       kind: "edit",
       status: "pending",
@@ -144,4 +203,22 @@ function permission(id: string) {
     options: [],
   };
   return { id, kind: "permission" as const, request };
+}
+
+function pendingPermission(toolCallId: string) {
+  return {
+    schemaVersion: 1 as const,
+    interactionId: `permission:${toolCallId}`,
+    kind: "permission" as const,
+    toolCall: {
+      toolCallId,
+      title: "写入文件",
+      name: "write_file",
+      kind: "edit" as const,
+      rawInput: { path: "index.html" },
+      locations: [],
+    },
+    options: [],
+    requestedAt: "2026-08-17T00:00:00.000Z",
+  };
 }

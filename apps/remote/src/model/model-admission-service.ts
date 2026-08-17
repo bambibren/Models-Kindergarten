@@ -301,6 +301,9 @@ export class ModelAdmissionService {
       displayName,
       model: candidate.model,
       sizeClass: "large",
+      ...(input.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: input.contextWindowTokens }),
       lifecycle: "installing",
       installationTestId: test.testId,
       generationDefaults: { reasoningProfile: defaultReasoningProfile },

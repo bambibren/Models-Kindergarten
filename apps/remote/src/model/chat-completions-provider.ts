@@ -9,7 +9,6 @@ import type {
   ModelContextSerialization,
   ModelEvent,
   ModelInput,
-  ModelInputMessageLimits,
   ModelMessage,
   ModelProvider,
   ModelStudent,
@@ -89,11 +88,6 @@ const MAX_HTTP_ERROR_BODY_BYTES = 64 * 1024;
  * It deliberately does not infer capability from vendor/model names.
  */
 export class ChatCompletionsProvider implements ModelProvider {
-  readonly inputMessageLimits: ModelInputMessageLimits = Object.freeze({
-    maxMessages: 10,
-    adapterReservedMessages: 1,
-    initialToolRoundHeadroom: 2,
-  });
   readonly reasoningCapability: ModelReasoningCapability;
   private readonly readBearerToken: ChatCompletionsProviderOptions["readBearerToken"];
   private readonly nativeByProfile: Readonly<
@@ -430,13 +424,6 @@ function toChatRequest(
     toSystemMessage(input.systemPrompt),
     ...input.messages.map((message) => toChatMessage(provider.student, message)),
   ];
-  if (messages.length > provider.inputMessageLimits.maxMessages) {
-    throw new ModelProviderError(
-      "model_request_failed",
-      `Chat Completions 输入消息超过 ${provider.inputMessageLimits.maxMessages} 条上限`,
-      false,
-    );
-  }
   return {
     model: provider.student.provider.model,
     messages,

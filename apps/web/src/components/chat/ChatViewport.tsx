@@ -47,7 +47,7 @@ export function ChatViewport({ historyChatEntries, streamingChatEntries, promptT
   if (count === 0) return <section className="empty-state">
     <span className="empty-mark"><GraduationCap size={23} /></span>
     <h1>今天想让模型学习什么？</h1>
-    <p>本地 qwen3:8b 通过 ACP 与沙箱工具协作。你可以让它读取文件、写入文件，或在需要时向你提问。</p>
+    <p>当前 ModelStudent 通过 ACP 与沙箱工具协作。你可以让它读取文件、写入文件，或在需要时向你提问。</p>
     <div className="suggestion-grid"><span>总结 sandbox 中的文件</span><span>新建一份学习笔记</span><span>读取 README 并解释架构</span></div>
   </section>;
   return <section className="chat-viewport" ref={viewportRef} onScroll={updateFollowState} aria-live="polite"><div className="chat-content" ref={contentRef}>

@@ -12,6 +12,8 @@ export interface ModelStudent {
   name: string;
   /** 显式模型配置；Runtime 不通过模型名称或参数量字符串猜测能力。 */
   sizeClass: "small" | "large";
+  /** 用户显式配置的上下文窗口；未知时缺省。 */
+  contextWindowTokens?: number;
   provider: {
     kind: ModelProviderKind;
     model: string;

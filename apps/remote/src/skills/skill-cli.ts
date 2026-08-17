@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { SkillInstaller } from "./skill-installer.js";
 import { SkillLockStore } from "./skill-lock-store.js";
+import { configuredSkillResourceOrigins, SkillSourceUrlPolicy } from "./skill-source-url.js";
 import type { SkillInstallRequest } from "./skill-types.js";
 
 const args = parseArgs(process.argv.slice(2));
@@ -9,7 +10,8 @@ const installer = new SkillInstaller(
   resolve(process.env.USER_SKILLS_DIR ?? `${dataDir}/skills`),
   new SkillLockStore(resolve(process.env.SKILLS_LOCK_FILE ?? `${dataDir}/skills-lock.json`)),
 );
-const request = installRequest(args);
+const sourcePolicy = new SkillSourceUrlPolicy(configuredSkillResourceOrigins(process.env.SKILL_RESOURCE_ORIGINS));
+const request = installRequest(args, sourcePolicy);
 const record = await installer.install(request);
 console.log(JSON.stringify({
   installed: true,
@@ -18,7 +20,7 @@ console.log(JSON.stringify({
   source: record.source,
 }, null, 2));
 
-function installRequest(args: Map<string, string | true>): SkillInstallRequest {
+function installRequest(args: Map<string, string | true>, sourcePolicy: SkillSourceUrlPolicy): SkillInstallRequest {
   if (args.get("approve") !== true) throw new Error("必须提供 --approve 明确确认安装");
   const source = required(args, "source");
   if (source === "local") {
@@ -39,7 +41,15 @@ function installRequest(args: Map<string, string | true>): SkillInstallRequest {
       },
     };
   }
-  throw new Error("--source 必须是 local 或 git");
+  if (source === "resource") {
+    const parsed = sourcePolicy.parse(required(args, "url"));
+    if (parsed.kind !== "resource") throw new Error("--source resource 必须使用已配置的静态资源地址");
+    return {
+      approved: true,
+      source: { kind: "resource", url: parsed.sourceUrl },
+    };
+  }
+  throw new Error("--source 必须是 local、git 或 resource");
 }
 
 function parseArgs(values: string[]): Map<string, string | true> {

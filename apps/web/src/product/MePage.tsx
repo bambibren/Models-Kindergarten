@@ -1,6 +1,8 @@
 import { Beaker, Blocks, Bot, Braces, ExternalLink, Plus, Sparkles, Trash2, UserRound } from "lucide-react";
 import { useCallback, useState } from "react";
+import type { SkillSource } from "@kindergarten/contracts";
 import { controlApi } from "../api/control-api.js";
+import { formatContextWindow, joinMetadata } from "../components/tokens/token-format.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { ProductNav } from "./ProductNav.js";
 import { useResource } from "./use-resource.js";
@@ -24,7 +26,7 @@ export function MePage() {
 }
 function ResourcePanel({ tab, data, retry }: { tab: Tab; data: Awaited<ReturnType<typeof loadAll>>; retry: () => void }) {
   if (tab === "agents") return <Panel title="可复用 Agent" action={<a href="/agents/new"><Plus size={13} />创建 Agent</a>}>{data.agents.map((item) => <ResourceRow href={`/agents/${item.agentId}`} icon={<Braces size={15} />} key={item.agentId} title={item.name} detail={item.description ?? "未填写说明"} onDelete={item.deletable === true ? () => remove(`Agent「${item.name}」`, () => controlApi.removeAgent(item.agentId), retry) : undefined} />)}</Panel>;
-  if (tab === "models") return <Panel title="我的 Models" action={<a href="/models/new"><Plus size={13} />新模型入园</a>}>{data.models.map((item) => <ResourceRow icon={<Bot size={15} />} key={item.modelStudentId} title={item.displayName} detail={`${item.model} · ${item.providerKind}`} state={item.status === "ready" ? "可用" : "不可用"} onDelete={item.deletable === true ? () => remove(`Model「${item.displayName}」`, () => controlApi.removeModel(item.modelStudentId), retry) : undefined} />)}</Panel>;
+  if (tab === "models") return <Panel title="我的 Models" action={<a href="/models/new"><Plus size={13} />新模型入园</a>}>{data.models.map((item) => <ResourceRow icon={<Bot size={15} />} key={item.modelStudentId} title={item.displayName} detail={joinMetadata([formatContextWindow(item.contextWindowTokens), item.model, item.providerKind])} state={item.status === "ready" ? "可用" : "不可用"} onDelete={item.deletable === true ? () => remove(`Model「${item.displayName}」`, () => controlApi.removeModel(item.modelStudentId), retry) : undefined} />)}</Panel>;
   if (tab === "mcps") return <Panel title="我的 MCPs" action={<a href="/mcp/new"><Plus size={13} />添加远程 MCP</a>}>{data.mcps.map((item) => <ResourceRow href={`/mcp/${item.mcpInstallationId}`} icon={<Blocks size={15} />} key={item.mcpInstallationId} title={item.name} detail={item.url} state={item.state} onDelete={item.deletable === true ? () => remove(`MCP「${item.name}」`, () => controlApi.removeMcp(item.mcpInstallationId), retry) : undefined} />)}</Panel>;
   if (tab === "skills") return <SkillPanel items={data.skills} retry={retry} />;
   return <Panel title="已保存的 Contexts">{data.experiments.map((item) => <ResourceRow href={experimentUrl(item.experimentId)} icon={<Beaker size={15} />} key={item.experimentId} title={item.name} detail={item.promptText} state={item.status} onDelete={() => remove(`Context「${item.name}」`, () => controlApi.removeExperiment(item.experimentId), retry)} />)}</Panel>;
@@ -50,7 +52,12 @@ function SkillPanel({ items, retry }: { items: Awaited<ReturnType<typeof control
     }
     setMessage("安装仍在进行，可稍后刷新查看。"); retry();
   }
-  return <Panel title="我的 Skills"><div className="product-inline-install"><input aria-label="Skill 安装地址" placeholder="GitHub 仓库或目录地址" value={url} onChange={(event) => setUrl(event.target.value)} /><button disabled={busy || !url.trim()} type="button" onClick={() => void install()}>{busy ? "正在提交" : "安装"}</button>{message && <small>{message}</small>}</div>{items.map((item) => <ResourceRow icon={<Sparkles size={15} />} key={item.skillInstallationId} title={item.displayName ?? item.skillName ?? "Skill"} detail={item.source.kind === "github_tree" ? `${item.source.repository}/${item.source.subdirectory}` : item.source.sourceId} state={item.state} onDelete={item.deletable === true ? () => remove(`Skill「${item.displayName ?? item.skillName ?? "Skill"}」`, () => controlApi.removeSkill(item.skillInstallationId), retry) : undefined} />)}</Panel>;
+  return <Panel title="我的 Skills"><div className="product-inline-install"><input aria-label="Skill 安装地址" placeholder="GitHub 或 MK Skill 资源地址" value={url} onChange={(event) => setUrl(event.target.value)} /><button disabled={busy || !url.trim()} type="button" onClick={() => void install()}>{busy ? "正在提交" : "安装"}</button>{message && <small>{message}</small>}</div>{items.map((item) => <ResourceRow icon={<Sparkles size={15} />} key={item.skillInstallationId} title={item.displayName ?? item.skillName ?? "Skill"} detail={skillSourceLabel(item.source)} state={item.state} onDelete={item.deletable === true ? () => remove(`Skill「${item.displayName ?? item.skillName ?? "Skill"}」`, () => controlApi.removeSkill(item.skillInstallationId), retry) : undefined} />)}</Panel>;
+}
+
+function skillSourceLabel(source: SkillSource): string {
+  if (source.kind === "github_tree") return `${source.repository}/${source.subdirectory}`;
+  return source.kind === "resource_bundle" ? source.url : source.sourceId;
 }
 
 function experimentUrl(id: string): string { return new URL(`/evaluation/experiments/${encodeURIComponent(id)}`, import.meta.env.VITE_EVALUATION_WEB_URL ?? "http://127.0.0.1:5175").toString(); }

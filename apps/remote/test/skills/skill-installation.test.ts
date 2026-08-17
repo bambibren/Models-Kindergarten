@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import { AgentRepository } from "../../src/agent/agent-repository.js";
 import { AgentService } from "../../src/agent/agent-service.js";
 import {
@@ -21,12 +22,15 @@ import { SkillInstallationRepository } from "../../src/skills/skill-installation
 import { SkillInstallationService, type SkillInstallerPort } from "../../src/skills/skill-installation-service.js";
 import { SkillLockStore } from "../../src/skills/skill-lock-store.js";
 import { SkillRegistry } from "../../src/skills/skill-registry.js";
+import { SkillSourceUrlPolicy } from "../../src/skills/skill-source-url.js";
 import type { TurnScope } from "../../src/runtime/turn-scope.js";
 import { ToolCallLedger, ToolRuntime, type ToolObserver } from "../../src/tools/tool-runtime.js";
 
 const dirs: string[] = [];
 const URL_A = "https://github.com/acme/skills/tree/main/frontend-design";
 const REPOSITORY_URL = "https://github.com/greensock/gsap-skills";
+const RESOURCE_ORIGIN = "http://127.0.0.1:7342";
+const RESOURCE_URL = `${RESOURCE_ORIGIN}/skills/website-design-fast`;
 
 afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
 
@@ -52,6 +56,34 @@ describe("Skill Installation", () => {
     expect(new EnsureAgentSkillsToolProvider(service, scope, "帮我设计网页").definitions).toHaveLength(0);
     expect(new EnsureAgentSkillsToolProvider(service, scope, `请安装 ${URL_A}`).definitions[0]?.function.name)
       .toBe("ensure_agent_skills");
+  });
+
+  it("只从配置允许的静态资源源站提取并安装 Skill", async () => {
+    const { service, scope, installer, agents } = await setup([], [RESOURCE_ORIGIN]);
+    const provider = new EnsureAgentSkillsToolProvider(service, scope, `请安装 ${RESOURCE_URL}`);
+    const parameters = provider.definitions[0]?.function.parameters as {
+      properties?: { source_urls?: { items?: { enum?: string[] } } };
+    };
+    expect(parameters.properties?.source_urls?.items?.enum).toEqual([RESOURCE_URL]);
+    expect(service.explicitSourceUrlCandidates("请安装 http://127.0.0.1:9999/skills/website-design-fast")).toEqual([]);
+
+    vi.mocked(installer.install).mockResolvedValueOnce(installedResource("website-design-fast"));
+    const job = await service.ensureForTurn(
+      { sourceUrls: [RESOURCE_URL], mode: "ensure" },
+      scope,
+      `请安装 ${RESOURCE_URL}`,
+    );
+
+    expect(installer.install).toHaveBeenCalledWith({
+      approved: true,
+      source: { kind: "resource", url: RESOURCE_URL },
+    }, { replaceExisting: false });
+    expect(job.items[0]?.source).toEqual({
+      kind: "resource_bundle",
+      url: RESOURCE_URL,
+      resolvedContentHash: "resource-hash",
+    });
+    expect((await agents.get(scope.agentId)).skills).toHaveLength(1);
   });
 
   it("动态 Tool Schema 保留用户给出的原始 URL，模型继续传 source_urls 和 mode", async () => {
@@ -240,6 +272,31 @@ describe("Skill Installation", () => {
       .rejects.toMatchObject({ code: "SKILL_SOURCE_NOT_USER_PROVIDED" });
   });
 
+  it("超过 Skill URL 上限时返回真实的资源限制，不报告格式错误", async () => {
+    const { service, scope } = await setup();
+    const urls = Array.from({ length: PRODUCT_CONFIG.skill.maxSourceUrlsPerJob + 1 }, (_, index) =>
+      `https://github.com/acme/skills/tree/main/skill-${index}`);
+    const provider = new EnsureAgentSkillsToolProvider(service, scope, `请安装 ${urls.join(" ")}`);
+    const prepared = provider.prepare({
+      id: "too-many-skill-urls",
+      name: "ensure_agent_skills",
+      arguments: { source_urls: urls, mode: "ensure" },
+    }, "fallback");
+
+    const result = await new ToolRuntime(provider).executeBatch(
+      [prepared],
+      observer(),
+      new ToolCallLedger(),
+      new AbortController().signal,
+    );
+
+    expect(result.outcomes[0]?.error).toEqual({
+      code: "SKILL_SOURCE_URL_LIMIT_EXCEEDED",
+      category: "resource_limit",
+      message: `单次 Skill 安装最多接收 ${PRODUCT_CONFIG.skill.maxSourceUrlsPerJob} 个 URL；本次提供了 ${urls.length} 个`,
+    });
+  });
+
   it("下载 GitHub 失败时不向页面泄露本机命令和临时路径", async () => {
     const { service, scope, installer } = await setup();
     vi.mocked(installer.install).mockRejectedValue(new Error("Command failed: git clone https://github.com/acme/skills.git /Users/demo/.install-secret/repo\ncurl 28: Failed to connect"));
@@ -391,7 +448,7 @@ describe("Skill Installation", () => {
   });
 });
 
-async function setup(readyIds: string[] = []) {
+async function setup(readyIds: string[] = [], resourceOrigins: string[] = []) {
   const dir = await mkdtemp(join(tmpdir(), "mk-skill-install-"));
   dirs.push(dir);
   const repository = new SkillInstallationRepository(join(dir, "installations.json"), join(dir, "jobs.json"));
@@ -416,7 +473,14 @@ async function setup(readyIds: string[] = []) {
     install: vi.fn(),
     uninstall: vi.fn(),
   };
-  service = new SkillInstallationService(repository, discovery, installer, registry, agents);
+  service = new SkillInstallationService(
+    repository,
+    discovery,
+    installer,
+    registry,
+    agents,
+    new SkillSourceUrlPolicy(resourceOrigins),
+  );
   const scope: TurnScope = {
     schemaVersion: 1,
     ownerId: "local-admin",
@@ -434,6 +498,15 @@ function installed(name: string, subdir: string) {
     name, description: `${name} test`, rootPath: `/tmp/${name}`, contentHash: `${name}-hash`,
     source: { kind: "git" as const, url: `${REPOSITORY_URL}.git`, commit: "a".repeat(40), subdir },
     scope: "user" as const, installedAt: Date.now(), trust: "approved" as const, manifest: { name, description: `${name} test` },
+  };
+}
+
+function installedResource(name: string) {
+  return {
+    name, description: `${name} test`, rootPath: `/tmp/${name}`, contentHash: "resource-hash",
+    source: { kind: "resource" as const, url: RESOURCE_URL, contentHash: "resource-hash" },
+    scope: "user" as const, installedAt: Date.now(), trust: "approved" as const,
+    manifest: { name, description: `${name} test` },
   };
 }
 

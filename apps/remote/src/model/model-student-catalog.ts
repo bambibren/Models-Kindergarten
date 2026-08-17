@@ -150,6 +150,7 @@ export class ModelStudentCatalog {
 
   private summary(item: CatalogItem): ModelStudentSummary {
     const supports = structuredClone(item.supports);
+    const contextWindowTokens = item.provider.student.contextWindowTokens;
     const configuredDefault = item.provider.student.generationDefaults.reasoningProfile;
     if (configuredDefault) supports.reasoning.defaultProfile = configuredDefault;
     return {
@@ -161,6 +162,7 @@ export class ModelStudentCatalog {
       model: item.provider.student.provider.model,
       status: item.status,
       supports,
+      ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
       deletable: item.deletable,
       ...(item.lastCheckedAt ? { lastCheckedAt: item.lastCheckedAt } : {}),
       ...(item.statusMessage ? { statusMessage: item.statusMessage } : {}),

@@ -33,6 +33,7 @@ export interface ManagedModelStudentRecord {
   displayName: string;
   model: string;
   sizeClass: "large";
+  contextWindowTokens?: number;
   /** 旧记录缺省视为 active；新事务必须显式写入。 */
   lifecycle?: "installing" | "active" | "rollback_pending" | "deleting";
   installationTestId?: string;
@@ -281,6 +282,7 @@ function isCatalogRecord(value: unknown): value is AdmissionCatalogRecord {
   }
   if (value.recordKind !== "model_student") return false;
   if (typeof value.modelStudentId !== "string" || typeof value.connectionId !== "string" || typeof value.displayName !== "string" || typeof value.model !== "string" || value.sizeClass !== "large") return false;
+  if (value.contextWindowTokens !== undefined && (!Number.isSafeInteger(value.contextWindowTokens) || Number(value.contextWindowTokens) <= 0)) return false;
   if (value.lifecycle !== undefined && !["installing", "active", "rollback_pending", "deleting"].includes(String(value.lifecycle))) return false;
   if (value.installationTestId !== undefined && typeof value.installationTestId !== "string") return false;
   try {

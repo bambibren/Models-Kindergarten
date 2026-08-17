@@ -8,10 +8,12 @@ import {
   parseExperimentDraftInput,
   parseFileReferenceUri,
   parseMcpCandidateInput,
+  PRODUCT_CONFIG,
   readExperimentRunRefMeta,
   readSessionBindingMeta,
   scoreManualDimensions,
   type ExecutionMetricsSnapshot,
+  type ModelStudentSummary,
 } from "./index.js";
 
 describe("management contracts", () => {
@@ -30,6 +32,8 @@ describe("management contracts", () => {
     });
 
     expect(input.name).toBe("代码助手");
+    expect(input.systemPrompt).toBe("  先检查再修改。  ");
+    expect(PRODUCT_CONFIG.agent.systemPromptMaxCharacters).toBe(32_000);
     expect(canonicalAgentInput(input).skillInstallationIds).toEqual(["skill-a", "skill-b"]);
     expect(canonicalAgentInput(input).builtinTools).toHaveLength(1);
     expect(input).not.toHaveProperty("defaultReasoningProfile");
@@ -97,6 +101,40 @@ describe("management contracts", () => {
     expect(parseFileReferenceUri("mk-file://folder/file.txt")).toBeUndefined();
     expect(parseFileReferenceUri("mk-file://file_8bca70a9?path=secret")).toBeUndefined();
     expect(parseFileReferenceUri("file:///tmp/secret.txt")).toBeUndefined();
+  });
+
+  it("ModelStudent 摘要公开手动配置的上下文上限，未知时保持字段缺省", () => {
+    const known = {
+      schemaVersion: 1,
+      modelStudentId: "student-known",
+      displayName: "Known",
+      sizeClass: "large",
+      providerKind: "siliconflow",
+      model: "vendor/model",
+      status: "ready",
+      supports: {
+        streaming: true,
+        toolCalls: true,
+        thought: true,
+        usage: true,
+        reasoning: {
+          schemaVersion: 1,
+          control: "fixed",
+          adjustable: false,
+          supportedProfiles: ["balanced"],
+          defaultProfile: "balanced",
+        },
+      },
+      contextWindowTokens: 262_144,
+    } satisfies ModelStudentSummary;
+    const { contextWindowTokens: _contextWindowTokens, ...knownWithoutContextWindow } = known;
+    const unknown = {
+      ...knownWithoutContextWindow,
+      modelStudentId: "student-unknown",
+    } satisfies ModelStudentSummary;
+
+    expect(known.contextWindowTokens).toBe(262_144);
+    expect(unknown).not.toHaveProperty("contextWindowTokens");
   });
 });
 

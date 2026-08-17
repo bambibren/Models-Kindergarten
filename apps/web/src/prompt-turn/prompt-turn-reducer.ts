@@ -12,7 +12,7 @@ import {
 export type PromptTurnAction =
   | { type: "turn/reset" }
   | { type: "turn/start"; request: PromptRequestState }
-  | { type: "turn/remote-state"; sessionId: string; turn: TurnState }
+  | { type: "turn/remote-state"; sessionId: string; turn: TurnState; restoredText?: string }
   | { type: "interaction/enqueue"; interaction: PendingInteractionState }
   | { type: "interaction/remove"; id: string }
   | { type: "turn/complete"; operationId: string; reason: Exclude<import("@agentclientprotocol/sdk").StopReason, "cancelled"> }
@@ -22,13 +22,21 @@ export type PromptTurnAction =
 export function promptTurnReducer(state: PromptTurnState, action: PromptTurnAction): PromptTurnState {
   if (action.type === "turn/reset") return idlePromptTurn;
   if (action.type === "turn/start") {
-    return { status: "active", phase: "accepted", waitingFor: { permission: 0, input: 0 }, request: action.request, interactions: emptyInteractions() };
+    return {
+      status: "active",
+      phase: "accepted",
+      waitingFor: { permission: 0, input: 0 },
+      pendingInteractions: [],
+      request: action.request,
+      interactions: emptyInteractions(),
+    };
   }
-  if (action.type === "turn/remote-state") return reduceRemoteState(state, action.sessionId, action.turn);
+  if (action.type === "turn/remote-state") return reduceRemoteState(state, action.sessionId, action.turn, action.restoredText);
   if (action.type === "interaction/enqueue") {
     if (state.status !== "active") return state;
     const sessionId = interactionSessionId(action.interaction);
     if (sessionId && sessionId !== state.request.sessionId) return state;
+    if (!state.pendingInteractions.some((interaction) => interaction.interactionId === action.interaction.id)) return state;
     return { ...state, interactions: addInteraction(state.interactions, action.interaction) };
   }
   if (action.type === "interaction/remove") {
@@ -48,11 +56,34 @@ export function promptTurnReducer(state: PromptTurnState, action: PromptTurnActi
   return { status: "cancelled", request: state.request };
 }
 
-function reduceRemoteState(state: PromptTurnState, sessionId: string, turn: TurnState): PromptTurnState {
-  if (state.status === "idle" || state.request.sessionId !== sessionId || state.request.turnId !== turn.turnId) return state;
+function reduceRemoteState(state: PromptTurnState, sessionId: string, turn: TurnState, restoredText = ""): PromptTurnState {
+  if (state.status === "idle") {
+    if (turn.status !== "active") return state;
+    return {
+      status: "active",
+      phase: turn.phase,
+      waitingFor: turn.waitingFor,
+      pendingInteractions: turn.pendingInteractions,
+      request: {
+        operationId: `remote:${sessionId}:${turn.turnId}`,
+        sessionId,
+        turnId: turn.turnId,
+        text: restoredText,
+      },
+      interactions: emptyInteractions(),
+    };
+  }
+  if (state.request.sessionId !== sessionId || state.request.turnId !== turn.turnId) return state;
   if (turn.status === "active") {
     if (state.status !== "active") return state;
-    return { ...state, phase: turn.phase, waitingFor: turn.waitingFor };
+    const ids = new Set(turn.pendingInteractions.map((interaction) => interaction.interactionId));
+    return {
+      ...state,
+      phase: turn.phase,
+      waitingFor: turn.waitingFor,
+      pendingInteractions: turn.pendingInteractions,
+      interactions: retainInteractions(state.interactions, ids),
+    };
   }
   if (turn.status === "completed") return { status: "completed", request: state.request, reason: "end_turn" };
   if (turn.status === "cancelled") return { status: "cancelled", request: state.request };
@@ -86,4 +117,8 @@ function removeInteraction(state: InteractionCollection, id: string): Interactio
   if (!state.byId[id]) return state;
   const byId = { ...state.byId }; delete byId[id];
   return { order: state.order.filter((value) => value !== id), byId };
+}
+function retainInteractions(state: InteractionCollection, ids: Set<string>): InteractionCollection {
+  const order = state.order.filter((id) => ids.has(id));
+  return { order, byId: Object.fromEntries(order.map((id) => [id, state.byId[id]!])) };
 }

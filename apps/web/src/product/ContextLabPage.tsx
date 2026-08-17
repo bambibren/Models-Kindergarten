@@ -2,6 +2,7 @@ import { Beaker, Check, LockKeyhole, Plus, Trash2 } from "lucide-react";
 import { useCallback, useState, type FormEvent } from "react";
 import type { AgentRecord, ExperimentContextPolicy, ExperimentDraftInput } from "@kindergarten/contracts";
 import { controlApi, type TurnContextSnapshot } from "../api/control-api.js";
+import { formatContextWindow, joinMetadata } from "../components/tokens/token-format.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { ProductNav } from "./ProductNav.js";
 import { useResource } from "./use-resource.js";
@@ -94,7 +95,7 @@ function ContextLabReady({ agents, models, source }: {
       <section className="product-context-prompt">
         <label><span>实验名称</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label>
         <label><span>实验问题</span><textarea readOnly={Boolean(source)} required rows={4} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="输入要让不同策略共同回答的问题…" /></label>
-        <div><label><span>ModelStudent</span><select disabled={Boolean(source)} value={modelId} onChange={(event) => setModelId(event.target.value)}>{models.map((item) => <option key={item.modelStudentId} value={item.modelStudentId}>{item.displayName} · {item.model}</option>)}</select></label><label className="product-checkbox"><input checked={toolExpected} type="checkbox" onChange={(event) => setToolExpected(event.target.checked)} /><span>这个任务预期必须使用 Tool</span></label></div>
+        <div><label><span>ModelStudent</span><select disabled={Boolean(source)} value={modelId} onChange={(event) => setModelId(event.target.value)}>{models.map((item) => <option key={item.modelStudentId} value={item.modelStudentId}>{joinMetadata([item.displayName, formatContextWindow(item.contextWindowTokens), item.model])}</option>)}</select></label><label className="product-checkbox"><input checked={toolExpected} type="checkbox" onChange={(event) => setToolExpected(event.target.checked)} /><span>这个任务预期必须使用 Tool</span></label></div>
       </section>
       <section className="product-lanes"><header><div><strong>上下文版本</strong><small>策略包含 system、Tools、Skills、MCP 与 history；memory 固定关闭</small></div><button disabled={lanes.length >= 3} type="button" onClick={() => setLanes((current) => [...current, makeLane("C", "rerun", initialAgent, tweak(initialPolicy), false)])}><Plus size={13} />添加 C</button></header>
         <div className={`lanes-${lanes.length}`}>{lanes.map((lane, index) => <article key={lane.variantId}><header><span>{lane.label}</span><div><strong>版本 {lane.label}</strong><small>{lane.mode === "reuse_snapshot" ? "复用原始快照 · 不重跑" : "隔离 Session · 真实 Runtime"}</small></div>{lane.locked ? <LockKeyhole size={12} /> : lanes.length > 2 && <button aria-label={`删除版本 ${lane.label}`} type="button" onClick={() => setLanes((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={12} /></button>}</header>

@@ -17,7 +17,12 @@ export class RenderErrorBoundary extends Component<Props, State> {
   static getDerivedStateFromError(): State { return { failed: true }; }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error("组件渲染失败", { scope: this.props.scope, error, componentStack: info.componentStack });
+    console.error("[web-react] render failed", {
+      scope: this.props.scope,
+      message: error.message,
+      stack: error.stack,
+      componentStack: info.componentStack,
+    });
   }
 
   render(): ReactNode {

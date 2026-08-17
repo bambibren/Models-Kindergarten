@@ -14,7 +14,11 @@ import {
   type ConcreteReasoningProfile,
   type ModelReasoningCapability,
   type TurnActivePhase,
-  type TurnWaitingState,
+  makeTurnInteractionId,
+  type TurnPendingElicitationInteraction,
+  type TurnPendingInteraction,
+  type TurnPendingPermissionInteraction,
+  type TurnState,
 } from "@kindergarten/contracts";
 import { AcpOutput } from "./acp-output.js";
 import type {
@@ -161,11 +165,13 @@ export class KindergartenAgent {
     const session = await this.requireSession(params.sessionId, params.cwd);
     const activeChannel = this.channels.get(session.id);
     activeChannel?.beginResume();
-    const output = new AcpOutput(session.id, new SessionAcpChannel(client));
+    const output = new AcpOutput(session.id, new SessionAcpChannel(client, session.id));
     try {
       for (const entry of sessionEntriesWithActiveProjection(session, this.projections.get(session.id))) {
         await replayEntry(output, entry);
       }
+      const activeTurn = session.turns.find((turn) => turn.state.status === "active");
+      if (activeTurn) await output.turnState(activeTurn.state);
     } finally {
       await activeChannel?.finishResume(client);
     }
@@ -186,7 +192,7 @@ export class KindergartenAgent {
         if (!turn) throw new acp.RequestError(-32602, `恢复的 Turn 不存在: ${cursor.turnId}`);
         const entries = sessionEntriesWithActiveProjection(session, this.projections.get(session.id))
           .filter((entry) => entry.turnId === cursor.turnId);
-        const output = new AcpOutput(session.id, new SessionAcpChannel(client));
+        const output = new AcpOutput(session.id, new SessionAcpChannel(client, session.id));
         for (const entry of entries) await replayEntryDelta(output, entry, cursor, turn.state.status !== "active");
         await output.turnState(turn.state);
       }
@@ -270,7 +276,7 @@ export class KindergartenAgent {
     }
 
     const turnId = readPromptMeta(params._meta)?.turnId ?? randomUUID();
-    const channel = new SessionAcpChannel(client);
+    const channel = new SessionAcpChannel(client, session.id);
     const detachClient = () => channel.detach(client);
     if (requestSignal.aborted) detachClient();
     else requestSignal.addEventListener("abort", detachClient, { once: true });
@@ -285,12 +291,12 @@ export class KindergartenAgent {
     let fileReferenceIds: string[] = [];
     let turnStarted = false;
     try {
-      await this.sessions.startTurnWithPrompt(session.id, turnId, user, {
+      const started = await this.sessions.startTurnWithPrompt(session.id, turnId, user, {
         modelStudentId: session.modelStudentId,
         agentId: session.agentId,
       });
       turnStarted = true;
-      await output.turnState({ schemaVersion: 1, turnId, status: "active", phase: "accepted", waitingFor: { permission: 0, input: 0 } });
+      await output.turnState(started.state);
       await output.message("user", user.messageId, text, {
         schemaVersion: 1,
         turnId,
@@ -332,16 +338,7 @@ export class KindergartenAgent {
         controller.signal,
       );
       await projection.usage(result.usage);
-      if (this.files && result.fileRelativePaths.length > 0) {
-        const references = await this.files.createFromPaths(
-          session.ownerId,
-          session.id,
-          turnId,
-          result.fileRelativePaths,
-        );
-        await projection.attachFileReferences(references);
-        fileReferenceIds = references.map((item) => item.fileReferenceId);
-      }
+      projection.trackFileRelativePaths(result.fileRelativePaths);
       if (result.reason === "cancelled") reason = "cancelled";
       else if (result.reason === "length") reason = "max_tokens";
     } catch (error) {
@@ -352,6 +349,20 @@ export class KindergartenAgent {
           await projection.finalizeOpenRounds();
         } catch (error) {
           failure ??= error;
+        }
+        if (this.files && projection.fileRelativePaths().length > 0) {
+          try {
+            const references = await this.files.createFromPaths(
+              session.ownerId,
+              session.id,
+              turnId,
+              projection.fileRelativePaths(),
+            );
+            await projection.attachFileReferences(references);
+            fileReferenceIds = references.map((item) => item.fileReferenceId);
+          } catch (error) {
+            failure ??= error;
+          }
         }
         await projection.phase("finalizing");
         const terminalStatus = controller.signal.aborted || reason === "cancelled" ? "cancelled" : failure ? "failed" : "completed";
@@ -452,6 +463,7 @@ class TurnProjection implements RunObserver {
   private readonly messageChunks = new Map<number, number>();
   private readonly thoughtChunks = new Map<number, number>();
   private readonly closedRounds = new Set<number>();
+  private readonly writtenFileRelativePaths = new Set<string>();
   private runtimeFacts: RuntimeTurnSnapshot | undefined;
   private readonly capabilityFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["capabilitySnapshots"]> = [];
   private readonly roundFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["modelRounds"]> = [];
@@ -471,6 +483,12 @@ class TurnProjection implements RunObserver {
 
   entriesSnapshot(): SessionEntry[] { return structuredClone(this.streamingSessionEntries); }
 
+  trackFileRelativePaths(paths: string[]): void {
+    paths.forEach((path) => this.writtenFileRelativePaths.add(path));
+  }
+
+  fileRelativePaths(): string[] { return [...this.writtenFileRelativePaths]; }
+
   async context(summary: ContextSummary): Promise<void> {
     const entry: SessionContextSummaryEntry = {
       type: "context_summary",
@@ -483,8 +501,14 @@ class TurnProjection implements RunObserver {
     await this.output.contextSummary(summary);
   }
 
-  async phase(phase: TurnActivePhase, waitingFor?: TurnWaitingState): Promise<void> {
-    const turn = await this.sessions.transitionTurn(this.sessionId, this.turnId, phase, waitingFor);
+  async phase(phase: TurnActivePhase): Promise<void> {
+    console.warn("[turn-phase] request", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, phase }));
+    const turn = await this.sessions.transitionTurn(this.sessionId, this.turnId, phase);
+    console.warn("[turn-phase] persisted", JSON.stringify({
+      sessionId: this.sessionId,
+      turnId: this.turnId,
+      state: turnStateLogFacts(turn.state),
+    }));
     await this.output.turnState(turn.state);
   }
 
@@ -631,6 +655,7 @@ class TurnProjection implements RunObserver {
   }
 
   async attachFileReferences(files: FileReference[]): Promise<void> {
+    const changed: SessionToolCallEntry[] = [];
     for (const file of files) {
       const pathSuffix = file.relativePath.replaceAll("\\", "/");
       const entry = this.streamingSessionEntries.findLast((item): item is SessionToolCallEntry => {
@@ -639,6 +664,8 @@ class TurnProjection implements RunObserver {
         return item.rawOutput.path.replaceAll("\\", "/").endsWith(pathSuffix);
       });
       if (!entry) continue;
+      if (entry.content.some((item) => item.type === "content" && item.content.type === "resource_link" &&
+        item.content.uri === makeFileReferenceUri(file.fileReferenceId))) continue;
       entry.content.push({
         type: "content",
         content: {
@@ -651,6 +678,7 @@ class TurnProjection implements RunObserver {
           _meta: { [META_KEY]: { fileReferences: { schemaVersion: 1, fileReferenceIds: [file.fileReferenceId] } } },
         },
       });
+      changed.push(entry);
       await this.output.toolUpdate({
         toolCallId: entry.toolCallId,
         status: entry.status,
@@ -659,9 +687,18 @@ class TurnProjection implements RunObserver {
         locations: [],
       });
     }
+    if (changed.length > 0) {
+      await this.sessions.attachTurnFileReferences(
+        this.sessionId,
+        this.turnId,
+        changed,
+        files.map((file) => file.fileReferenceId),
+      );
+    }
   }
 
   async toolStart(call: PreparedToolCall): Promise<void> {
+    console.warn("[tool] start", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, permission: call.permission }));
     const entry: SessionToolCallEntry = {
       type: "tool_call",
       turnId: this.turnId,
@@ -693,6 +730,8 @@ class TurnProjection implements RunObserver {
     status: acp.ToolCallStatus,
     result: ToolOutcome,
   ): Promise<void> {
+    result.effects?.fileRelativePaths?.forEach((path) => this.writtenFileRelativePaths.add(path));
+    console.warn("[tool] finish", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, status, outcomeStatus: result.status }));
     const entry = this.streamingSessionEntries.find(
       (item): item is SessionToolCallEntry =>
         item.type === "tool_call" && item.toolCallId === call.id,
@@ -718,60 +757,132 @@ class TurnProjection implements RunObserver {
   }
 
   async requestPermission(call: PreparedToolCall): Promise<boolean> {
-    const response = await this.channel.request(this.signal, (client) => client.request(
-      acp.methods.client.session.requestPermission, {
+    const interaction: TurnPendingPermissionInteraction = {
+      schemaVersion: 1,
+      interactionId: makeTurnInteractionId("permission", call.id),
+      kind: "permission",
+      toolCall: {
+        toolCallId: call.id,
+        title: call.title,
+        name: call.name,
+        kind: call.kind,
+        rawInput: structuredClone(call.arguments),
+        locations: call.locations.map((location) => ({
+          path: location.path,
+          ...(location.line === null || location.line === undefined ? {} : { line: location.line }),
+        })),
+      },
+      options: [
+        { optionId: "allow-once", name: "允许本次执行", kind: "allow_once" },
+        { optionId: "reject-once", name: "拒绝本次执行", kind: "reject_once" },
+      ],
+      requestedAt: new Date().toISOString(),
+    };
+    await this.beginInteraction(interaction);
+    console.warn("[permission] requested", JSON.stringify({
+      sessionId: this.sessionId,
+      turnId: this.turnId,
+      toolCallId: call.id,
+      name: call.name,
+      interactionId: interaction.interactionId,
+      requestedAt: interaction.requestedAt,
+    }));
+    try {
+      const response = await this.channel.request<acp.RequestPermissionResponse>(interaction.interactionId, this.signal, (client) => client.request(
+        acp.methods.client.session.requestPermission, {
+          sessionId: this.sessionId,
+          toolCall: {
+            ...interaction.toolCall,
+            status: "pending",
+          },
+          options: interaction.options,
+        }),
+      );
+      const allowed = (
+        response.outcome.outcome === "selected" &&
+        response.outcome.optionId === "allow-once"
+      );
+      console.warn("[permission] resolved", JSON.stringify({
         sessionId: this.sessionId,
-        toolCall: {
-          toolCallId: call.id,
-          title: call.title,
-          name: call.name,
-          kind: call.kind,
-          status: "pending",
-          rawInput: call.arguments,
-          locations: call.locations,
-        },
-        options: [
-          { optionId: "allow-once", name: "允许本次执行", kind: "allow_once" },
-          { optionId: "reject-once", name: "拒绝本次执行", kind: "reject_once" },
-        ],
-      }),
-    );
-    return (
-      response.outcome.outcome === "selected" &&
-      response.outcome.optionId === "allow-once"
-    );
+        turnId: this.turnId,
+        toolCallId: call.id,
+        interactionId: interaction.interactionId,
+        outcome: response.outcome,
+        allowed,
+      }));
+      return allowed;
+    } finally {
+      await this.finishInteraction(interaction.interactionId);
+    }
   }
 
   async askUser(question: string, toolCallId: string): Promise<string> {
-    const response = await this.channel.request(this.signal, (client) => client.request(
-      acp.methods.client.elicitation.create, {
-        sessionId: this.sessionId,
-        toolCallId,
-        mode: "form",
-        message: question,
-        requestedSchema: {
-          type: "object",
-          properties: {
-            answer: {
-              type: "string",
-              title: "你的回答",
-              minLength: 1,
-              maxLength: 4000,
-            },
+    const interaction: TurnPendingElicitationInteraction = {
+      schemaVersion: 1,
+      interactionId: makeTurnInteractionId("elicitation", toolCallId),
+      kind: "elicitation",
+      toolCallId,
+      message: question,
+      requestedSchema: {
+        type: "object",
+        properties: {
+          answer: {
+            type: "string",
+            title: "你的回答",
+            minLength: 1,
+            maxLength: 4000,
           },
-          required: ["answer"],
         },
-      }),
-    );
-    if (response.action !== "accept") {
-      // AskUser 的取消语义是停止当前 Turn，不应伪装成一次 Tool 执行失败。
-      throw new DOMException("用户取消了回答", "AbortError");
+        required: ["answer"],
+      },
+      requestedAt: new Date().toISOString(),
+    };
+    await this.beginInteraction(interaction);
+    try {
+      const response = await this.channel.request<acp.CreateElicitationResponse>(interaction.interactionId, this.signal, (client) => client.request(
+        acp.methods.client.elicitation.create, {
+          sessionId: this.sessionId,
+          toolCallId: interaction.toolCallId,
+          mode: "form",
+          message: interaction.message,
+          requestedSchema: interaction.requestedSchema,
+        }),
+      );
+      if (response.action !== "accept") {
+        // AskUser 的取消语义是停止当前 Turn，不应伪装成一次 Tool 执行失败。
+        throw new DOMException("用户取消了回答", "AbortError");
+      }
+      const answer = isRecord(response.content) ? response.content.answer : undefined;
+      if (typeof answer !== "string" || answer.trim().length === 0) {
+        throw new Error("用户没有提供有效回答");
+      }
+      return answer;
+    } finally {
+      await this.finishInteraction(interaction.interactionId);
     }
-    const answer = isRecord(response.content) ? response.content.answer : undefined;
-    if (typeof answer !== "string" || answer.trim().length === 0) {
-      throw new Error("用户没有提供有效回答");
-    }
-    return answer;
+  }
+
+  private async beginInteraction(interaction: TurnPendingInteraction): Promise<void> {
+    const turn = await this.sessions.addTurnInteraction(this.sessionId, this.turnId, interaction);
+    console.warn("[turn-interaction] persisted", JSON.stringify({
+      sessionId: this.sessionId,
+      turnId: this.turnId,
+      interactionId: interaction.interactionId,
+      kind: interaction.kind,
+      waitingFor: turn.state.status === "active" ? turn.state.waitingFor : undefined,
+    }));
+    await this.output.turnState(turn.state);
+  }
+
+  private async finishInteraction(interactionId: string): Promise<void> {
+    const turn = await this.sessions.removeTurnInteraction(this.sessionId, this.turnId, interactionId);
+    console.warn("[turn-interaction] resolved", JSON.stringify({
+      sessionId: this.sessionId,
+      turnId: this.turnId,
+      interactionId,
+      waitingFor: turn.state.status === "active" ? turn.state.waitingFor : undefined,
+    }));
+    await this.output.turnState(turn.state);
   }
 
   private ensureMessage(round: number): SessionMessageEntry {
@@ -956,6 +1067,23 @@ function safeJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/** 诊断日志只记录状态机轮廓，不写入 Tool 参数、文件内容或 AskUser 问题。 */
+function turnStateLogFacts(state: TurnState) {
+  return state.status === "active"
+    ? {
+        status: state.status,
+        phase: state.phase,
+        waitingFor: state.waitingFor,
+        pendingInteractions: state.pendingInteractions.map((interaction) => ({
+          interactionId: interaction.interactionId,
+          kind: interaction.kind,
+          toolCallId: interaction.kind === "permission" ? interaction.toolCall.toolCallId : interaction.toolCallId,
+          ...(interaction.kind === "permission" ? { toolName: interaction.toolCall.name } : {}),
+        })),
+      }
+    : { status: state.status };
 }
 
 function promptText(content: acp.ContentBlock[]): string {

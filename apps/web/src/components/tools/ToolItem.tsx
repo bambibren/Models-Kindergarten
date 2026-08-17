@@ -9,6 +9,10 @@ import { formatTokenCount } from "../tokens/token-format.js";
 export function ToolItem({ entry }: { entry: ToolCallEntry }) {
   const phase = toolPhase(entry.status);
   const disclosure = useAutoDisclosure(phase);
+  const artifacts = entry.content.flatMap((item) =>
+    item.type === "content" && item.content.type === "resource_link" && item.content.uri.startsWith("mk-file://")
+      ? [item.content]
+      : []);
   return <Collapsible.Root className={`activity-item tool-item phase-${phase}`} open={disclosure.open} onOpenChange={disclosure.setOpen}>
     <Collapsible.Trigger className="activity-trigger">
       <span className="activity-icon">{toolIcon(entry, phase)}</span>
@@ -19,12 +23,21 @@ export function ToolItem({ entry }: { entry: ToolCallEntry }) {
       </span>
       <ChevronDown className="disclosure-chevron" size={15} />
     </Collapsible.Trigger>
+    {artifacts.length > 0 && <div className="tool-artifact-actions">
+      {artifacts.map((artifact) => <button key={artifact.uri} type="button" onClick={() => openArtifact(artifact.uri)}>
+        预览 {artifact.title ?? artifact.name}
+      </button>)}
+    </div>}
     <Collapsible.Content className="activity-content tool-detail">
       {entry.rawInput !== undefined && <Detail label="输入"><JsonValue value={entry.rawInput} /></Detail>}
       {entry.content.map((item, index) => <ToolContent item={item} key={`${entry.toolCallId}:${index}`} />)}
       {entry.rawOutput !== undefined && <Detail label="输出"><JsonValue value={entry.rawOutput} /></Detail>}
     </Collapsible.Content>
   </Collapsible.Root>;
+}
+
+function openArtifact(uri: string): void {
+  window.dispatchEvent(new CustomEvent("mk-open-file-reference", { detail: uri.slice("mk-file://".length) }));
 }
 
 function Detail({ label, children }: { label: string; children: React.ReactNode }) { return <section className="tool-section"><span>{label}</span>{children}</section>; }

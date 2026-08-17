@@ -12,11 +12,13 @@ import type {
 } from "./session-types.js";
 import { isConcreteReasoningProfile, readTurnState, type ConcreteReasoningProfile } from "@kindergarten/contracts";
 import { readProviderOpaqueContinuation } from "../model/provider-continuation.js";
-import type { TurnActivePhase, TurnWaitingState, TurnStatus } from "@kindergarten/contracts";
+import type { TurnActivePhase, TurnPendingInteraction, TurnStatus } from "@kindergarten/contracts";
 import {
+  addPendingTurnInteraction,
   finishTurnState,
   initialTurnState,
   interruptTurnState,
+  removePendingTurnInteraction,
   transitionActiveTurn,
 } from "./turn-state-machine.js";
 
@@ -215,11 +217,32 @@ export class SessionRepository {
     id: string,
     turnId: string,
     phase: TurnActivePhase,
-    waitingFor?: TurnWaitingState,
   ): Promise<TurnExecutionRecord> {
     return this.updateTurn(id, turnId, (current) => ({
       ...current,
-      state: transitionActiveTurn(current.state, phase, waitingFor),
+      state: transitionActiveTurn(current.state, phase),
+    }), false);
+  }
+
+  async addTurnInteraction(
+    id: string,
+    turnId: string,
+    interaction: TurnPendingInteraction,
+  ): Promise<TurnExecutionRecord> {
+    return this.updateTurn(id, turnId, (current) => ({
+      ...current,
+      state: addPendingTurnInteraction(current.state, interaction),
+    }), false);
+  }
+
+  async removeTurnInteraction(
+    id: string,
+    turnId: string,
+    interactionId: string,
+  ): Promise<TurnExecutionRecord> {
+    return this.updateTurn(id, turnId, (current) => ({
+      ...current,
+      state: removePendingTurnInteraction(current.state, interactionId),
     }), false);
   }
 
@@ -233,6 +256,27 @@ export class SessionRepository {
       upsertEntries(session, entries);
       turn.entryIds = [...new Set([...(turn.entryIds ?? []), ...entries.map(entryIdentity)])];
       touch(session, entries.at(-1)?.createdAt ?? new Date().toISOString());
+      await this.save(sessions);
+      return clone(turn);
+    });
+  }
+
+  /** 文件引用是已执行 Tool 的派生产物，可在 Turn 终态之后补齐，但不能改写 Turn 终态。 */
+  async attachTurnFileReferences(
+    id: string,
+    turnId: string,
+    entries: SessionEntry[],
+    fileReferenceIds: string[],
+  ): Promise<TurnExecutionRecord> {
+    if (entries.length === 0 || fileReferenceIds.length === 0) return this.requireTurn(id, turnId);
+    return this.enqueueWrite(async () => {
+      const sessions = await this.readAll();
+      const session = requireSession(sessions, id);
+      const turn = requireTurn(session, turnId);
+      upsertEntries(session, entries);
+      turn.entryIds = [...new Set([...(turn.entryIds ?? []), ...entries.map(entryIdentity)])];
+      turn.fileReferenceIds = [...new Set([...(turn.fileReferenceIds ?? []), ...fileReferenceIds])];
+      touch(session, new Date().toISOString());
       await this.save(sessions);
       return clone(turn);
     });

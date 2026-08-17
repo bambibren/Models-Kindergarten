@@ -1,12 +1,9 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
-import { basename, relative, resolve, sep } from "node:path";
+import { relative, resolve, sep } from "node:path";
+import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import { parse as parseYaml } from "yaml";
 import type { SkillDefinition, SkillInstallRecord, SkillManifest } from "./skill-types.js";
-
-const MAX_FILES = 200;
-const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
-const MAX_SINGLE_FILE_BYTES = 256 * 1024;
 
 /** 校验 Agent Skills 标准字段，并把整个目录内容固定为一个可复现 Hash。 */
 export async function validateSkillDirectory(
@@ -19,9 +16,6 @@ export async function validateSkillDirectory(
   if (!skillFile) throw new Error("Skill 根目录缺少 SKILL.md");
   const raw = await readFile(skillFile.path, "utf8");
   const { manifest, instructions } = parseSkillMarkdown(raw);
-  if (manifest.name !== basename(rootReal)) {
-    throw new Error(`Skill name 必须与目录名一致: ${manifest.name} != ${basename(rootReal)}`);
-  }
   const hash = createHash("sha256");
   for (const file of files.toSorted((left, right) => left.relativePath.localeCompare(right.relativePath))) {
     hash.update(file.relativePath).update("\0").update(await readFile(file.path)).update("\0");
@@ -49,11 +43,8 @@ export function parseSkillMarkdown(value: string): {
   }
   const record = frontmatter as Record<string, unknown>;
   const name = requiredString(record.name, "Skill name");
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.length > 64) {
-    throw new Error("Skill name 必须是 1-64 位小写字母、数字和单连字符");
-  }
+  assertSafeSkillName(name);
   const description = requiredString(record.description, "Skill description");
-  if (description.length > 1024) throw new Error("Skill description 超过 1024 字符");
   const instructions = match[2]?.trim() ?? "";
   if (!instructions) throw new Error("SKILL.md 指令正文不能为空");
   const manifest: SkillManifest = {
@@ -72,13 +63,12 @@ export function parseSkillMarkdown(value: string): {
 }
 
 export async function assertSkillResource(root: string, input: string): Promise<string> {
-  if (!input || input.length > 240 || input.includes("\\")) throw new Error("Skill 资源路径无效");
+  if (!input || input.includes("\\")) throw new Error("Skill 资源路径无效");
   const target = resolve(root, input);
   const rel = relative(root, target);
   if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`)) throw new Error("Skill 资源路径越界");
   const info = await lstat(target);
   if (info.isSymbolicLink() || !info.isFile()) throw new Error("Skill 资源必须是普通文件");
-  if (info.size > MAX_SINGLE_FILE_BYTES) throw new Error("Skill 资源超过大小限制");
   const actual = await realpath(target);
   const actualRel = relative(await realpath(root), actual);
   if (actualRel === ".." || actualRel.startsWith(`..${sep}`)) throw new Error("Skill 资源真实路径越界");
@@ -88,7 +78,6 @@ export async function assertSkillResource(root: string, input: string): Promise<
 interface CollectedFile {
   path: string;
   relativePath: string;
-  size: number;
 }
 
 async function collectFiles(root: string): Promise<CollectedFile[]> {
@@ -96,7 +85,6 @@ async function collectFiles(root: string): Promise<CollectedFile[]> {
   let total = 0;
   async function walk(directory: string): Promise<void> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.name.startsWith(".")) throw new Error(`Skill 不允许隐藏文件: ${entry.name}`);
       const path = resolve(directory, entry.name);
       const info = await lstat(path);
       if (info.isSymbolicLink()) throw new Error(`Skill 不允许符号链接: ${entry.name}`);
@@ -105,20 +93,27 @@ async function collectFiles(root: string): Promise<CollectedFile[]> {
         continue;
       }
       if (!info.isFile()) throw new Error(`Skill 包含不支持的文件类型: ${entry.name}`);
-      if ((info.mode & 0o111) !== 0 && !relative(root, path).startsWith(`scripts${sep}`)) {
-        throw new Error(`Skill 可执行文件只能位于 scripts/: ${relative(root, path)}`);
-      }
-      if (info.size > MAX_SINGLE_FILE_BYTES) throw new Error(`Skill 文件超过大小限制: ${entry.name}`);
       total += info.size;
-      if (total > MAX_TOTAL_BYTES) throw new Error("Skill 总大小超过 2 MiB");
-      results.push({ path, relativePath: relative(root, path).split(sep).join("/"), size: info.size });
-      if (results.length > MAX_FILES) throw new Error("Skill 文件数量超过 200");
+      if (total > PRODUCT_CONFIG.skill.maxTotalBytes) {
+        throw new Error(`Skill 总大小超过 ${PRODUCT_CONFIG.skill.maxTotalBytes} 字节`);
+      }
+      results.push({ path, relativePath: relative(root, path).split(sep).join("/") });
+      if (results.length > PRODUCT_CONFIG.skill.maxFiles) {
+        throw new Error(`Skill 文件数量超过 ${PRODUCT_CONFIG.skill.maxFiles}`);
+      }
     }
   }
   const rootInfo = await stat(root);
   if (!rootInfo.isDirectory()) throw new Error("Skill 根路径不是目录");
   await walk(root);
   return results;
+}
+
+/** Skill 名称不限定展示格式，只禁止把名称解释成文件路径。 */
+export function assertSafeSkillName(value: string): void {
+  if (value === "." || value === ".." || value.includes("/") || value.includes("\\") || value.includes("\0")) {
+    throw new Error("Skill name 不得包含路径");
+  }
 }
 
 function requiredString(value: unknown, label: string): string {

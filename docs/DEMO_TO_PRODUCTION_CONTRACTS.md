@@ -1372,8 +1372,8 @@ export class AcpSessionUpdateRouter {
 - FileSandbox 与 ProcessSandbox 使用同一 Session workspace；任何工具若要把本地路径显示为产物，必须把明确的受控 relative path 交给 FileReferenceService，不能扫描或暴露整个目录；
 - 每次读写 realpath 校验仍在 root；不存在目标的父目录逐段检查 symlink；
 - 默认单文件 256KiB 延续现状，HTML/Markdown preview 可按实际需要在 ADR 中调高，但必须有限额；
-- HTML 移除/阻止 `script`、`object`、`embed`、`base`、自动刷新和危险 URL scheme；CSP 默认 `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:`；
-- iframe 不加 `allow-scripts`、`allow-same-origin`、`allow-forms`、`allow-popups`。
+- HTML 保留脚本与交互控件；CSP 允许内联脚本和 HTTPS 静态资源，同时禁止嵌套页面、插件与表单提交；
+- iframe 只加 `allow-scripts`，不加 `allow-same-origin`、`allow-forms`、`allow-popups` 或顶层导航权限。
 
 ## 19. 可观测事件
 

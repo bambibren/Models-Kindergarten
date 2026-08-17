@@ -3,7 +3,11 @@ import type { AgentService } from "../agent/agent-service.js";
 import type { ModelStudentCatalog } from "../model/model-student-catalog.js";
 import { ApiProblemError } from "../server/api-problem.js";
 import { AtomicJsonStore } from "../storage/atomic-json-store.js";
-import { isConcreteReasoningProfile, type ConcreteReasoningProfile } from "@kindergarten/contracts";
+import {
+  isConcreteReasoningProfile,
+  PRODUCT_CONFIG,
+  type ConcreteReasoningProfile,
+} from "@kindergarten/contracts";
 
 export interface SessionLaunchDraft {
   schemaVersion: 1;
@@ -30,7 +34,9 @@ export class SessionLaunchService {
       throw invalid("reasoningProfileOverride 格式无效");
     }
     const promptText = raw.promptText.trim();
-    if (!promptText || promptText.length > 100_000) throw invalid("promptText 必须为 1 到 100000 个字符");
+    if (!promptText || promptText.length > PRODUCT_CONFIG.sessionLaunch.maxPromptCharacters) {
+      throw invalid(`promptText 必须为 1 到 ${PRODUCT_CONFIG.sessionLaunch.maxPromptCharacters} 个字符`);
+    }
     if (!this.models.isReady(raw.modelStudentId)) throw new ApiProblemError(409, "SESSION_BINDING_INVALID", "ModelStudent 不可用", false);
     await this.agents.get(raw.agentId, ownerId);
     const created = new Date();
@@ -45,7 +51,7 @@ export class SessionLaunchService {
         ? { reasoningProfileOverride: raw.reasoningProfileOverride }
         : {}),
       createdAt: created.toISOString(),
-      expiresAt: new Date(created.getTime() + 24 * 60 * 60_000).toISOString(),
+      expiresAt: new Date(created.getTime() + PRODUCT_CONFIG.sessionLaunch.draftTtlMs).toISOString(),
     };
     await this.store.update((items) => [...items.filter((item) => Date.parse(item.expiresAt) > Date.now()), draft]);
     return draft;

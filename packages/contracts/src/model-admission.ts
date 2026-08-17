@@ -121,6 +121,7 @@ export interface ModelStudentInstallInput {
   testId: string;
   displayName?: string;
   defaultReasoningProfile?: ConcreteReasoningProfile;
+  contextWindowTokens?: number;
 }
 
 /** Connection 是内部复用实体；这个 View 只能表达安全状态，不能回读 credentialRef。 */
@@ -188,7 +189,7 @@ export function parseResponsesModelCandidateInput(value: unknown): ResponsesMode
 
 export function parseModelStudentInstallInput(value: unknown): ModelStudentInstallInput {
   if (!isRecord(value)) throw new Error("模型入园请求必须是对象");
-  const allowed = new Set(["testId", "displayName", "defaultReasoningProfile"]);
+  const allowed = new Set(["testId", "displayName", "defaultReasoningProfile", "contextWindowTokens"]);
   const unknown = Object.keys(value).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`模型入园请求包含未知字段: ${unknown}`);
   const testId = boundedString(value.testId, "testId", 1, 200);
@@ -198,10 +199,14 @@ export function parseModelStudentInstallInput(value: unknown): ModelStudentInsta
   const defaultReasoningProfile = value.defaultReasoningProfile === undefined
     ? undefined
     : parseConcreteReasoningProfile(value.defaultReasoningProfile, "defaultReasoningProfile");
+  const contextWindowTokens = value.contextWindowTokens === undefined
+    ? undefined
+    : requiredPositiveInteger(value.contextWindowTokens, "contextWindowTokens");
   return {
     testId,
     ...(displayName ? { displayName } : {}),
     ...(defaultReasoningProfile ? { defaultReasoningProfile } : {}),
+    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
   };
 }
 
@@ -379,7 +384,7 @@ function requiredNonEmptyString(value: unknown, field: string): string {
 }
 
 function positiveInteger(value: unknown): number | undefined {
-  return Number.isInteger(value) && Number(value) > 0 ? Number(value) : undefined;
+  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : undefined;
 }
 
 function requiredPositiveInteger(value: unknown, field: string): number {

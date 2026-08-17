@@ -5,6 +5,7 @@ import {
   TOKEN_USAGE_NOTIFICATION,
   TURN_STATE_NOTIFICATION,
   makeExperimentRunRefMeta,
+  makeTurnInteractionId,
   makePromptMeta,
   makeSessionResumeMeta,
   makeSessionBindingMeta,
@@ -50,7 +51,12 @@ export class AcpWebClient {
     const app = acp
       .client({ name: "model-kindergarten-web" })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
-        handlers.onUpdate(params);
+        try {
+          handlers.onUpdate(params);
+        } catch (error) {
+          console.error("[acp-web] session/update handler failed", notificationFacts(params), error);
+          throw error;
+        }
       })
       .onNotification(
         CONTEXT_SUMMARY_NOTIFICATION,
@@ -97,7 +103,8 @@ export class AcpWebClient {
     }
 
     void connection.closed.then(() => {
-      interactions.cancelAll();
+      console.warn("[acp-web] connection closed");
+      interactions.abandonAll();
       handlers.onClose();
     });
     return client;
@@ -201,7 +208,7 @@ export class AcpWebClient {
   }
 
   close(): void {
-    this.interactions.cancelAll();
+    this.interactions.abandonAll();
     this.connection.close();
   }
 }
@@ -225,7 +232,13 @@ class PendingAcpInteractions {
   requestPermission(
     request: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
-    const id = crypto.randomUUID();
+    const id = makeTurnInteractionId("permission", request.toolCall.toolCallId);
+    console.warn("[acp-web] permission received", {
+      interactionId: id,
+      sessionId: request.sessionId,
+      toolCallId: request.toolCall.toolCallId,
+      name: request.toolCall.name,
+    });
     return new Promise((resolve) => {
       this.byId.set(id, { kind: "permission", resolve });
       this.handlers.onInteraction({ id, kind: "permission", request });
@@ -235,7 +248,10 @@ class PendingAcpInteractions {
   requestElicitation(
     request: acp.CreateElicitationRequest,
   ): Promise<acp.CreateElicitationResponse> {
-    const id = crypto.randomUUID();
+    const toolCallId = "toolCallId" in request && typeof request.toolCallId === "string"
+      ? request.toolCallId
+      : crypto.randomUUID();
+    const id = makeTurnInteractionId("elicitation", toolCallId);
     return new Promise((resolve) => {
       this.byId.set(id, { kind: "elicitation", resolve });
       this.handlers.onInteraction({ id, kind: "elicitation", request });
@@ -248,6 +264,12 @@ class PendingAcpInteractions {
   ): void {
     const pending = this.byId.get(interaction.id);
     if (!pending || pending.kind !== interaction.kind) return;
+    console.warn("[acp-web] interaction resolved", {
+      interactionId: interaction.id,
+      kind: interaction.kind,
+      sessionId: "sessionId" in interaction.request ? interaction.request.sessionId : undefined,
+      toolCallId: interactionToolCallId(interaction),
+    });
     this.byId.delete(interaction.id);
     if (pending.kind === "permission") {
       pending.resolve(value as acp.RequestPermissionResponse);
@@ -268,4 +290,30 @@ class PendingAcpInteractions {
       this.handlers.onInteractionResolved(id);
     }
   }
+
+  /** 传输关闭不等于用户取消；只释放当前页面投影，不向 Remote 提交决定。 */
+  abandonAll(): void {
+    for (const id of [...this.byId.keys()]) {
+      this.byId.delete(id);
+      this.handlers.onInteractionResolved(id);
+    }
+  }
+}
+
+function notificationFacts(value: acp.SessionNotification) {
+  const update = value.update;
+  return {
+    sessionId: value.sessionId,
+    sessionUpdate: update.sessionUpdate,
+    messageId: "messageId" in update ? update.messageId : undefined,
+    toolCallId: "toolCallId" in update ? update.toolCallId : undefined,
+    status: "status" in update ? update.status : undefined,
+  };
+}
+
+function interactionToolCallId(interaction: PendingInteractionState): string | undefined {
+  if (interaction.kind === "permission") return interaction.request.toolCall.toolCallId;
+  return "toolCallId" in interaction.request && typeof interaction.request.toolCallId === "string"
+    ? interaction.request.toolCallId
+    : undefined;
 }

@@ -21,36 +21,14 @@ export interface ToolBatchResult {
   outcomes: ToolOutcome[];
 }
 
-interface LedgerRecord {
-  callId: string;
-  status?: ToolOutcome["status"];
-  outcome?: ToolOutcome;
-  duplicateCount: number;
-}
-
+/**
+ * 保留为运行接口的兼容参数。重复错误的累计与止损由
+ * RepeatedInvalidToolCallGuard 负责；正确调用不在这里去重或复用结果。
+ */
 export class ToolCallLedger {
-  private readonly byKey = new Map<string, LedgerRecord>();
-
-  register(call: PreparedToolCall): { duplicate?: LedgerRecord } {
-    const existing = this.byKey.get(call.dedupeKey);
-    if (!existing) {
-      this.byKey.set(call.dedupeKey, { callId: call.id, duplicateCount: 0 });
-      return {};
-    }
-    existing.duplicateCount += 1;
-    return { duplicate: existing };
-  }
-
-  complete(call: PreparedToolCall, outcome: ToolOutcome): void {
-    const record = this.byKey.get(call.dedupeKey);
-    if (record && record.callId === call.id) {
-      record.status = outcome.status;
-      record.outcome = outcome;
-    }
-  }
 }
 
-/** ToolRuntime 在模型已经提出调用后，统一执行去重、权限、局部重试和 Handler。 */
+/** ToolRuntime 在模型已经提出调用后，统一执行权限、局部重试和 Handler。 */
 export class ToolRuntime {
   constructor(
     readonly registry: ToolRegistryPort,
@@ -60,26 +38,13 @@ export class ToolRuntime {
   async executeBatch(
     calls: PreparedToolCall[],
     observer: ToolObserver,
-    ledger: ToolCallLedger,
+    _ledger: ToolCallLedger,
     signal: AbortSignal,
   ): Promise<ToolBatchResult> {
     for (const call of calls) await observer.toolStart(call);
 
-    const decisions = calls.map((call) => ledger.register(call));
-    const outcomes = await Promise.all(calls.map(async (call, index) => {
-      const decision = decisions[index];
-      if (decision?.duplicate) {
-        const outcome = duplicateOutcome(call, decision.duplicate);
-        await observer.toolFinish(
-          call,
-          decision.duplicate.status === "success" ? "completed" : "failed",
-          outcome,
-        );
-        return outcome;
-      }
-
+    const outcomes = await Promise.all(calls.map(async (call) => {
       const outcome = await this.executeOne(call, observer, signal);
-      ledger.complete(call, outcome);
       await observer.toolFinish(call, outcome.status === "success" ? "completed" : "failed", outcome);
       return outcome;
     }));
@@ -156,35 +121,6 @@ export class ToolRuntime {
       );
     }
   }
-}
-
-function duplicateOutcome(call: PreparedToolCall, previous: LedgerRecord): ToolOutcome {
-  const completed = previous.outcome?.status === "success";
-  const repeatedValidationError = previous.outcome?.error?.code === "invalid_arguments"
-    ? previous.outcome.error
-    : undefined;
-  const rawOutput = {
-    previousCallId: previous.callId,
-    previousStatus: previous.status ?? "running",
-    previousOutput: previous.outcome?.rawOutput,
-  };
-  return {
-    status: "duplicate_blocked",
-    retryable: false,
-    ...(repeatedValidationError ? { error: repeatedValidationError } : {}),
-    modelContent: JSON.stringify({
-      ok: completed,
-      cached: true,
-      tool: call.name,
-      toolCallId: call.id,
-      code: "duplicate_tool_call",
-      ...rawOutput,
-      instruction: "相同工具和参数已经处理；直接使用 previousOutput，不要再次调用。",
-    }),
-    rawOutput,
-    content: [{ type: "content", content: { type: "text", text: "已阻止重复工具调用" } }],
-    locations: call.locations,
-  };
 }
 
 function deniedOutcome(call: PreparedToolCall, message: string): ToolOutcome {

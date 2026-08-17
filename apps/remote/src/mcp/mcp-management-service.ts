@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   parseMcpCandidateInput,
+  PRODUCT_CONFIG,
   stableJson,
   type McpCandidateInput,
   type McpCapabilitySnapshot as PublicSnapshot,
@@ -12,8 +13,6 @@ import { ApiProblemError } from "../server/api-problem.js";
 import type { McpManagementRepository } from "./mcp-management-repository.js";
 import type { McpClientManager } from "./mcp-client-manager.js";
 import type { McpCapabilitySnapshot, McpServerConfig } from "./mcp-types.js";
-
-const TEST_TTL_MS = 10 * 60_000;
 
 export class McpManagementService {
   private readonly protectedIds: Set<string>;
@@ -62,7 +61,7 @@ export class McpManagementService {
       candidate,
       state: "testing",
       createdAt: createdAt.toISOString(),
-      expiresAt: new Date(createdAt.getTime() + TEST_TTL_MS).toISOString(),
+      expiresAt: new Date(createdAt.getTime() + PRODUCT_CONFIG.mcp.testResultTtlMs).toISOString(),
     };
     await this.repository.putTest(record);
     try {

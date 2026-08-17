@@ -70,15 +70,18 @@ source
 安装命令：
 
 ```bash
-pnpm --filter @kindergarten/remote skill:install -- \
+pnpm --filter @kindergarten/remote skill:install \
   --source local --path /absolute/path/to/skill --approve
 
-pnpm --filter @kindergarten/remote skill:install -- \
+pnpm --filter @kindergarten/remote skill:install \
   --source git --url https://github.com/example/skills.git \
   --ref <commit-or-tag> --subdir skills/example --approve
+
+pnpm --filter @kindergarten/remote skill:install \
+  --source resource --url http://127.0.0.1:7342/skills/example --approve
 ```
 
-Git 安装最终记录解析后的 40 位 Commit。安装过程不会运行 lifecycle 或 Skill scripts；同名 Skill 直接拒绝，内容与 lock Hash 不一致时 Remote 启动失败。
+Git 安装最终记录解析后的 40 位 Commit。静态资源来源必须位于 `SKILL_RESOURCE_ORIGINS` 配置的源站，默认只允许 `http://127.0.0.1:7342`；资源包逐文件验证路径、大小和 SHA-256，并验证整包 Hash 后才进入同一个隔离发布流程。安装过程不会运行 lifecycle 或 Skill scripts；同名 Skill 直接拒绝，内容与 lock Hash 不一致时 Remote 启动失败。
 
 ### 产品安装入口
 

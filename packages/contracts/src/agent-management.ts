@@ -1,4 +1,5 @@
 import { isRecord, optionalString, requiredString } from "./common.js";
+import { PRODUCT_CONFIG } from "./product-config.js";
 
 export type ToolPermission = "allow" | "ask" | "deny";
 
@@ -63,11 +64,14 @@ export function parseAgentInput(value: unknown): AgentInput {
   if (!Array.isArray(value.builtinTools)) throw new Error("builtinTools 必须是数组");
   if (!Array.isArray(value.skillInstallationIds)) throw new Error("skillInstallationIds 必须是数组");
   if (!Array.isArray(value.mcps)) throw new Error("mcps 必须是数组");
-  const description = optionalString(value, "description", { max: 500 });
+  const description = optionalString(value, "description", { max: PRODUCT_CONFIG.agent.descriptionMaxCharacters });
   return canonicalAgentInput({
-    name: requiredString(value, "name", { max: 80 }),
+    name: requiredString(value, "name", { max: PRODUCT_CONFIG.agent.nameMaxCharacters }),
     ...(description ? { description } : {}),
-    systemPrompt: requiredString(value, "systemPrompt", { max: 32_000 }),
+    systemPrompt: requiredString(value, "systemPrompt", {
+      max: PRODUCT_CONFIG.agent.systemPromptMaxCharacters,
+      preserveWhitespace: true,
+    }),
     builtinTools: value.builtinTools.map(parseBuiltinToolBinding),
     skillInstallationIds: value.skillInstallationIds.map((id) => {
       if (typeof id !== "string" || id.trim().length === 0) throw new Error("skillInstallationIds 包含无效 ID");
@@ -98,7 +102,7 @@ export function canonicalAgentInput(input: AgentInput): AgentInput {
     ...base,
     name: input.name.trim(),
     ...(description ? { description } : {}),
-    systemPrompt: input.systemPrompt.trim(),
+    systemPrompt: input.systemPrompt,
     builtinTools: [...builtin.values()].toSorted((a, b) => a.toolId.localeCompare(b.toolId)),
     skillInstallationIds: [...new Set(input.skillInstallationIds)].toSorted(),
     mcps,
@@ -109,7 +113,7 @@ function parseBuiltinToolBinding(value: unknown): BuiltinToolBinding {
   if (!isRecord(value)) throw new Error("builtinTools 条目必须是对象");
   if (typeof value.enabled !== "boolean") throw new Error("builtinTools.enabled 必须是布尔值");
   return {
-    toolId: requiredString(value, "toolId", { max: 120 }),
+    toolId: requiredString(value, "toolId", { max: PRODUCT_CONFIG.agent.toolIdMaxCharacters }),
     enabled: value.enabled,
     permission: parsePermission(value.permission),
   };
@@ -119,12 +123,16 @@ function parseMcpBinding(value: unknown): McpBinding {
   if (!isRecord(value) || typeof value.enabled !== "boolean") throw new Error("MCP binding 格式无效");
   if (!Array.isArray(value.tools) || !Array.isArray(value.resources)) throw new Error("MCP capability binding 必须是数组");
   return {
-    mcpInstallationId: requiredString(value, "mcpInstallationId", { max: 120 }),
+    mcpInstallationId: requiredString(value, "mcpInstallationId", {
+      max: PRODUCT_CONFIG.agent.mcpInstallationIdMaxCharacters,
+    }),
     enabled: value.enabled,
     tools: value.tools.map((item) => {
       if (!isRecord(item) || typeof item.enabled !== "boolean") throw new Error("MCP tool binding 格式无效");
       return {
-        remoteName: requiredString(item, "remoteName", { max: 200 }),
+        remoteName: requiredString(item, "remoteName", {
+          max: PRODUCT_CONFIG.agent.mcpRemoteToolNameMaxCharacters,
+        }),
         enabled: item.enabled,
         permission: parsePermission(item.permission),
       };
@@ -134,7 +142,7 @@ function parseMcpBinding(value: unknown): McpBinding {
         throw new Error("MCP resource binding 格式无效");
       }
       return {
-        uri: requiredString(item, "uri", { max: 2_048 }),
+        uri: requiredString(item, "uri", { max: PRODUCT_CONFIG.agent.mcpResourceUriMaxCharacters }),
         enabled: item.enabled,
         preload: item.preload,
       };
@@ -150,7 +158,8 @@ function parsePermission(value: unknown): ToolPermission {
 function parseHistoryPolicy(value: unknown): HistoryPolicy {
   if (!isRecord(value)) throw new Error("historyPolicy 必须是对象");
   if (value.mode === "none") return { mode: "none" };
-  if (value.mode === "recent_turns" && Number.isInteger(value.maxTurns) && Number(value.maxTurns) >= 0 && Number(value.maxTurns) <= 50) {
+  if (value.mode === "recent_turns" && Number.isInteger(value.maxTurns) && Number(value.maxTurns) >= 0 &&
+    Number(value.maxTurns) <= PRODUCT_CONFIG.agent.historyRecentTurnsMax) {
     return { mode: "recent_turns", maxTurns: Number(value.maxTurns) };
   }
   throw new Error("historyPolicy 格式无效");

@@ -15,8 +15,10 @@ import {
   modelStudentHomeUrl,
   selectModelAdmissionPreset,
   updateModelAdmissionConnection,
+  updateModelAdmissionContextWindowTokens,
   updateModelAdmissionDefaultReasoningProfile,
   updateModelAdmissionDisplayName,
+  validateOptionalContextWindowTokens,
   validateModelAdmissionDraft,
   visibleModelAdmissionErrors,
 } from "./model-admission-state.js";
@@ -114,6 +116,7 @@ describe("production model admission state", () => {
     const initialized = initializeModelAdmissionPresets(createModelAdmissionState(), [siliconflowPreset, openaiPreset]);
     expect(initialized.phase).toBe("editing");
     expect(initialized.draft.presetId).toBe("siliconflow");
+    expect(initialized.draft.contextWindowTokens).toBe("");
   });
 
   it("accepts an opaque credential without assuming an sk- prefix", () => {
@@ -123,6 +126,7 @@ describe("production model admission state", () => {
       baseUrl: "https://sub.example.test",
       model: "custom-model",
       apiKey: "opaque-provider-key",
+      contextWindowTokens: "",
     }, customPreset)).toEqual({ valid: true, errors: {} });
   });
 
@@ -133,6 +137,7 @@ describe("production model admission state", () => {
       baseUrl: "http://user:pass@example.test?key=value",
       model: "",
       apiKey: "",
+      contextWindowTokens: "",
     }, customPreset)).toMatchObject({
       valid: false,
       errors: {
@@ -148,6 +153,7 @@ describe("production model admission state", () => {
       baseUrl: "",
       model: "provider-model-id",
       apiKey: "opaque",
+      contextWindowTokens: "",
     }, openaiPreset)).toEqual({ valid: true, errors: {} });
   });
 
@@ -158,6 +164,7 @@ describe("production model admission state", () => {
       baseUrl: "https://attacker.invalid",
       model: "provider-model-id",
       apiKey: "opaque",
+      contextWindowTokens: "262144",
     }, openaiPreset);
     expect(input).toEqual({
       presetId: "openai",
@@ -166,37 +173,45 @@ describe("production model admission state", () => {
       apiKey: "opaque",
     });
     expect("baseUrl" in input).toBe(false);
+    expect("contextWindowTokens" in input).toBe(false);
   });
 
   it("invalidates a verified probe when connection facts change", () => {
     const verified = {
       ...initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
       phase: "verified" as const,
-      draft: { presetId: "custom_responses" as const, displayName: "大聪明", baseUrl: "https://responses.example.test", model: "same-model-id", apiKey: "secret" },
+      draft: { presetId: "custom_responses" as const, displayName: "大聪明", baseUrl: "https://responses.example.test", model: "same-model-id", apiKey: "secret", contextWindowTokens: "262144" },
       test: successfulTest,
     };
-    const changed = updateModelAdmissionConnection(verified, { model: "another-model" });
-    expect(changed.phase).toBe("editing");
-    expect(changed.test).toBeUndefined();
-    expect(changed.defaultReasoningProfile).toBeUndefined();
-    expect(changed.draft.model).toBe("another-model");
+    for (const patch of [
+      { model: "another-model" },
+      { apiKey: "another-secret" },
+      { baseUrl: "https://another.example.test" },
+    ]) {
+      const changed = updateModelAdmissionConnection(verified, patch);
+      expect(changed.phase).toBe("editing");
+      expect(changed.test).toBeUndefined();
+      expect(changed.defaultReasoningProfile).toBeUndefined();
+      expect(changed.draft).toMatchObject(patch);
+      expect(changed.draft.contextWindowTokens).toBe("262144");
+    }
   });
 
   it("clears protocol-specific fields and secret when the preset changes", () => {
     const current = {
       ...initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
-      draft: { presetId: "custom_responses" as const, displayName: "大聪明", baseUrl: "https://custom.example", model: "model-a", apiKey: "secret" },
+      draft: { presetId: "custom_responses" as const, displayName: "大聪明", baseUrl: "https://custom.example", model: "model-a", apiKey: "secret", contextWindowTokens: "262144" },
       test: successfulTest,
     };
     const changed = selectModelAdmissionPreset(current, siliconflowPreset);
-    expect(changed.draft).toEqual({ presetId: "siliconflow", displayName: "大聪明", baseUrl: "", model: "", apiKey: "" });
+    expect(changed.draft).toEqual({ presetId: "siliconflow", displayName: "大聪明", baseUrl: "", model: "", apiKey: "", contextWindowTokens: "262144" });
     expect(changed.test).toBeUndefined();
   });
 
   it("keeps a verified probe when only the ModelStudent nickname changes", () => {
     const editing = {
       ...initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
-      draft: { presetId: "custom_responses" as const, displayName: "原名", baseUrl: "https://responses.example.test", model: "same-model-id", apiKey: "secret" },
+      draft: { presetId: "custom_responses" as const, displayName: "原名", baseUrl: "https://responses.example.test", model: "same-model-id", apiKey: "secret", contextWindowTokens: "262144" },
     };
     const verified = acceptSuccessfulModelStudentTest(editing, successfulTest);
     const selected = updateModelAdmissionDefaultReasoningProfile(verified, "max");
@@ -209,7 +224,71 @@ describe("production model admission state", () => {
       testId: "test-1",
       displayName: "大聪明",
       defaultReasoningProfile: "max",
+      contextWindowTokens: 262_144,
     });
+  });
+
+  it("keeps a verified probe when the optional context window changes", () => {
+    const editing = {
+      ...initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
+      draft: {
+        presetId: "custom_responses" as const,
+        displayName: "大聪明",
+        baseUrl: "https://responses.example.test",
+        model: "same-model-id",
+        apiKey: "secret",
+        contextWindowTokens: "",
+      },
+    };
+    const verified = updateModelAdmissionDefaultReasoningProfile(
+      acceptSuccessfulModelStudentTest(editing, successfulTest),
+      "max",
+    );
+    const updated = updateModelAdmissionContextWindowTokens(verified, "262144");
+
+    expect(updated.phase).toBe("verified");
+    expect(updated.test?.testId).toBe("test-1");
+    expect(updated.defaultReasoningProfile).toBe("max");
+    expect(updated.draft.contextWindowTokens).toBe("262144");
+  });
+
+  it("omits a blank context window and rejects a provided non-positive integer", () => {
+    const editing = updateModelAdmissionDisplayName(
+      initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
+      "大聪明",
+    );
+    const verified = acceptSuccessfulModelStudentTest(editing, successfulTest);
+    expect(buildModelStudentInstallInput(verified)).toEqual({
+      testId: "test-1",
+      displayName: "大聪明",
+      defaultReasoningProfile: "balanced",
+    });
+
+    for (const value of ["0", "-1", "1.5", "9007199254740992"]) {
+      const invalid = updateModelAdmissionContextWindowTokens(verified, value);
+      expect(() => buildModelStudentInstallInput(invalid)).toThrow("上下文窗口必须是正整数，或留空");
+    }
+  });
+
+  it("validates the optional context window independently from capability probing", () => {
+    expect(validateOptionalContextWindowTokens("")).toBeUndefined();
+    expect(validateOptionalContextWindowTokens(" 262144 ")).toBeUndefined();
+    expect(validateOptionalContextWindowTokens("0")).toBe("请输入正整数，或留空。");
+    expect(validateOptionalContextWindowTokens("1.5")).toBe("请输入正整数，或留空。");
+
+    const draft = {
+      presetId: "custom_responses" as const,
+      displayName: "大聪明",
+      baseUrl: "https://responses.example.test",
+      model: "same-model-id",
+      apiKey: "secret",
+      contextWindowTokens: "1.5",
+    };
+    expect(validateModelAdmissionDraft(draft, customPreset)).toEqual({ valid: true, errors: {} });
+    const contextWindowError = validateOptionalContextWindowTokens(draft.contextWindowTokens);
+    expect(visibleModelAdmissionErrors(draft, {
+      contextWindowTokens: contextWindowError!,
+    }, {})).toEqual({ contextWindowTokens: "请输入正整数，或留空。" });
   });
 
   it("starts from the probe default and resets the selection before every new probe", () => {

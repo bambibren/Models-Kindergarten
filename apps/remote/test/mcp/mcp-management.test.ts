@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import { AgentRepository } from "../../src/agent/agent-repository.js";
 import { AgentService } from "../../src/agent/agent-service.js";
 import { McpClientManager } from "../../src/mcp/mcp-client-manager.js";
@@ -21,6 +22,8 @@ describe("McpManagementService", () => {
       name: "Demo MCP", transport: "streamable_http", url: "https://example.com/mcp", auth: { kind: "none" },
     });
     expect(tested.state).toBe("succeeded");
+    expect(Date.parse(tested.expiresAt) - Date.parse(tested.createdAt))
+      .toBe(PRODUCT_CONFIG.mcp.testResultTtlMs);
     expect(tested.snapshot?.tools[0]).toMatchObject({ name: "echo" });
     const installed = await service.install({ testId: tested.testId });
     expect(installed).toMatchObject({ state: "connected", authKind: "none", enabled: true });

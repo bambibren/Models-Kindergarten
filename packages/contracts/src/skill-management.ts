@@ -11,6 +11,11 @@ export type SkillSource =
       resolvedCommit?: string;
       subdirectory: string;
     }
+  | {
+      kind: "resource_bundle";
+      url: string;
+      resolvedContentHash?: string;
+    }
   | { kind: "approved_local"; sourceId: string };
 
 export interface SkillInstallation {

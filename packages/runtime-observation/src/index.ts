@@ -39,7 +39,7 @@ export interface RuntimeVariantSnapshot {
     skills: Array<{
       name: string;
       contentHash: string;
-      source: "builtin" | "project" | "user" | "git";
+      source: "builtin" | "project" | "user" | "git" | "resource";
     }>;
   };
 }

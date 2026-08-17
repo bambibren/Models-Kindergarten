@@ -58,6 +58,25 @@ describe("AgentService", () => {
     expect(second.items[0]?.agentId).not.toBe(first.items[0]?.agentId);
   });
 
+  it("保存 Agent 时不改写前端提交的写文件权限", async () => {
+    const service = await makeService();
+    const created = await service.create({
+      ...input("权限配置"),
+      builtinTools: [{ toolId: "write_file", enabled: true, permission: "ask" }],
+    });
+    expect(created.builtinTools).toEqual([
+      { toolId: "write_file", enabled: true, permission: "ask" },
+    ]);
+
+    const updated = await service.update(created.agentId, {
+      ...input("权限配置"),
+      builtinTools: [{ toolId: "write_file", enabled: true, permission: "allow" }],
+    });
+    expect(updated.builtinTools).toEqual([
+      { toolId: "write_file", enabled: true, permission: "allow" },
+    ]);
+  });
+
   it("拒绝仍携带 Agent 推理默认值的旧记录", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-agents-legacy-"));
     dirs.push(dir);

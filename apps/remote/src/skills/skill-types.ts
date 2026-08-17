@@ -1,5 +1,5 @@
 export type SkillScope = "builtin" | "project" | "user";
-export type SkillSourceKind = "builtin" | "project" | "user" | "git";
+export type SkillSourceKind = "builtin" | "project" | "user" | "git" | "resource";
 
 export interface SkillManifest {
   name: string;
@@ -17,7 +17,8 @@ export interface SkillInstallRecord {
     | { kind: "builtin"; version: string }
     | { kind: "project"; path: string }
     | { kind: "user"; path: string }
-    | { kind: "git"; url: string; commit: string; subdir?: string };
+    | { kind: "git"; url: string; commit: string; subdir?: string }
+    | { kind: "resource"; url: string; contentHash: string };
   scope: SkillScope;
   rootPath: string;
   contentHash: string;
@@ -39,7 +40,8 @@ export interface SkillRoot {
 
 export type SkillInstallSource =
   | { kind: "local"; path: string }
-  | { kind: "git"; url: string; ref: string; subdir?: string };
+  | { kind: "git"; url: string; ref: string; subdir?: string }
+  | { kind: "resource"; url: string };
 
 export interface SkillInstallRequest {
   source: SkillInstallSource;

@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import type { TurnActivePhase, TurnWaitingState } from "@kindergarten/contracts";
+import type { TurnActivePhase, TurnPendingInteraction, TurnWaitingState } from "@kindergarten/contracts";
 
 export interface PromptRequestState {
   operationId: string;
@@ -32,6 +32,7 @@ export type PromptTurnState =
       status: "active";
       phase: TurnActivePhase;
       waitingFor: TurnWaitingState;
+      pendingInteractions: TurnPendingInteraction[];
       request: PromptRequestState;
       interactions: InteractionCollection;
     }
