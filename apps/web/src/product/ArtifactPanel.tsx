@@ -1,5 +1,5 @@
 import type { FileReference } from "@kindergarten/contracts";
-import { FileText, X } from "lucide-react";
+import { FileText, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect } from "react";
 import { controlApi } from "../api/control-api.js";
 import { HtmlPreviewFrame } from "../components/artifacts/HtmlPreviewFrame.js";
@@ -22,7 +22,13 @@ export function ArtifactPanel({
   }, [onFileLoaded, state]);
 
   return <aside className="artifact-panel">
-    <header><div><FileText size={15} /><span><strong>{state.phase === "ready" || state.phase === "empty" ? state.data.file.displayName : "产物预览"}</strong><small>安全预览 · {fileReferenceId.slice(0, 14)}…</small></span></div><button aria-label="关闭产物预览" type="button" onClick={onClose}><X size={16} /></button></header>
+    <header>
+      <div className="artifact-title"><FileText size={15} /><span><strong>{state.phase === "ready" || state.phase === "empty" ? state.data.file.displayName : "产物预览"}</strong><small>安全预览 · {fileReferenceId.slice(0, 14)}…</small></span></div>
+      <div className="artifact-actions">
+        <button aria-label="刷新当前预览" disabled={state.phase === "loading"} title="刷新当前预览" type="button" onClick={retry}><RefreshCw size={15} /></button>
+        <button aria-label="关闭产物预览" title="关闭产物预览" type="button" onClick={onClose}><X size={16} /></button>
+      </div>
+    </header>
     <div className="artifact-body">{state.phase === "loading" ? <LoadingState label="正在读取产物" /> : state.phase === "error" ? <ErrorState {...state} retry={retry} /> : <Preview value={state.data} />}</div>
   </aside>;
 }

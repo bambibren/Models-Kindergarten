@@ -329,8 +329,16 @@ export default function App() {
       const response = await client.load(session.sessionId, session.cwd);
       setConfigOptions(response.configOptions ?? []);
     } finally {
-      // load 的通知也使用 streamingChatEntries，结束时必须统一提交或清理。
-      store.dispatchChat({ type: "stream/commit", operationId });
+      const current = useAppStore.getState();
+      const turn = current.promptTurn;
+      // load 回放提交为历史；活动 Turn 同一原子转换续接实时流，避免授权后的增量落入空窗口。
+      current.dispatchChat({
+        type: "stream/load-complete",
+        operationId,
+        ...(turn.status === "active" && turn.request.sessionId === session.sessionId
+          ? { activeTurn: { operationId: turn.request.operationId, turnId: turn.request.turnId } }
+          : {}),
+      });
     }
   }
 

@@ -11,6 +11,7 @@ import { emptyEntries } from "./chat-types.js";
 export type ChatAction =
   | { type: "session/open"; sessionId: string }
   | { type: "stream/start"; operationId: string; source: StreamSource; turnId: string; optimisticContent?: ContentBlock[] }
+  | { type: "stream/load-complete"; operationId: string; activeTurn?: { operationId: string; turnId: string } }
   | { type: "stream/commit"; operationId: string }
   | { type: "context/summary"; value: ContextSummaryNotification }
   | { type: "token/usage"; value: TokenUsageNotification }
@@ -42,6 +43,23 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         seenChunks: new Set(),
         ...(optimistic ? { optimisticUserEntryId: optimistic.id } : {}),
       },
+    };
+  }
+  if (action.type === "stream/load-complete") {
+    if (state.streaming?.operationId !== action.operationId) return state;
+    const split = action.activeTurn
+      ? partitionCollection(state.streamingChatEntries, action.activeTurn.turnId)
+      : { matching: emptyEntries(), rest: state.streamingChatEntries };
+    return {
+      ...state,
+      historyChatEntries: mergeCollections(state.historyChatEntries, split.rest),
+      streamingChatEntries: split.matching,
+      streaming: action.activeTurn ? {
+        operationId: action.activeTurn.operationId,
+        source: "load",
+        turnId: action.activeTurn.turnId,
+        seenChunks: new Set(),
+      } : null,
     };
   }
   if (action.type === "stream/commit") {
@@ -209,6 +227,19 @@ function mergeCollections(committed: EntryCollection, streaming: EntryCollection
     if (entry) byId[id] = finalizeEntry(entry);
   }
   return { order: [...committed.order, ...streaming.order.filter((id) => committed.byId[id] === undefined)], byId };
+}
+
+function partitionCollection(collection: EntryCollection, turnId: string): { matching: EntryCollection; rest: EntryCollection } {
+  const matching = emptyEntries();
+  const rest = emptyEntries();
+  for (const id of collection.order) {
+    const entry = collection.byId[id];
+    if (!entry) continue;
+    const target = entry.turnId === turnId ? matching : rest;
+    target.order.push(id);
+    target.byId[id] = entry;
+  }
+  return { matching, rest };
 }
 
 function finalizeEntry(entry: ChatEntry): ChatEntry {

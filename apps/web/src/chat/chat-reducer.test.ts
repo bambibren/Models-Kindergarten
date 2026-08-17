@@ -189,6 +189,64 @@ describe("chatReducer", () => {
     expect(state.streamingChatEntries.order).toHaveLength(0);
   });
 
+  it("load 恢复活动 Turn 后继续接收授权后的工具更新和回复", () => {
+    let state = openStream("load");
+    state = update(state, {
+      sessionUpdate: "tool_call",
+      toolCallId: "write-after-wait",
+      title: "写入 index.html",
+      name: "write_file",
+      kind: "edit",
+      status: "pending",
+    });
+    state = chatReducer(state, {
+      type: "stream/load-complete",
+      operationId: "operation-1",
+      activeTurn: { operationId: "remote:session-1:turn-1", turnId: "turn-1" },
+    });
+
+    expect(state.streaming?.operationId).toBe("remote:session-1:turn-1");
+    expect(state.streamingChatEntries.order).toEqual(["tool:write-after-wait"]);
+    expect(state.historyChatEntries.order).toEqual([]);
+
+    state = update(state, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "write-after-wait",
+      status: "completed",
+      content: [{
+        type: "content",
+        content: {
+          type: "resource_link",
+          name: "index.html",
+          uri: "mk-file://file-after-wait",
+        },
+      }],
+    });
+    state = chatReducer(state, {
+      type: "acp/update",
+      value: messageNotice("assistant", "answer-after-wait", "修改完成", 0, true),
+    });
+    state = chatReducer(state, {
+      type: "stream/commit",
+      operationId: "remote:session-1:turn-1",
+    });
+
+    expect(values(state.historyChatEntries)).toMatchObject([
+      {
+        type: "tool_call",
+        toolCallId: "write-after-wait",
+        status: "completed",
+        content: [{ content: { type: "resource_link", uri: "mk-file://file-after-wait" } }],
+      },
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "修改完成" }],
+      },
+    ]);
+    expect(state.streaming).toBeNull();
+  });
+
   it("提交旧流后可以开始新的 streamingEntries", () => {
     let state = openStream("prompt", [{ type: "text", text: "上一轮" }]);
     state = chatReducer(state, {

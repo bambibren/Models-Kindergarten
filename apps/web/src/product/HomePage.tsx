@@ -9,12 +9,10 @@ import { ProductNav } from "./ProductNav.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { useResource } from "./use-resource.js";
 
-const websitePrompt = `请先调用 ensure_agent_skills，把以下 3 个 Skills 安装到当前 Agent 并自动启用，全部就绪后再开始任务：
+export const websitePrompt = `请先把以下 Skills 安装到当前 Agent 并自动启用，全部就绪后再开始任务：
 https://github.com/anthropics/skills/tree/main/skills/frontend-design
-https://github.com/nexu-io/open-design/tree/main/skills/design-brief
-https://github.com/nexu-io/open-design/tree/main/skills/impeccable-design-polish
 
-请为 Models Kindergarten 制作一个可直接预览的静态网站，把最终 HTML 写入 index.html。`;
+请制作一个气泡水网站，风格是幼稚可爱清新活泼，气泡水有四种口味：葡萄、橙子、海盐、青柠。首屏的大slogan是“快来一起做汽水课间操！”，背景需要有淡化不喧宾夺主的动效。然后后面几屏需要展示不同口味气泡水瓶的介绍，需要气泡水瓶内的水随鼠标反馈可以做液体运动。还需要展示网页互动小游戏，吸引学生群体。`;
 
 export function HomePage() {
   const load = useCallback(async () => {
@@ -56,15 +54,19 @@ function HomeReady({ models, agents, sessions }: { models: ModelStudentSummary[]
           <div>{models.map((item) => <button disabled={item.status !== "ready"} key={item.modelStudentId} type="button" onClick={() => { setModelId(item.modelStudentId); modelPicker.current?.removeAttribute("open"); }}><span><GraduationCap size={14} /></span><div><strong>{item.displayName}</strong><small>{joinMetadata([formatContextWindow(item.contextWindowTokens), item.model, item.status === "ready" ? "可用" : item.statusMessage ?? "不可用"])}</small></div>{item.modelStudentId === modelId && <Check size={13} />}</button>)}</div>
         </details><a className="product-model-admission-link" href="/models/new"><UserPlus size={15} />新模型入园</a></div>
       <h1>今天想让模型学习什么？</h1><p>选择一个真实 Agent 开始任务，或比较不同上下文策略。</p>
-      <div className="product-capability-cards">
-        <button aria-label="小说创作（功能调研中）" disabled type="button"><BookOpenText size={17} /><span><strong>小说创作</strong><small>功能调研中</small></span></button>
-        <button type="button" onClick={() => setPrompt(websitePrompt)}><Code2 size={17} /><span><strong>网站开发</strong><small>显式安装 3 个 Skills 后生成 HTML</small></span></button>
-        <a href="/context-lab"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>比较 2–3 种真实策略</small></span></a>
-      </div>
+      <HomeCapabilities onSelectWebsite={() => setPrompt(websitePrompt)} />
       <form className="product-home-composer" onSubmit={(event) => void submit(event)}><textarea aria-label="给 ModelStudent 发送消息" rows={3} placeholder="给 ModelStudent 发送消息…" value={prompt} onChange={(event) => setPrompt(event.target.value)} /><footer><div className="product-home-settings"><details className="product-agent-picker" ref={agentPicker}><summary><Bot size={13} /><strong>{agent?.name ?? "没有 Agent"}</strong><ChevronDown size={13} /></summary><div>{agents.map((item) => <button type="button" key={item.agentId} onClick={() => { setAgentId(item.agentId); agentPicker.current?.removeAttribute("open"); }}><Bot size={13} /><span><strong>{item.name}</strong><small>{item.description ?? "未填写说明"}</small></span>{item.agentId === agentId && <Check size={12} />}</button>)}</div></details>{reasoningProfiles.length > 1 && <ReasoningProfileSelect {...(model ? { capability: model.supports.reasoning } : {})} choices={reasoningProfiles.map((profile) => ({ profile, name: profileLabel(profile, model?.supports.reasoning) }))} label="新会话思考控制" onChange={setReasoningProfile} value={reasoningProfile} />}</div><span>创建后，Agent 与模型固定在该会话中</span><button aria-label="发送" disabled={!prompt.trim() || !modelId || !agentId} type="submit"><ArrowUp size={16} /></button></footer></form>
     </header>
     <section className="product-recent"><header><span>ADMIN · RECENT SESSIONS</span><h2>最近会话</h2></header>{sessions.length === 0 ? <div className="product-empty"><strong>还没有会话</strong><p>从上方输入一个任务即可开始。</p></div> : <div>{sessions.slice(0, 6).map((session) => <a href={`/sessions/${encodeURIComponent(session.sessionId)}`} key={session.sessionId}><span><strong>{session.title}</strong><small>{session.preview || "暂无消息"}</small></span><time>{formatDate(session.updatedAt)}</time></a>)}</div>}</section>
   </section></Page>;
+}
+
+export function HomeCapabilities({ onSelectWebsite }: { onSelectWebsite: () => void }) {
+  return <div className="product-capability-cards">
+    <button type="button" onClick={onSelectWebsite}><Code2 size={17} /><span><strong>网站开发</strong><small>显式安装 网页设计Skills 后生成 HTML</small></span></button>
+    <button aria-label="小说创作（功能调研中）" disabled type="button"><BookOpenText size={17} /><span><strong>小说创作</strong><small>功能调研中</small></span></button>
+    <a href="/context-lab"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>比较 2–3 种真实策略</small></span></a>
+  </div>;
 }
 
 function Page({ children }: { children: React.ReactNode }) { return <main className="product-page"><ProductNav active="home" />{children}</main>; }
