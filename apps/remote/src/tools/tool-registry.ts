@@ -214,9 +214,17 @@ export class ToolRegistry implements ToolRegistryPort {
           `命令执行失败（exit ${value.exitCode ?? "signal"}）`,
           false,
           value,
+          value.changedFiles.length > 0
+            ? { effects: { fileRelativePaths: value.changedFiles } }
+            : undefined,
         );
       }
-      return result(call, value, modelEnvelope(call, true, value));
+      return {
+        ...result(call, value, modelEnvelope(call, true, value)),
+        ...(value.changedFiles.length > 0
+          ? { effects: { fileRelativePaths: value.changedFiles } }
+          : {}),
+      };
     }
     if (call.name === "web_search") {
       const items = await this.web.search(

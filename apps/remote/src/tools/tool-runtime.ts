@@ -118,6 +118,9 @@ export class ToolRuntime {
         errorText(error),
         detected?.retryable ?? false,
         detected?.rawOutput,
+        undefined,
+        undefined,
+        detected?.effects,
       );
     }
   }
@@ -144,6 +147,7 @@ function errorOutcome(
   rawOutput?: unknown,
   details?: Record<string, unknown>,
   instruction?: string,
+  effects?: ToolOutcome["effects"],
 ): ToolOutcome {
   const error = { code, category, message };
   const publicOutput = { error, ...details };
@@ -161,6 +165,7 @@ function errorOutcome(
     rawOutput: rawOutput ?? publicOutput,
     content: [{ type: "content", content: { type: "text", text: message } }],
     locations: call.locations,
+    ...(effects ? { effects } : {}),
   };
 }
 

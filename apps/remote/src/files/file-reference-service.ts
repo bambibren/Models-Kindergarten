@@ -27,10 +27,12 @@ export class FileReferenceService {
     await sandbox.initialize();
     const files: FileReference[] = [];
     for (const relativePath of [...new Set(relativePaths)]) {
-      const reused = existing.find((item) => item.ownerId === ownerId && item.sessionId === sessionId &&
-        item.turnId === turnId && item.relativePath === relativePath);
-      if (reused) { files.push(reused); continue; }
       const { content } = await sandbox.readBytes(relativePath);
+      const sha256 = createHash("sha256").update(content).digest("hex");
+      const reused = existing.find((item) => item.ownerId === ownerId && item.sessionId === sessionId &&
+        item.turnId === turnId && item.relativePath === relativePath && item.byteLength === content.byteLength &&
+        item.sha256 === sha256);
+      if (reused) { files.push(reused); continue; }
       const fileReferenceId = `file_${randomUUID().replaceAll("-", "")}`;
       await this.writeBlob(fileReferenceId, content);
       const format = fileFormat(relativePath);
@@ -44,7 +46,7 @@ export class FileReferenceService {
         relativePath,
         mimeType: format.mimeType,
         byteLength: content.byteLength,
-        sha256: createHash("sha256").update(content).digest("hex"),
+        sha256,
         previewKind: format.previewKind,
         createdAt: new Date().toISOString(),
       };

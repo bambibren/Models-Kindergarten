@@ -219,7 +219,17 @@ describe("V1.6 Agent Runtime", () => {
     const signal = new AbortController().signal;
     const inside = await processSandbox.run("printf ok > inside.txt", ".", 5_000, signal);
     expect(inside.exitCode).toBe(0);
+    expect(inside.changedFiles).toEqual(["inside.txt"]);
+    expect(inside.deletedFiles).toEqual([]);
     expect(await readFile(join(sandbox.root, "inside.txt"), "utf8")).toBe("ok");
+
+    const registry = new ToolRegistry(sandbox, processSandbox);
+    const update = await registry.execute(registry.prepare({
+      id: "command-update",
+      name: "run_command",
+      arguments: { command: "printf changed > inside.txt" },
+    }, "fallback"), { signal, askUser: async () => "" });
+    expect(update.effects?.fileRelativePaths).toEqual(["inside.txt"]);
 
     const outside = await processSandbox.run(
       `printf no > /tmp/models-kindergarten-outside-${Date.now()}.txt`,

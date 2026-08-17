@@ -245,6 +245,135 @@ describe("Tool Loop", () => {
     await expect(access(join(dir, "sandbox", "denied", "result.html"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("文件工具完成后在 Turn 继续生成期间立即发布预览引用", async () => {
+    const dir = await tempDir();
+    const sandbox = new FileSandbox(join(dir, "sandbox"));
+    await sandbox.initialize();
+    const sessions = new SessionRepository(join(dir, "data"));
+    const provider = new WriteThenWaitProvider();
+    const createFromPaths = vi.fn(async (_ownerId: string, sessionId: string, turnId: string) => [{
+      schemaVersion: 1 as const,
+      fileReferenceId: "file_streamed1234567890abcdef1234567890",
+      ownerId: "local-admin",
+      sessionId,
+      turnId,
+      displayName: "index.html",
+      relativePath: "index.html",
+      mimeType: "text/html",
+      byteLength: 15,
+      sha256: "a".repeat(64),
+      previewKind: "static_html" as const,
+      createdAt: "2026-08-17T00:00:00.000Z",
+    }]);
+    const files = { createFromPaths } as unknown as FileReferenceService;
+    const agent = new KindergartenAgent(
+      sessions,
+      AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox)),
+      testBindings(),
+      files,
+    ).createApp();
+    const updates: acp.SessionNotification[] = [];
+    const client = acp.client({ name: "streamed-artifact-page" })
+      .onNotification(acp.methods.client.session.update, ({ params }) => { updates.push(params); })
+      .onRequest(acp.methods.client.session.requestPermission, () => ({
+        outcome: { outcome: "selected", optionId: "allow-once" },
+      }))
+      .connect(agent);
+    await initialize(client);
+    const session = await client.agent.request(acp.methods.agent.session.new, {
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: makeSessionBindingMeta({ schemaVersion: 1, modelStudentId: "student-1", agentId: "agent-1" }),
+    });
+
+    const prompt = client.agent.request(acp.methods.agent.session.prompt, {
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "写完文件后继续回答" }],
+      _meta: makePromptMeta({ schemaVersion: 1, turnId: "streamed-artifact-turn" }),
+    });
+    await provider.waitForSecondRound();
+
+    await vi.waitFor(() => expect(updates.some((notice) => {
+      const update = notice.update;
+      return update.sessionUpdate === "tool_call_update" && update.content?.some((item) =>
+        item.type === "content" && item.content.type === "resource_link" &&
+        item.content.uri === "mk-file://file_streamed1234567890abcdef1234567890");
+    })).toBe(true));
+    expect(createFromPaths).toHaveBeenCalledTimes(1);
+
+    provider.continueSecondRound();
+    await prompt;
+    client.close();
+    await client.closed;
+  });
+
+  it.runIf(process.platform === "darwin")("终端真实改写文件后同样立即发布预览引用", async () => {
+    const dir = await tempDir();
+    const sandbox = new FileSandbox(join(dir, "sandbox"));
+    await sandbox.initialize();
+    await sandbox.writeText("index.html", "<h1>旧版本</h1>");
+    const sessions = new SessionRepository(join(dir, "data"));
+    const provider = new CommandThenWaitProvider();
+    const createFromPaths = vi.fn(async (_ownerId: string, sessionId: string, turnId: string) => [{
+      schemaVersion: 1 as const,
+      fileReferenceId: "file_command1234567890abcdef123456789",
+      ownerId: "local-admin",
+      sessionId,
+      turnId,
+      displayName: "index.html",
+      relativePath: "index.html",
+      mimeType: "text/html",
+      byteLength: 18,
+      sha256: "b".repeat(64),
+      previewKind: "static_html" as const,
+      createdAt: "2026-08-17T00:00:00.000Z",
+    }]);
+    const files = { createFromPaths } as unknown as FileReferenceService;
+    const agent = new KindergartenAgent(
+      sessions,
+      AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox)),
+      testBindings(),
+      files,
+    ).createApp();
+    const updates: acp.SessionNotification[] = [];
+    const client = acp.client({ name: "command-artifact-page" })
+      .onNotification(acp.methods.client.session.update, ({ params }) => { updates.push(params); })
+      .onRequest(acp.methods.client.session.requestPermission, () => ({
+        outcome: { outcome: "selected", optionId: "allow-once" },
+      }))
+      .connect(agent);
+    await initialize(client);
+    const session = await client.agent.request(acp.methods.agent.session.new, {
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: makeSessionBindingMeta({ schemaVersion: 1, modelStudentId: "student-1", agentId: "agent-1" }),
+    });
+
+    const prompt = client.agent.request(acp.methods.agent.session.prompt, {
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "用命令修改文件" }],
+      _meta: makePromptMeta({ schemaVersion: 1, turnId: "command-artifact-turn" }),
+    });
+    await provider.waitForSecondRound();
+
+    expect(createFromPaths).toHaveBeenCalledWith(
+      "local-admin",
+      session.sessionId,
+      "command-artifact-turn",
+      ["index.html"],
+    );
+    expect(updates.some((notice) => {
+      const update = notice.update;
+      return update.sessionUpdate === "tool_call_update" && update.toolCallId === "streamed-command" &&
+        update.content?.some((item) => item.type === "content" && item.content.type === "resource_link");
+    })).toBe(true);
+
+    provider.continueSecondRound();
+    await prompt;
+    client.close();
+    await client.closed;
+  });
+
   it("文件写入成功后，即使 Turn 后续失败也保留预览引用", async () => {
     const dir = await tempDir();
     const sandbox = new FileSandbox(join(dir, "sandbox"));
@@ -399,6 +528,64 @@ class WriteThenFailProvider extends ScriptedToolProvider {
       return;
     }
     throw new Error("模拟写入后的模型失败");
+  }
+}
+
+class WriteThenWaitProvider extends ScriptedToolProvider {
+  private secondRoundStarted!: () => void;
+  private secondRoundContinued!: () => void;
+  private readonly secondRound = new Promise<void>((resolve) => { this.secondRoundStarted = resolve; });
+  private readonly continuation = new Promise<void>((resolve) => { this.secondRoundContinued = resolve; });
+
+  waitForSecondRound(): Promise<void> { return this.secondRound; }
+  continueSecondRound(): void { this.secondRoundContinued(); }
+
+  override async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
+    if (!input.messages.some((item) => item.role === "tool")) {
+      yield {
+        type: "tool_calls",
+        calls: [{
+          id: "streamed-write",
+          name: "write_file",
+          arguments: { path: "index.html", content: "<h1>完成</h1>" },
+        }],
+      };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+    this.secondRoundStarted();
+    await this.continuation;
+    yield { type: "text_delta", text: "文件已经完成" };
+    yield { type: "finish", reason: "stop" };
+  }
+}
+
+class CommandThenWaitProvider extends ScriptedToolProvider {
+  private secondRoundStarted!: () => void;
+  private secondRoundContinued!: () => void;
+  private readonly secondRound = new Promise<void>((resolve) => { this.secondRoundStarted = resolve; });
+  private readonly continuation = new Promise<void>((resolve) => { this.secondRoundContinued = resolve; });
+
+  waitForSecondRound(): Promise<void> { return this.secondRound; }
+  continueSecondRound(): void { this.secondRoundContinued(); }
+
+  override async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
+    if (!input.messages.some((item) => item.role === "tool")) {
+      yield {
+        type: "tool_calls",
+        calls: [{
+          id: "streamed-command",
+          name: "run_command",
+          arguments: { command: "printf '<h1>新版本</h1>' > index.html; false" },
+        }],
+      };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+    this.secondRoundStarted();
+    await this.continuation;
+    yield { type: "text_delta", text: "命令修改已完成" };
+    yield { type: "finish", reason: "stop" };
   }
 }
 

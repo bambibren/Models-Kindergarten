@@ -3,6 +3,7 @@ import type {
   AgentRecord,
   ExperimentDraftInput,
   ExperimentRecord,
+  FileReference,
   FilePreviewResponse,
   McpCandidateInput,
   McpInstallationView,
@@ -98,6 +99,7 @@ export const controlApi = {
   contextPreview: (input: import("@kindergarten/contracts").ContextPreviewInput) => request<import("@kindergarten/contracts").ContextPreviewResponse>("/context-previews", "POST", input),
   experiments: (saved = false) => get<ExperimentRecord[]>(`/experiments${saved ? "?saved=true" : ""}`),
   removeExperiment: (id: string) => request<void>(`/experiments/${encodeURIComponent(id)}`, "DELETE"),
+  fileReference: (id: string) => get<FileReference>(`/files/${encodeURIComponent(id)}`),
   filePreview: (id: string) => get<FilePreviewResponse>(`/files/${encodeURIComponent(id)}/preview`),
   contentUrl: (id: string) => `${CONTROL_URL}/files/${encodeURIComponent(id)}/content`,
 };

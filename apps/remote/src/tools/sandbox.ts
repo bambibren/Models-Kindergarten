@@ -7,6 +7,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 const MAX_FILE_BYTES = 256 * 1024;
@@ -110,6 +111,41 @@ export class FileSandbox {
 
     await writeFile(target, content, { encoding: "utf8", flag: "w" });
     return { path: target, oldText, newText: content };
+  }
+
+  /**
+   * 终端命令不会像 write_file 一样声明目标路径，因此只能在同一 FileSandbox
+   * 边界内对可预览普通文件做内容快照。符号链接、超限文件和特殊文件不进入引用链。
+   */
+  async snapshotReferenceableFiles(): Promise<Map<string, string>> {
+    await this.ensureReady();
+    const snapshot = new Map<string, string>();
+    const visit = async (directory: string, prefix: string): Promise<void> => {
+      const entries = (await readdir(directory, { withFileTypes: true }))
+        .toSorted((left, right) => left.name.localeCompare(right.name));
+      for (const entry of entries) {
+        if (entry.isSymbolicLink()) continue;
+        const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+        let target: string;
+        try {
+          target = this.preview(path);
+        } catch {
+          // 终端可以创建 FileSandbox 不接受的文件名；这类文件不能进入预览引用链。
+          continue;
+        }
+        await this.assertSafeComponents(target, false);
+        if (entry.isDirectory()) {
+          await visit(target, path);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const info = await stat(target);
+        if (!info.isFile() || info.size > MAX_FILE_BYTES) continue;
+        snapshot.set(path, createHash("sha256").update(await readFile(target)).digest("hex"));
+      }
+    };
+    await visit(this.root, "");
+    return snapshot;
   }
 
   private async ensureReady(): Promise<void> {

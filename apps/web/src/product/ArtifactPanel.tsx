@@ -1,13 +1,25 @@
+import type { FileReference } from "@kindergarten/contracts";
 import { FileText, X } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { controlApi } from "../api/control-api.js";
 import { HtmlPreviewFrame } from "../components/artifacts/HtmlPreviewFrame.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { useResource } from "./use-resource.js";
 
-export function ArtifactPanel({ fileReferenceId, onClose }: { fileReferenceId: string; onClose: () => void }) {
+export function ArtifactPanel({
+  fileReferenceId,
+  onClose,
+  onFileLoaded,
+}: {
+  fileReferenceId: string;
+  onClose: () => void;
+  onFileLoaded?: (file: FileReference) => void;
+}) {
   const load = useCallback(() => controlApi.filePreview(fileReferenceId), [fileReferenceId]);
   const { state, retry } = useResource(load);
+  useEffect(() => {
+    if (state.phase === "ready" || state.phase === "empty") onFileLoaded?.(state.data.file);
+  }, [onFileLoaded, state]);
 
   return <aside className="artifact-panel">
     <header><div><FileText size={15} /><span><strong>{state.phase === "ready" || state.phase === "empty" ? state.data.file.displayName : "产物预览"}</strong><small>安全预览 · {fileReferenceId.slice(0, 14)}…</small></span></div><button aria-label="关闭产物预览" type="button" onClick={onClose}><X size={16} /></button></header>

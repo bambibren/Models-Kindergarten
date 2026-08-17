@@ -44,6 +44,23 @@ describe("FileReferenceService", () => {
     await expect(service.createFromPaths("local-admin", "session-a", "turn-a", ["../secret.txt"]))
       .rejects.toThrow(/path|路径/);
   });
+
+  it("同一 Turn 同一路径内容未变时复用引用，内容变化时创建新快照", async () => {
+    const { service, workspaces } = await setup();
+    const sandbox = new FileSandbox(join(workspaces, "session-a"));
+    await sandbox.initialize();
+    await sandbox.writeText("index.html", "<h1>第一版</h1>");
+    const [first] = await service.createFromPaths("local-admin", "session-a", "turn-a", ["index.html"]);
+    const [same] = await service.createFromPaths("local-admin", "session-a", "turn-a", ["index.html"]);
+
+    await sandbox.writeText("index.html", "<h1>第二版</h1>");
+    const [second] = await service.createFromPaths("local-admin", "session-a", "turn-a", ["index.html"]);
+
+    expect(same?.fileReferenceId).toBe(first?.fileReferenceId);
+    expect(second?.fileReferenceId).not.toBe(first?.fileReferenceId);
+    expect((await service.preview(first!.fileReferenceId)).content).toEqual({ kind: "static_html", html: "<h1>第一版</h1>", csp: expect.any(String) });
+    expect((await service.preview(second!.fileReferenceId)).content).toEqual({ kind: "static_html", html: "<h1>第二版</h1>", csp: expect.any(String) });
+  });
 });
 
 async function setup() {

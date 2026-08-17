@@ -284,7 +284,17 @@ export class KindergartenAgent {
     const output = new AcpOutput(session.id, channel);
 
     const user = makeMessage("user", text, turnId, randomUUID());
-    const projection = new TurnProjection(session.id, turnId, user, output, channel, this.sessions, controller.signal);
+    const projection = new TurnProjection(
+      session.id,
+      turnId,
+      user,
+      output,
+      channel,
+      this.sessions,
+      controller.signal,
+      session.ownerId,
+      this.files,
+    );
     this.projections.set(session.id, projection);
     let failure: unknown = null;
     let reason: acp.StopReason = "end_turn";
@@ -350,6 +360,7 @@ export class KindergartenAgent {
         } catch (error) {
           failure ??= error;
         }
+        fileReferenceIds = projection.publishedFileReferenceIds();
         if (this.files && projection.fileRelativePaths().length > 0) {
           try {
             const references = await this.files.createFromPaths(
@@ -359,7 +370,10 @@ export class KindergartenAgent {
               projection.fileRelativePaths(),
             );
             await projection.attachFileReferences(references);
-            fileReferenceIds = references.map((item) => item.fileReferenceId);
+            fileReferenceIds = [...new Set([
+              ...projection.publishedFileReferenceIds(),
+              ...references.map((item) => item.fileReferenceId),
+            ])];
           } catch (error) {
             failure ??= error;
           }
@@ -464,6 +478,7 @@ class TurnProjection implements RunObserver {
   private readonly thoughtChunks = new Map<number, number>();
   private readonly closedRounds = new Set<number>();
   private readonly writtenFileRelativePaths = new Set<string>();
+  private readonly publishedFileReferenceIdSet = new Set<string>();
   private runtimeFacts: RuntimeTurnSnapshot | undefined;
   private readonly capabilityFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["capabilitySnapshots"]> = [];
   private readonly roundFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["modelRounds"]> = [];
@@ -477,6 +492,8 @@ class TurnProjection implements RunObserver {
     private readonly channel: SessionAcpChannel,
     private readonly sessions: SessionRepository,
     private readonly signal: AbortSignal,
+    private readonly ownerId: string,
+    private readonly files?: FileReferenceService,
   ) {}
 
   matchesTurn(turnId: string): boolean { return this.turnId === turnId; }
@@ -488,6 +505,8 @@ class TurnProjection implements RunObserver {
   }
 
   fileRelativePaths(): string[] { return [...this.writtenFileRelativePaths]; }
+
+  publishedFileReferenceIds(): string[] { return [...this.publishedFileReferenceIdSet]; }
 
   async context(summary: ContextSummary): Promise<void> {
     const entry: SessionContextSummaryEntry = {
@@ -654,15 +673,14 @@ class TurnProjection implements RunObserver {
     for (const round of rounds) await this.roundComplete(round);
   }
 
-  async attachFileReferences(files: FileReference[]): Promise<void> {
+  async attachFileReferences(files: FileReference[], sourceToolCallId?: string): Promise<void> {
     const changed: SessionToolCallEntry[] = [];
     for (const file of files) {
       const pathSuffix = file.relativePath.replaceAll("\\", "/");
-      const entry = this.streamingSessionEntries.findLast((item): item is SessionToolCallEntry => {
-        if (item.type !== "tool_call" || item.name !== "write_file") return false;
-        if (!isRecord(item.rawOutput) || typeof item.rawOutput.path !== "string") return true;
-        return item.rawOutput.path.replaceAll("\\", "/").endsWith(pathSuffix);
-      });
+      const entry = this.streamingSessionEntries.findLast((item): item is SessionToolCallEntry =>
+        item.type === "tool_call" && (sourceToolCallId
+          ? item.toolCallId === sourceToolCallId
+          : toolCallAffectedPath(item, pathSuffix)));
       if (!entry) continue;
       if (entry.content.some((item) => item.type === "content" && item.content.type === "resource_link" &&
         item.content.uri === makeFileReferenceUri(file.fileReferenceId))) continue;
@@ -679,6 +697,7 @@ class TurnProjection implements RunObserver {
         },
       });
       changed.push(entry);
+      this.publishedFileReferenceIdSet.add(file.fileReferenceId);
       await this.output.toolUpdate({
         toolCallId: entry.toolCallId,
         status: entry.status,
@@ -730,7 +749,9 @@ class TurnProjection implements RunObserver {
     status: acp.ToolCallStatus,
     result: ToolOutcome,
   ): Promise<void> {
-    result.effects?.fileRelativePaths?.forEach((path) => this.writtenFileRelativePaths.add(path));
+    // 失败命令也可能已经产生部分写入；effects 描述真实副作用，不等同于工具成功状态。
+    const fileRelativePaths = result.effects?.fileRelativePaths ?? [];
+    fileRelativePaths.forEach((path) => this.writtenFileRelativePaths.add(path));
     console.warn("[tool] finish", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, status, outcomeStatus: result.status }));
     const entry = this.streamingSessionEntries.find(
       (item): item is SessionToolCallEntry =>
@@ -754,6 +775,11 @@ class TurnProjection implements RunObserver {
       content,
       locations,
     });
+    // 文件实际写入成功后立即通过标准 ACP resource_link 发布；无需等待整个模型 Turn 结束。
+    if (this.files && fileRelativePaths.length > 0) {
+      const references = await this.files.createFromPaths(this.ownerId, this.sessionId, this.turnId, fileRelativePaths);
+      await this.attachFileReferences(references, call.id);
+    }
   }
 
   async requestPermission(call: PreparedToolCall): Promise<boolean> {
@@ -1124,4 +1150,14 @@ function entryIdentity(entry: SessionEntry): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toolCallAffectedPath(entry: SessionToolCallEntry, path: string): boolean {
+  if (!isRecord(entry.rawOutput)) return false;
+  if (entry.name === "write_file" && typeof entry.rawOutput.path === "string") {
+    return entry.rawOutput.path.replaceAll("\\", "/").endsWith(path);
+  }
+  return entry.name === "run_command" && Array.isArray(entry.rawOutput.changedFiles) &&
+    entry.rawOutput.changedFiles.some((item) =>
+      typeof item === "string" && item.replaceAll("\\", "/") === path);
 }
