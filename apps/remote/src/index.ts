@@ -69,6 +69,7 @@ import { ArtifactRepository } from "./artifacts/artifact-repository.js";
 import { ArtifactBlobStore } from "./artifacts/artifact-blob-store.js";
 import { ArtifactService } from "./artifacts/artifact-service.js";
 import { ARTIFACT_TOOL_IDS } from "./artifacts/artifact-tool-provider.js";
+import { PPTX_TOOL_IDS } from "./pptx/pptx-tool-provider.js";
 import { registerArtifactRoutes } from "./artifacts/artifact-routes.js";
 import {
   DEFAULT_AGENT_SYSTEM_PROMPT,
@@ -157,6 +158,7 @@ const agentService = new AgentService(agentRepository, {
   builtinToolIds: () => [
     ...new ToolRegistry(sandbox).definitions.map((item) => item.function.name),
     ...ARTIFACT_TOOL_IDS,
+    ...PPTX_TOOL_IDS,
   ],
   readySkillInstallationIds: () => skillInstallations?.readyInstallationIdsSync() ?? [],
   mcpCapabilities: () => mcp.capabilitySnapshots().map((snapshot) => ({

@@ -42,6 +42,19 @@ describe("RuntimeCapabilityResolver", () => {
     expect(after.capabilityHash).not.toBe(before.capabilityHash);
   });
 
+  it("build_pptx 只在 Agent 明确启用时进入当前 Turn 能力快照", async () => {
+    const { resolver, service, agentId } = await setup();
+    const before = await resolver.resolve(scope(agentId, "session-pptx-before"));
+    expect(before.tools.registry.definitions.map((item) => item.function.name)).not.toContain("build_pptx");
+
+    await service.update(agentId, agentInput("PPTX Agent", false, true));
+    const after = await resolver.resolve(scope(agentId, "session-pptx-after"));
+    expect(after.tools.registry.definitions.map((item) => item.function.name)).toContain("build_pptx");
+    expect(after.tools.registry.capabilitySnapshot().tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "pptx:tool:build_pptx", modelName: "build_pptx", origin: "builtin" }),
+    ]));
+  });
+
   it("按 Session 冻结的 modelStudentId 解析对应 Provider", async () => {
     const { service, skills, mcp, dir, agentId } = await setup();
     const fallback = new FixtureProvider();
@@ -89,7 +102,7 @@ async function setup() {
   dirs.push(dir);
   const repository = new AgentRepository(join(dir, "agents.json"));
   const service = new AgentService(repository, {
-    builtinToolIds: () => ["read_file", "write_file"],
+    builtinToolIds: () => ["read_file", "write_file", "build_pptx"],
     readySkillInstallationIds: () => [],
     mcpCapabilities: () => [],
   });
@@ -106,13 +119,14 @@ async function setup() {
   return { resolver, service, skills, mcp, dir, agentId: agent.agentId };
 }
 
-function agentInput(systemPrompt: string, write: boolean) {
+function agentInput(systemPrompt: string, write: boolean, pptx = false) {
   return {
     name: "测试 Agent",
     systemPrompt,
     builtinTools: [
       { toolId: "read_file", enabled: true, permission: "allow" as const },
       { toolId: "write_file", enabled: write, permission: "ask" as const },
+      { toolId: "build_pptx", enabled: pptx, permission: "allow" as const },
     ],
     skillInstallationIds: [], mcps: [],
     historyPolicy: { mode: "recent_turns" as const, maxTurns: 4 }, memoryPolicy: { mode: "off" as const },

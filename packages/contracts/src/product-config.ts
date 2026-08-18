@@ -16,6 +16,16 @@ export const PRODUCT_CONFIG = {
     /** 文本预览只进入模型/UI 的前 5 MiB；原始 Artifact 仍可完整下载。 */
     maxTextPreviewBytes: 5 * 1024 * 1024,
   },
+  pptx: {
+    /** PptxGenJS 源码沿用文本文件的大上限，不允许把二进制素材塞进源码。 */
+    maxSourceBytes: 5 * 1024 * 1024,
+    /** 最终 PPTX 复用普通 Artifact 的单文件上限。 */
+    maxOutputBytes: 100 * 1024 * 1024,
+    /** 构建只计算源码执行时间；模型生成源码的时间不在其中。 */
+    buildTimeoutMs: 120_000,
+    /** 子进程 stdout/stderr 只保留诊断摘要，不进入产物。 */
+    maxProcessOutputBytes: 64 * 1024,
+  },
   skill: {
     /** 单个 Skill 最多收集的文件数，防止安装过程失控。 */
     maxFiles: 200,

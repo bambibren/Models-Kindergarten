@@ -1,16 +1,16 @@
-# MK 产物、Mention 与 HTML 链路升级（含 MCP/PPTX 能力预研）— TRD
+# MK 产物、Mention 与 HTML/PPTX 链路升级（含 MCP 能力预研）— TRD
 
-> 版本：0.6（实施记录）
+> 版本：0.8（实施记录）
 > 日期：2026-08-18
-> 状态：Artifact、Mention、HTML 主链已实现并完成配置化验收；MCP/PPTX 并行验证已完成
+> 状态：Artifact、Mention、HTML 主链已完成验收；PPTX 技术链路已实现，等待外部 Skill + 大聪明配置化验收
 > 关联讨论：`01a00dc2-58df-7122-b0ac-981216ae1ba1`、`01a00e17-dbbc-7f23-8647-5d56edb8b982`
-> 实施边界：PPTX 产品链路仍未开发，后续以独立子 TRD 为准。
+> 实施边界：PPTX 只增加通用构建与普通 Artifact 发布能力，不内置 Skill、不创建默认 PPT Agent、不增加专用 Browser 预览。
 
 ---
 
 ## 1. 概要
 
-本轮开发主线只做三件事：完成通用 Artifact 能力、给现有输入框增加轻量 Artifact Mention、跑通允许 JavaScript 动效的 HTML 生成与预览链路。PPTX 生成实现从本轮主线删除；远程 MCP 与外部 PPTX 工具分别建立并行验证任务，先取得真实能力证据，为后续开发做准备。
+首轮主线完成通用 Artifact、轻量 Artifact Mention 和允许 JavaScript 动效的 HTML 生成/预览。外部 PPTX 工具验证完成后，后续阶段增加受控 PptxGenJS 构建能力，并复用普通文件 Artifact 完成发布和下载；远程 MCP 继续保持配置化接入与独立验证。
 
 项目只提供通用技术能力，不内置 HTML/PPT/Imagegen 等业务 Skill，不内置 MCP Server，不创建默认 HTML/PPT Agent。主线完成后，通过 MK 配置外部 Skill、远程 MCP 和 Agent，并且只使用“大聪明”做模型验收。
 
@@ -22,6 +22,7 @@
 - Prompt、Session、`load`、`resume` 都能携带稳定的 Artifact ID，不用文件名或文本位置判断身份。
 - 跑通 HTML/CSS/JavaScript/图片/字体等 Bundle 资源的生成、发布和隔离预览，JavaScript 动效可运行。
 - 构建 HTML 时不增加单独的“构建并发布”确认框。
+- 支持 Agent 配置受控 PPTX 构建能力，将当前 Workspace 中的 PptxGenJS 源码生成标准 `.pptx`，再由通用 Artifact 显式发布。
 - 所有新增协议行为都有测试，不破坏 ACP、Session、ToolRuntime 和 FileSandbox 既有不变量。
 
 ### 1.2 并行验证结果
@@ -31,9 +32,9 @@
 
 ### 1.3 非目标
 
-- 本轮不实现 `build_presentation`、PPTX 专用构建服务、PPTX 预览或 PPT Agent。
+- 不实现 PPTX 专用 Browser 预览，不创建或内置 PPT Agent。
 - 不强制一次 PPT 任务只能产生一个 Artifact，也不拦截用户或 Skill 生成其他文件。
-- 未来 PPT 专项首个要开发的格式是 `.pptx` Artifact；PDF、总览图和检查报告不是首个专项能力，但这不是“禁止其他产物”的运行时规则。
+- PPTX 构建能力只生成调用方指定的 `.pptx`，不主动生成附属文件；这不是“禁止任务出现其他文件”的运行时规则。
 - Mention 既有图片时不强制禁止生成新图片；“优先复用”是提示词和验收期望，不是拦截器。
 - 不开发 `contenteditable`、富文本 AST、行内 Mention node、光标映射或隐藏 markup 编辑器。
 - 不内置 Skill、MCP Server、默认 Agent、固定 MCP URL 或演示数据。
@@ -53,8 +54,8 @@
 
 “PPT 最终只发布一个 `.pptx`”只作为典型目标场景，不作为程序级排他规则：
 
-- 本轮主线不开发任何 PPTX 生成能力。
-- 后续 PPT 专项首先保证 `.pptx` 能成为可下载 Artifact。
+- PPTX 技术链路生成指定 `.pptx`，并复用普通文件 Artifact 成为可下载产物。
+- 不新增 PPTX Artifact 类型、Artifact Group 或专用预览模型。
 - 不因为当前 Turn 的目标是 PPT 就拒绝其他文件、删除其他 Artifact，或阻止模型生成新的图片。
 - 如果用户、外部 Skill 或普通 Artifact 发布流程明确产生其他文件，通用 Artifact 能力仍可处理；是否发布由显式调用决定。
 
@@ -131,7 +132,7 @@ MCP 不内置、不创建默认配置；以上未完成项不阻塞 Artifact/HTM
 - 本次使用独立受限验证工具，不是 MK 内 Agent Tool 链；Mention Blob 复用、MK 内工具选择、模型直接观看逐页图仍未闭环。
 - 当前 `ProcessSandbox` 仅支持 macOS，`markitdown`/`defusedxml` 未安装，云端 Linux 还需要固定构建 Worker、中文字体和依赖。
 
-这些差异已经触发独立的外部文档 [`PPTX生成链路子方案-trd.md`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX/PPTX生成链路子方案-trd.md>)。本轮不开发 PPTX 产品能力，也不把外部 Skill 内置到项目。
+这些差异触发了独立的外部文档 [`PPTX生成链路子方案-trd.md`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX/PPTX生成链路子方案-trd.md>)；后续实现继续保持外部 Skill 不进入项目，并按最新讨论删除附属文件逻辑。
 
 ---
 
@@ -180,10 +181,13 @@ flowchart LR
 
     R -. "配置绑定" .-> ES["项目外 HTML Skill"]
     R -. "并行实测" .-> BM["Brave Search MCP"]
-    PT["独立 PPTX 验证任务"] -. "不进入本轮实现" .-> XP["外部 PPTX Skill/工具链"]
+    R --> PB["受控 PPTX 构建能力"]
+    PB --> PF["Workspace .pptx"]
+    PF --> AR
+    PT["外部 PPTX Skill"] -. "配置绑定" .-> R
 ```
 
-主线的依赖顺序是 Artifact → Mention/HTML。HTML 与 PPT 不存在相互依赖；本轮没有 PPT 实现阶段。
+依赖顺序是 Artifact → Mention/HTML；PPTX 构建只依赖稳定的 FileSandbox/ToolRuntime，并在生成后复用 Artifact。HTML 与 PPTX 不相互依赖。
 
 ### 5.1 模块划分
 
@@ -197,8 +201,11 @@ flowchart LR
 | Artifact routes | 列表、详情、内容、Bundle 资源、归档/恢复 | `apps/remote/src/artifacts/artifact-routes.ts` |
 | Artifact UI | 我的 Artifacts、详情、下载、HTML Preview | `apps/web/src/product/ArtifactDetailPage.tsx`、`PublishedArtifactPanel.tsx` |
 | Mention UI | `@` 搜索浮层与同容器 Tag 标签 | `apps/web/src/components/composer/` |
+| PPTX Build Service | 受控执行 PptxGenJS、限制资源、检查基础 OOXML | `apps/remote/src/pptx/pptx-build-service.ts` |
+| PPTX Tool Provider | Agent 配置、permission、ToolRuntime 与能力快照 | `apps/remote/src/pptx/pptx-tool-provider.ts` |
+| PPTX Inspector | 在内存读取 ZIP central directory 并统计幻灯片 | `apps/remote/src/pptx/pptx-inspector.ts` |
 
-不创建 `presentation/` 模块，不新增 `build_presentation` Tool。
+不增加 PPTX 持久化领域模型、专用预览模块或内置业务 Skill。
 
 ---
 
@@ -411,8 +418,8 @@ HTML Design Agent 使用以下配置：
 | `publish_artifact_version` | allow | 不询问；vN 只能由服务端递增 |
 | `rollback_artifact` | allow | 不询问；但模型仅能在用户明确要求回滚时调用 |
 | `ask_user` | allow | 调用时使用 ACP elicitation，不使用 permission 弹窗 |
+| `build_pptx` | allow | 只在用户创建的 PPT Agent 中显式启用；构建不弹确认 |
 
-- 本轮没有 PPTX 构建 Tool。
 - 删除 HTML/PPT 的独立“构建并发布”确认，也不实现“一次高层确认覆盖内部步骤”。
 - `write_file=allow` 只放开当前 Session 的 FileSandbox 写入，不能扩大到其他 Workspace、宿主机路径或其他用户 Artifact。
 - 命令工具实现暂时保留，但通过 Registry 集中开关短路：不进入模型 Tool Schema，也不进入 Agent 能力配置。
@@ -457,11 +464,12 @@ HTML Design Agent 使用以下配置：
 | 大聪明理解外部 PPTX Skill 并生成/修订源码 | PASS |
 | `.pptx` 打开、渲染、结构和编辑冒烟 | PASS |
 | 可编辑对象、原生图表/Workbook、图片、备注、Master | PASS |
-| `.pptx` 作为普通文件 Artifact | 数据模型可直接承载；MK 内发布尚待 PPT 专项联调 |
-| Mention 既有图片 Blob 复用 | 本次未进入 MK Agent 主链，未验证 |
-| 云端 Linux 受控执行与模型视觉 QA | 未闭环 |
+| `.pptx` 作为普通文件 Artifact | MK 内 build → publish → download 自动化联调通过 |
+| Mention 既有图片/PPTX Blob 复用 | 同 owner 跨 Session 物化字节一致测试通过 |
+| macOS 受控执行 | `sandbox-exec` + 真实 PptxGenJS 一页构建通过 |
+| 云端 Linux 受控执行 | 已实现 user/network namespace + Node permission 路径，部署镜像仍需提供 `unshare` |
 
-由于执行沙箱、字体/依赖和视觉 QA 与原设想存在差异，已在项目外生成 [`PPTX生成链路子方案-trd.md`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX/PPTX生成链路子方案-trd.md>)。后续采用受控 `build_pptx` Worker；本轮不实现 PPTX，不内置 Skill，不创建默认 PPT Agent。
+外部预研材料继续保留在项目外；实际实现已按后续讨论删除主动 PDF、逐页图和检查报告逻辑。完整实现与人工验收步骤见 [`PPTX生成链路开发实现与验收.md`](./PPTX生成链路开发实现与验收.md)。
 
 ---
 
@@ -496,7 +504,7 @@ HTML Design Agent 使用以下配置：
 | `ARTIFACT_RESOURCE_LIMIT` | 单文件、Bundle 或 Turn staging 超限 | 413，指出具体限制，不截断或自动重试 |
 | `ARTIFACT_RESOURCE_NOT_FOUND` | HTML Bundle 内资源不存在 | 404，不回退宿主机或来源 Workspace |
 
-Prompt Meta 结构错误沿用 ACP/Contract 现有非法参数路径；重复 Mention ID 在解析时去重。MCP/PPTX 报告记录各自实测错误，不为未实现产品链路新增错误码。
+Prompt Meta 结构错误沿用 ACP/Contract 现有非法参数路径；重复 Mention ID 在解析时去重。MCP 报告继续记录独立实测错误；PPTX 构建错误由 ToolRuntime 返回明确的参数、依赖、执行、超时、资源和 OOXML 结构类别。
 
 ---
 
@@ -618,13 +626,14 @@ flowchart TB
 - 仓库没有新增业务 Skill、MCP Server、固定 MCP URL、默认 HTML/PPT Agent。
 - 外部 Skill 使用能力描述，不依赖 Agent 私有工具名，不由 Runtime 动态打补丁。
 - HTML 端到端只使用“大聪明”；不存在 Minimax 测试记录。
+- PPTX 配置化验收同样只使用“大聪明”；MK 不自动创建 PPT Agent。
 - 外部能力缺失时直接报告未绑定，不偷偷换模型、换工具或换产物。
 
 ### 16.3 并行报告（完成）
 
 - MCP 报告包含具体 Server、版本、实际发现/调用、Rich Content 和云端边界；Brave 真实搜索因凭据与网络缺失明确标为未验证。
 - PPTX 报告包含真实 `.pptx`、打开/渲染/结构/编辑结果和大聪明 Tool Trace。
-- PPTX 实测差异已生成独立子 TRD；PPTX 主功能未进入本轮代码。
+- PPTX 外部实测差异已生成独立子 TRD；后续实现已落入独立实现与验收文档。
 
 ---
 
@@ -636,6 +645,7 @@ flowchart TB
 2. 轻量 Mention 和 Session/ACP 扩展。
 3. HTML Bundle 发布、sandboxed iframe 和 Artifact UI。
 4. HTML Design Agent 配置化验收。
+5. PPTX 构建能力与普通 Artifact 联调；外部 PPTX Skill + 大聪明配置化验收。
 
 MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 
@@ -651,7 +661,7 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 - 可以关闭新 Artifact 发布和 HTML Preview，但仍保留既有 Blob/元数据供恢复。
 - 回滚不覆盖用户 Workspace，不批量重建，不自动重试。
 - HTML Preview UI/路由可关闭，不影响普通 Artifact 下载。
-- PPTX 本轮无实现，因此没有 PPTX 功能回滚项。
+- 关闭 Agent 的 `build_pptx` binding 即可让之后的新 Turn 不再获得构建能力；既有 `.pptx` Artifact 不删除。
 
 ---
 
@@ -664,7 +674,7 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 | 同 owner 跨 Session Artifact 被误当 Workspace | 高 | 始终从 Blob Store 读取，只在当前 Session 物化 |
 | Brave 图片只有 URL | 中 | 真实热链仍未验证；URL 不伪装成 Blob，稳定素材另做受控导入 |
 | Brave HTTP 公网无认证 | 高 | 只在回环/可信网络验证；云端需反代鉴权与 MK 配置补充 |
-| PPTX Skill 与运行时不兼容 | 高 | 独立真实验证；有差异就创建 PPTX 子 TRD |
+| 外部 PPTX Skill 与运行时不兼容 | 高 | Skill 保持能力描述；使用外部资源服务和大聪明做配置化验收，不加工具名映射补丁 |
 | `markitdown` 缺失 | 中 | 在验证报告中确认是否必需，不自动安装掩盖差异 |
 | 外部 Skill 描述不足 | 高 | 用大聪明真实验收，调整项目外 Skill 文案，不加 Runtime 映射补丁 |
 | 手动重试重复发布 | 高 | operationId、参数指纹、成功结果幂等返回 |
@@ -689,9 +699,9 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 
 ## 20. 后续边界
 
-本轮没有待确认的主线开发项。后续工作保持独立，不反向扩大本轮范围：
+主线技术开发项已完成；后续工作保持独立，不反向扩大范围：
 
-- PPTX 产品实现以项目外的 [`PPTX生成链路子方案-trd.md`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX/PPTX生成链路子方案-trd.md>) 为准，需用户另行确认后开发。
+- PPTX 后续只进行外部 Skill + 大聪明人工验收和云端 Linux 镜像验证，不把 Skill 或默认 Agent 写入项目。
 - MCP 动态 Resource 临时授权、云端远程鉴权/VPC allowlist 和稳定 URL Import 分别设计，不内置 Server。
 - Brave 真实效果待具备 API Key 和云端出站网络后重测，不把当前 Schema/失败路径验证写成搜索质量通过。
 
@@ -708,3 +718,4 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 | 0.5 | 2026-08-18 | 记录 Artifact/Mention/HTML 实现与大聪明端到端验收；按真实代码修正 Tool/Contract/预览边界；合并 MCP/PPTX 实测结论并引用独立 PPTX 子 TRD | Codex |
 | 0.6 | 2026-08-18 | 纠正 GSAP CDN 误判；改用官方 Client 绕过 MK 独立验证 MCP Server，补充动态 Resource、Bearer 网关和私网直连通过证据；MK 限制只保留为后续开发计划 | Codex |
 | 0.7 | 2026-08-18 | Artifact 发布统一为首次/覆盖与新 vN 两个工具，增加显式回滚、每 ID 最近三份修订和无引用 Blob 清理；命令工具集中短路并从模型、提示词和 Agent 配置隐藏 | Codex |
+| 0.8 | 2026-08-18 | 落地受控 PPTX 构建、OOXML 基础检查、Agent 配置与普通 Artifact 联调；不生成附属文件，不内置 Skill 或默认 PPT Agent | Codex |

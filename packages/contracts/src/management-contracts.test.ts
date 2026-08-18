@@ -35,6 +35,9 @@ describe("management contracts", () => {
     expect(input.systemPrompt).toBe("  先检查再修改。  ");
     expect(PRODUCT_CONFIG.agent.systemPromptMaxCharacters).toBe(32_000);
     expect(PRODUCT_CONFIG.artifact.maxRetainedRevisions).toBe(3);
+    expect(PRODUCT_CONFIG.pptx.buildTimeoutMs).toBe(120_000);
+    expect(PRODUCT_CONFIG.pptx.maxSourceBytes).toBe(5 * 1024 * 1024);
+    expect(PRODUCT_CONFIG.pptx.maxOutputBytes).toBe(PRODUCT_CONFIG.artifact.maxFileBytes);
     expect(canonicalAgentInput(input).skillInstallationIds).toEqual(["skill-a", "skill-b"]);
     expect(canonicalAgentInput(input).builtinTools).toHaveLength(1);
     expect(input).not.toHaveProperty("defaultReasoningProfile");

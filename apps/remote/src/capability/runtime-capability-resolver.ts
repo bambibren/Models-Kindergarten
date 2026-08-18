@@ -22,6 +22,8 @@ import type { SkillInstallationService } from "../skills/skill-installation-serv
 import { EnsureAgentSkillsToolProvider } from "../skills/ensure-agent-skills-tool.js";
 import type { ArtifactService } from "../artifacts/artifact-service.js";
 import { ArtifactToolProvider } from "../artifacts/artifact-tool-provider.js";
+import { PptxBuildService } from "../pptx/pptx-build-service.js";
+import { PptxToolProvider } from "../pptx/pptx-tool-provider.js";
 
 export interface ResolvedRuntimeCapabilities {
   scope: TurnScope;
@@ -100,6 +102,7 @@ export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort 
       : installationIds;
     const providers = [
       new ToolRegistry(sandbox, undefined, undefined, builtinBindings),
+      new PptxToolProvider(new PptxBuildService(sandbox), builtinBindings),
       ...(this.artifacts ? [new ArtifactToolProvider(this.artifacts, scope, builtinBindings)] : []),
       new McpToolProvider(this.mcp, agent.mcps),
       new SkillToolProvider(this.skills, skillNames),
