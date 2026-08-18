@@ -72,8 +72,35 @@ export type ArtifactPreviewResponse = {
     | { kind: "text"; text: string }
     | { kind: "image"; contentUrl: string }
     | { kind: "pdf"; contentUrl: string }
+    | { kind: "pptx"; contentUrl: string }
     | { kind: "unsupported"; contentUrl: string };
 };
+
+export interface PptxPlaybackResponse {
+  documentServerApiUrl: string;
+  config: {
+    type: "embedded";
+    documentType: "slide";
+    document: {
+      fileType: "pptx";
+      key: string;
+      title: string;
+      url: string;
+      permissions: { download: false; edit: false; print: false };
+    };
+    editorConfig: {
+      lang: "zh-CN";
+      mode: "view";
+      customization: {
+        compactHeader: true;
+        hideRightMenu: true;
+        toolbarHideFileName: true;
+      };
+      embedded: { autostart: "player"; toolbarDocked: "bottom" };
+    };
+    token?: string;
+  };
+}
 
 const OPAQUE_ARTIFACT_ID = /^[A-Za-z0-9_-]{8,160}$/;
 

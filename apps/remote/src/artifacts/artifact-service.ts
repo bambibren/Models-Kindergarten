@@ -212,7 +212,7 @@ export class ArtifactService {
     if (kind === "markdown") return { artifact, content: { kind, markdown: previewText(bytes) } };
     if (kind === "text") return { artifact, content: { kind, text: previewText(bytes) } };
     if (kind === "static_html") return { artifact, content: { kind, html: bytes.toString("utf8"), csp: HTML_BUNDLE_CSP } };
-    if (kind === "image" || kind === "pdf") return { artifact, content: { kind, contentUrl } };
+    if (kind === "image" || kind === "pdf" || kind === "pptx") return { artifact, content: { kind, contentUrl } };
     return { artifact, content: { kind: "unsupported", contentUrl } };
   }
 
@@ -493,13 +493,14 @@ function escapeAttribute(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 }
 
-function previewKind(name: string, type: string): "markdown" | "static_html" | "text" | "image" | "pdf" | "unsupported" {
+function previewKind(name: string, type: string): "markdown" | "static_html" | "text" | "image" | "pdf" | "pptx" | "unsupported" {
   const extension = extname(name).toLowerCase();
   if (type === "text/markdown" || extension === ".md" || extension === ".markdown") return "markdown";
   if (type === "text/html" || extension === ".html" || extension === ".htm") return "static_html";
   if (type.startsWith("text/") || type === "application/json") return "text";
   if (type.startsWith("image/")) return "image";
   if (type === "application/pdf") return "pdf";
+  if (type === "application/vnd.openxmlformats-officedocument.presentationml.presentation" || extension === ".pptx") return "pptx";
   return "unsupported";
 }
 

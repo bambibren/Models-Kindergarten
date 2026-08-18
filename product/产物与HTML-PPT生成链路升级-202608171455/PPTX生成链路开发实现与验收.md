@@ -1,7 +1,7 @@
 # PPTX 生成链路开发实现与验收
 
 > 日期：2026-08-18
-> 状态：代码与自动化回归已完成，等待用户执行外部 Skill + 大聪明配置化验收
+> 状态：PPTX 预览与动画播放已完成真实文件验收，等待用户执行外部 Skill + 大聪明配置化验收
 > 关联方案：[`产物与HTML-PPT生成链路升级-trd.md`](./产物与HTML-PPT生成链路升级-trd.md)、[项目外 PPTX 子方案](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX/PPTX生成链路子方案-trd.md>)
 
 ## 1. 最终实现范围
@@ -15,10 +15,10 @@
   → Agent 在当前 Session Workspace 写入 PptxGenJS 源码
   → 受控构建能力生成并检查指定 .pptx
   → 现有普通文件 Artifact 能力显式发布
-  → 产物列表展示并提供标准 .pptx 下载
+  → 产物列表展示、浏览器静态预览、可选动画播放并提供标准 .pptx 下载
 ```
 
-本次没有实现 PPTX 专用 Browser 预览。发布后的 `.pptx` 在产物列表和详情页中按普通文件展示，用户通过下载后使用 PowerPoint、Keynote 或兼容软件打开和编辑。
+发布后的 `.pptx` 仍是普通文件 Artifact。详情页按需加载浏览器渲染器，直接读取原始 `.pptx` 字节并展示逐页静态预览；用户点击“动画播放”时，才按需连接本机 ONLYOFFICE DocumentServer。Remote 只签发绑定 owner、Artifact ID、当前 SHA-256 和过期时间的只读票据，服务端不会为了预览生成 PDF、逐页图或报告。下载仍返回 Blob Store 中的原始 `.pptx`，可在 PowerPoint、Keynote 或兼容软件中继续编辑。
 
 ## 2. 根据讨论修正的正式边界
 
@@ -45,6 +45,10 @@
 | `apps/remote/src/capability/runtime-capability-resolver.ts` | 按当前 Agent 的保存配置决定本 Turn 是否暴露 PPTX 能力 |
 | `apps/remote/src/index.ts` | 把 PPTX 能力加入 Agent capability options；不自动修改已有 Agent，也不创建 PPT Agent |
 | `apps/remote/src/artifacts/*` | 复用既有普通文件发布、Blob 存储、版本、下载和 Mention 物化能力 |
+| `apps/remote/src/artifacts/onlyoffice-preview.ts` | 生成只读播放配置与短时 Artifact 取件票据，校验当前文件哈希 |
+| `packages/contracts/src/artifacts.ts`、`file-references.ts` | 声明普通 Artifact、Session 文件的 `pptx` 预览响应和动画播放配置 |
+| `apps/web/src/components/artifacts/PptxPreview.tsx` | 按需加载浏览器渲染器，限制 ZIP 解析资源并逐页静态展示 |
+| `apps/web/src/components/artifacts/OnlyOfficePptxPlayer.tsx` | 用户点击后加载 ONLYOFFICE，提供幻灯片播放、页面内/原生全屏和静态预览返回 |
 
 ### 3.1 构建输入与输出
 
@@ -132,11 +136,34 @@ MK 不会自动创建这个 Agent，也不会静默修改已有 Agent 的配置�
 
 - 新建或编辑 Agent 时，能力列表中出现 `build_pptx`，默认不勾选；用户勾选后按保存配置生效。
 - 大聪明可在当前 Session 写入 PptxGenJS 源码并生成标准 `.pptx`。
-- 构建成功本身不会制造预览入口；发布成功后，文件进入“我的 Artifacts”。
+- 构建成功后的 Session 文件可以预览；发布成功后，文件进入“我的 Artifacts”并可从列表或详情页预览。
 - 产物详情显示文件名、MIME、大小、SHA-256、版本和来源 Session/Turn。
+- 详情页显示 PPTX 页数和逐页静态内容；渲染器只在打开 PPTX 时按需加载。
+- 已发布 Artifact 提供“动画播放”；ONLYOFFICE 只在用户点击后加载，可切换幻灯片、全屏或返回静态预览。
+- 静态预览或动画播放器失败时都提供手动重试，顶部下载入口保持可用。
 - 用户下载得到的字节就是构建产生并存入 Artifact Blob Store 的 `.pptx`。
 - 同一内容仍享受 Artifact Blob SHA-256 去重、vN、覆盖和回滚能力。
 - Mention 已有图片或 PPTX 时，可以从 Artifact Blob 物化到当前 Workspace；不会读取原 Session Workspace。
+
+### 5.1 本地动画播放器启动
+
+首次使用先拉取 ARM64 镜像：
+
+```bash
+docker pull --platform linux/arm64 onlyoffice/documentserver:9.4.0
+```
+
+本地 Demo 使用以下命令启动。端口只绑定 `127.0.0.1`；`ALLOW_PRIVATE_IP_ADDRESS=true` 仅用于允许容器读取 `host.docker.internal` 上的 MK Remote：
+
+```bash
+docker run -d --name mk-onlyoffice-preview --restart unless-stopped \
+  -p 127.0.0.1:8080:80 \
+  -e JWT_ENABLED=false \
+  -e ALLOW_PRIVATE_IP_ADDRESS=true \
+  onlyoffice/documentserver:9.4.0
+```
+
+打开 `http://127.0.0.1:8080/healthcheck` 应返回 `true`。云端部署不得沿用关闭 JWT 的本地命令，必须让 DocumentServer 的 `JWT_SECRET` 与 MK Remote 的 `ONLYOFFICE_JWT_SECRET` 一致，并将 `ONLYOFFICE_PUBLIC_URL`、`ONLYOFFICE_ARTIFACT_BASE_URL` 配置为双方实际可达的 HTTPS 地址。
 
 ## 6. 验收清单
 
@@ -158,6 +185,13 @@ MK 不会自动创建这个 Agent，也不会静默修改已有 Agent 的配置�
 - [ ] Workspace 没有由 MK 主动生成 PDF、逐页图、总览图或检查报告。
 - [ ] Agent 显式发布 `.pptx` 后，最终回复包含 Artifact 链接。
 - [ ] “我的 Artifacts”出现该 `.pptx`，刷新页面后仍存在。
+- [ ] 点击该 `.pptx` 后直接显示逐页静态预览，页数与构建结果一致。
+- [ ] 预览可见中文、图片、形状、表格和图表等文件内已有内容；无需先生成中间文件。
+- [ ] 点击“动画播放”后 ONLYOFFICE 成功打开同一份文件，可切换幻灯片。
+- [ ] 点击“全屏”后播放器覆盖当前浏览器视口，退出后恢复原预览尺寸。
+- [ ] 点击“静态预览”后返回逐页预览，不重新发布或修改 Artifact。
+- [ ] DocumentServer 用短时票据读取的字节 SHA-256 与当前 Artifact 一致；篡改、过期或跨 Artifact 票据返回 404。
+- [ ] 预览失败时可手动重试，且不影响原始 `.pptx` 下载。
 - [ ] 下载文件扩展名、MIME 和实际内容均为标准 `.pptx`。
 
 ### C. PowerPoint 文件质量
@@ -202,8 +236,12 @@ MK 不会自动创建这个 Agent，也不会静默修改已有 Agent 的配置�
 |---|---|
 | `pptx-inspector.test.ts` | ZIP/OOXML 条目、页数、损坏文件 |
 | `pptx-build-service.test.ts` | 路径、真实 PptxGenJS 构建、错误、取消、无自动重试 |
-| `pptx-tool-provider.test.ts` | Tool Schema、permission=allow、无直接预览、Capability snapshot |
+| `pptx-tool-provider.test.ts` | Tool Schema、permission=allow、构建结果不伪造发布状态、Capability snapshot |
 | `runtime-capability-resolver.test.ts` | Agent 未启用时隐藏、启用后进入当前 Turn |
 | `pptx-artifact-chain.test.ts` | build → publish → download → Mention 物化字节一致 |
+| `artifact-service.test.ts`、`file-reference.test.ts` | 已发布 Artifact 与 Session 文件返回受控 PPTX 内容地址 |
+| `onlyoffice-preview.test.ts` | 只读配置、DocumentServer JWT、短时票据、过期/篡改/跨 Artifact 拒绝 |
+| `onlyoffice-preview-route.test.ts` | owner 签发播放配置、容器取件路由、当前版本字节和 no-store 响应 |
+| `PublishedArtifactPanel.test.tsx` | PPTX 进入浏览器预览组件并展示动画播放入口，不落入仅下载兜底 |
 
 视觉设计质量和 PowerPoint 客户端编辑体验属于配置化人工验收；程序测试不伪造这两项结论。

@@ -71,6 +71,7 @@ import { ArtifactService } from "./artifacts/artifact-service.js";
 import { ARTIFACT_TOOL_IDS } from "./artifacts/artifact-tool-provider.js";
 import { PPTX_TOOL_IDS } from "./pptx/pptx-tool-provider.js";
 import { registerArtifactRoutes } from "./artifacts/artifact-routes.js";
+import { OnlyOfficePreviewService } from "./artifacts/onlyoffice-preview.js";
 import {
   DEFAULT_AGENT_SYSTEM_PROMPT,
   removeLegacyModelIdentity,
@@ -318,7 +319,7 @@ const fileReferences = new FileReferenceService(
   resolve(dataDir, "file-blobs"),
 );
 registerFileRoutes(control.router, fileReferences);
-registerArtifactRoutes(control.router, artifacts);
+registerArtifactRoutes(control.router, artifacts, new OnlyOfficePreviewService());
 const agent = new KindergartenAgent(sessions, runtime, bindings, experimentService, modelStudents, artifacts).createApp();
 const server = new RemoteServer(agent, {
   studentId: student.id,

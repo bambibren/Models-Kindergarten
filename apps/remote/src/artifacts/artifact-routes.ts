@@ -1,7 +1,9 @@
 import type { ControlRouter } from "../server/control-router.js";
+import { ApiProblemError } from "../server/api-problem.js";
 import type { ArtifactService } from "./artifact-service.js";
+import type { OnlyOfficePreviewService } from "./onlyoffice-preview.js";
 
-export function registerArtifactRoutes(router: ControlRouter, service: ArtifactService): void {
+export function registerArtifactRoutes(router: ControlRouter, service: ArtifactService, onlyOffice?: OnlyOfficePreviewService): void {
   router.register("GET", "/artifacts", ({ url, principal }) => {
     const state = url.searchParams.get("state");
     return service.list(principal.principalId, {
@@ -13,6 +15,21 @@ export function registerArtifactRoutes(router: ControlRouter, service: ArtifactS
     service.get(params.artifactId ?? "", principal.principalId));
   router.register("GET", "/artifacts/:artifactId/preview", ({ params, principal, url }) =>
     service.preview(params.artifactId ?? "", principal.principalId, `${url.protocol}//${url.host}/api/control/v1`));
+  if (onlyOffice) {
+    router.register("GET", "/artifacts/:artifactId/pptx-playback", async ({ params, principal }) => {
+      const artifact = await service.get(params.artifactId ?? "", principal.principalId);
+      return onlyOffice.create(artifact);
+    });
+    router.register("GET", "/onlyoffice/artifacts/:artifactId/raw", async ({ params, url }) => {
+      const artifactId = params.artifactId ?? "";
+      const ticket = onlyOffice.verify(artifactId, url.searchParams.get("token"));
+      const value = await service.content(artifactId, ticket.ownerId);
+      if (value.artifact.primary.sha256 !== ticket.sha256) {
+        throw new ApiProblemError(404, "ARTIFACT_FORBIDDEN", "PPTX 播放票据对应的版本已经变化", false);
+      }
+      return binaryResponse(value.bytes, value.artifact.primary.mimeType, value.artifact.displayName, false, "private, no-store");
+    });
+  }
   router.register("GET", "/artifacts/:artifactId/content", async ({ params, principal }) => {
     const value = await service.download(params.artifactId ?? "", principal.principalId);
     return binaryResponse(value.bytes, value.mimeType, value.fileName, true);
@@ -31,14 +48,14 @@ export function registerArtifactRoutes(router: ControlRouter, service: ArtifactS
     service.setState(params.artifactId ?? "", principal.principalId, "active"));
 }
 
-function binaryResponse(bytes: Buffer, mimeType: string, name: string, attachment: boolean): Response {
+function binaryResponse(bytes: Buffer, mimeType: string, name: string, attachment: boolean, cacheControl?: string): Response {
   return new Response(new Uint8Array(bytes), {
     headers: {
       "content-type": mimeType,
       "content-length": String(bytes.byteLength),
       "content-disposition": `${attachment ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(name)}`,
       "x-content-type-options": "nosniff",
-      "cache-control": attachment ? "private, no-store" : "private, max-age=31536000, immutable",
+      "cache-control": cacheControl ?? (attachment ? "private, no-store" : "private, max-age=31536000, immutable"),
     },
   });
 }

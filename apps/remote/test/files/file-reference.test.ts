@@ -61,6 +61,24 @@ describe("FileReferenceService", () => {
     expect((await service.preview(first!.fileReferenceId)).content).toEqual({ kind: "static_html", html: "<h1>第一版</h1>", csp: expect.any(String) });
     expect((await service.preview(second!.fileReferenceId)).content).toEqual({ kind: "static_html", html: "<h1>第二版</h1>", csp: expect.any(String) });
   });
+
+  it("PPTX Session 文件允许通过受控内容端点交给浏览器渲染", async () => {
+    const { service, workspaces } = await setup();
+    const sandbox = new FileSandbox(join(workspaces, "session-pptx"));
+    await sandbox.initialize();
+    await sandbox.writeBytes("deck.pptx", new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
+    const [file] = await service.createFromPaths("local-admin", "session-pptx", "turn-pptx", ["deck.pptx"]);
+
+    expect(file).toMatchObject({
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      previewKind: "pptx",
+    });
+    expect((await service.preview(file!.fileReferenceId)).content).toEqual({
+      kind: "pptx",
+      contentUrl: `/api/control/v1/files/${file!.fileReferenceId}/content`,
+    });
+    expect((await service.content(file!.fileReferenceId)).bytes).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  });
 });
 
 async function setup() {

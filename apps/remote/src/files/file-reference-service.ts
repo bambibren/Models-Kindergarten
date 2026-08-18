@@ -72,7 +72,7 @@ export class FileReferenceService {
     if (file.previewKind === "static_html") {
       return { file, content: { kind: "static_html", html: content.toString("utf8"), csp: INTERACTIVE_HTML_CSP } };
     }
-    if (file.previewKind === "image" || file.previewKind === "pdf") {
+    if (file.previewKind === "image" || file.previewKind === "pdf" || file.previewKind === "pptx") {
       return { file, content: { kind: file.previewKind, contentUrl: `/api/control/v1/files/${file.fileReferenceId}/content` } };
     }
     return { file, content: { kind: "unsupported" } };
@@ -80,7 +80,7 @@ export class FileReferenceService {
 
   async content(id: string, ownerId = "local-admin"): Promise<{ file: FileReference; bytes: Buffer }> {
     const file = await this.get(id, ownerId);
-    if (file.previewKind !== "image" && file.previewKind !== "pdf") {
+    if (file.previewKind !== "image" && file.previewKind !== "pdf" && file.previewKind !== "pptx") {
       throw new ApiProblemError(409, "FILE_PREVIEW_NOT_SUPPORTED", "该文件不能通过二进制内容端点预览", false);
     }
     return { file, bytes: await this.readVerified(file) };
@@ -115,5 +115,11 @@ function fileFormat(path: string): Pick<FileReference, "mimeType" | "previewKind
     return { mimeType, previewKind: "image" };
   }
   if (extension === ".pdf") return { mimeType: "application/pdf", previewKind: "pdf" };
+  if (extension === ".pptx") {
+    return {
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      previewKind: "pptx",
+    };
+  }
   return { mimeType: "application/octet-stream", previewKind: "unsupported" };
 }

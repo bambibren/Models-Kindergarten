@@ -18,6 +18,7 @@ import type {
   ConcreteReasoningProfile,
   ArtifactListResponse,
   ArtifactPreviewResponse,
+  PptxPlaybackResponse,
   ArtifactRecord,
 } from "@kindergarten/contracts";
 
@@ -109,6 +110,7 @@ export const controlApi = {
   artifacts: (query = "", state: "active" | "archived" | "all" = "active") => get<ArtifactListResponse>(`/artifacts?state=${state}&query=${encodeURIComponent(query)}`),
   artifact: (id: string) => get<ArtifactRecord>(`/artifacts/${encodeURIComponent(id)}`),
   artifactPreview: (id: string) => get<ArtifactPreviewResponse>(`/artifacts/${encodeURIComponent(id)}/preview`),
+  artifactPptxPlayback: (id: string) => get<PptxPlaybackResponse>(`/artifacts/${encodeURIComponent(id)}/pptx-playback`),
   artifactContentUrl: (id: string) => `${CONTROL_URL}/artifacts/${encodeURIComponent(id)}/content`,
   setArtifactState: (id: string, action: "archive" | "restore") => request<ArtifactRecord>(`/artifacts/${encodeURIComponent(id)}/${action}`, "POST", {}),
 };

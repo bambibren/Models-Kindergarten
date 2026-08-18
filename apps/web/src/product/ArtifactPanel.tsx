@@ -3,6 +3,7 @@ import { FileText, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect } from "react";
 import { controlApi } from "../api/control-api.js";
 import { HtmlPreviewFrame } from "../components/artifacts/HtmlPreviewFrame.js";
+import { PptxPreview } from "../components/artifacts/PptxPreview.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { useResource } from "./use-resource.js";
 
@@ -38,5 +39,6 @@ function Preview({ value }: { value: Awaited<ReturnType<typeof controlApi.filePr
   if (value.content.kind === "markdown" || value.content.kind === "text") return <pre className="artifact-text">{value.content.kind === "markdown" ? value.content.markdown : value.content.text}</pre>;
   if (value.content.kind === "image") return <img alt={value.file.displayName} src={controlApi.contentUrl(value.file.fileReferenceId)} />;
   if (value.content.kind === "pdf") return <iframe src={controlApi.contentUrl(value.file.fileReferenceId)} title={value.file.displayName} />;
+  if (value.content.kind === "pptx") return <PptxPreview contentUrl={controlApi.contentUrl(value.file.fileReferenceId)} title={value.file.displayName} />;
   return <div className="product-state"><FileText size={20} /><strong>暂不支持安全预览</strong><p>该类型未开放下载端点；请让 Agent 转换为 Markdown、静态 HTML、图片或 PDF。</p></div>;
 }

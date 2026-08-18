@@ -1,10 +1,10 @@
 # MK 产物、Mention 与 HTML/PPTX 链路升级（含 MCP 能力预研）— TRD
 
-> 版本：0.8（实施记录）
+> 版本：1.0（实施记录）
 > 日期：2026-08-18
 > 状态：Artifact、Mention、HTML 主链已完成验收；PPTX 技术链路已实现，等待外部 Skill + 大聪明配置化验收
 > 关联讨论：`01a00dc2-58df-7122-b0ac-981216ae1ba1`、`01a00e17-dbbc-7f23-8647-5d56edb8b982`
-> 实施边界：PPTX 只增加通用构建与普通 Artifact 发布能力，不内置 Skill、不创建默认 PPT Agent、不增加专用 Browser 预览。
+> 实施边界：PPTX 增加通用构建、普通 Artifact 发布、浏览器静态预览和按需动画播放能力；不内置 Skill、不创建默认 PPT Agent。
 
 ---
 
@@ -23,6 +23,7 @@
 - 跑通 HTML/CSS/JavaScript/图片/字体等 Bundle 资源的生成、发布和隔离预览，JavaScript 动效可运行。
 - 构建 HTML 时不增加单独的“构建并发布”确认框。
 - 支持 Agent 配置受控 PPTX 构建能力，将当前 Workspace 中的 PptxGenJS 源码生成标准 `.pptx`，再由通用 Artifact 显式发布。
+- 支持在 Session 文件面板直接静态预览 `.pptx`；已发布 Artifact 详情可按需使用本机 ONLYOFFICE 动画播放，并保留原文件下载。
 - 所有新增协议行为都有测试，不破坏 ACP、Session、ToolRuntime 和 FileSandbox 既有不变量。
 
 ### 1.2 并行验证结果
@@ -32,7 +33,7 @@
 
 ### 1.3 非目标
 
-- 不实现 PPTX 专用 Browser 预览，不创建或内置 PPT Agent。
+- 不创建或内置 PPT Agent；不为预览在服务端主动转换 PDF、逐页图片或检查报告。
 - 不强制一次 PPT 任务只能产生一个 Artifact，也不拦截用户或 Skill 生成其他文件。
 - PPTX 构建能力只生成调用方指定的 `.pptx`，不主动生成附属文件；这不是“禁止任务出现其他文件”的运行时规则。
 - Mention 既有图片时不强制禁止生成新图片；“优先复用”是提示词和验收期望，不是拦截器。
@@ -55,7 +56,7 @@
 “PPT 最终只发布一个 `.pptx`”只作为典型目标场景，不作为程序级排他规则：
 
 - PPTX 技术链路生成指定 `.pptx`，并复用普通文件 Artifact 成为可下载产物。
-- 不新增 PPTX Artifact 类型、Artifact Group 或专用预览模型。
+- 不新增 PPTX 持久化 Artifact 类型或 Artifact Group；普通文件 Artifact 通过预览响应声明 `pptx` 展示方式。
 - 不因为当前 Turn 的目标是 PPT 就拒绝其他文件、删除其他 Artifact，或阻止模型生成新的图片。
 - 如果用户、外部 Skill 或普通 Artifact 发布流程明确产生其他文件，通用 Artifact 能力仍可处理；是否发布由显式调用决定。
 
@@ -199,13 +200,13 @@ flowchart LR
 | ArtifactService | 首次发布、同 ID 覆盖、服务端 vN、回滚、Mention 解析、Blob 物化、预览、归档/恢复 | `apps/remote/src/artifacts/artifact-service.ts` |
 | ArtifactToolProvider | 四个 Artifact Tool，统一经过 ToolRuntime | `apps/remote/src/artifacts/artifact-tool-provider.ts` |
 | Artifact routes | 列表、详情、内容、Bundle 资源、归档/恢复 | `apps/remote/src/artifacts/artifact-routes.ts` |
-| Artifact UI | 我的 Artifacts、详情、下载、HTML Preview | `apps/web/src/product/ArtifactDetailPage.tsx`、`PublishedArtifactPanel.tsx` |
+| Artifact UI | 我的 Artifacts、详情、下载、HTML/PPTX Preview、PPTX 动画播放 | `apps/web/src/product/ArtifactDetailPage.tsx`、`PublishedArtifactPanel.tsx`、`components/artifacts/PptxPreview.tsx`、`OnlyOfficePptxPlayer.tsx` |
 | Mention UI | `@` 搜索浮层与同容器 Tag 标签 | `apps/web/src/components/composer/` |
 | PPTX Build Service | 受控执行 PptxGenJS、限制资源、检查基础 OOXML | `apps/remote/src/pptx/pptx-build-service.ts` |
 | PPTX Tool Provider | Agent 配置、permission、ToolRuntime 与能力快照 | `apps/remote/src/pptx/pptx-tool-provider.ts` |
 | PPTX Inspector | 在内存读取 ZIP central directory 并统计幻灯片 | `apps/remote/src/pptx/pptx-inspector.ts` |
 
-不增加 PPTX 持久化领域模型、专用预览模块或内置业务 Skill。
+不增加 PPTX 持久化领域模型、服务端转换链路或内置业务 Skill；浏览器按需加载渲染组件，直接读取原始 `.pptx` 字节。
 
 ---
 
@@ -701,7 +702,7 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 
 主线技术开发项已完成；后续工作保持独立，不反向扩大范围：
 
-- PPTX 后续只进行外部 Skill + 大聪明人工验收和云端 Linux 镜像验证，不把 Skill 或默认 Agent 写入项目。
+- PPTX 后续进行外部 Skill + 大聪明人工验收和云端 Linux 镜像验证，不把 Skill 或默认 Agent 写入项目。
 - MCP 动态 Resource 临时授权、云端远程鉴权/VPC allowlist 和稳定 URL Import 分别设计，不内置 Server。
 - Brave 真实效果待具备 API Key 和云端出站网络后重测，不把当前 Schema/失败路径验证写成搜索质量通过。
 
@@ -719,3 +720,5 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 | 0.6 | 2026-08-18 | 纠正 GSAP CDN 误判；改用官方 Client 绕过 MK 独立验证 MCP Server，补充动态 Resource、Bearer 网关和私网直连通过证据；MK 限制只保留为后续开发计划 | Codex |
 | 0.7 | 2026-08-18 | Artifact 发布统一为首次/覆盖与新 vN 两个工具，增加显式回滚、每 ID 最近三份修订和无引用 Blob 清理；命令工具集中短路并从模型、提示词和 Agent 配置隐藏 | Codex |
 | 0.8 | 2026-08-18 | 落地受控 PPTX 构建、OOXML 基础检查、Agent 配置与普通 Artifact 联调；不生成附属文件，不内置 Skill 或默认 PPT Agent | Codex |
+| 0.9 | 2026-08-18 | 增加普通文件 Artifact 与 Session 文件的 PPTX 浏览器静态预览；渲染器按需加载，直接读取原始字节，不新增服务端转换产物 | Codex |
+| 1.0 | 2026-08-18 | 已发布 PPTX 增加按需 ONLYOFFICE 动画播放、短时只读取件票据、全屏与静态预览返回；真实 9 页 Artifact 联调通过 | Codex |

@@ -207,6 +207,20 @@ describe("ArtifactService", () => {
     });
     expect((await fixture.service.download(artifact.artifactId, "local-admin")).fileName).toBe("poster.png");
   });
+
+  it("PPTX Artifact 返回浏览器渲染所需的原始内容地址", async () => {
+    const fixture = await setup();
+    const sandbox = await workspace(fixture.workspaces, "session-pptx");
+    await sandbox.writeBytes("deck.pptx", new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
+    const artifact = await fixture.service.publishFile(input("session-pptx", "turn-pptx", "op-pptx", "deck.pptx"));
+    const preview = await fixture.service.preview(artifact.artifactId, "local-admin", "https://preview.example.test/api/control/v1");
+
+    expect(artifact.primary.mimeType).toBe("application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    expect(preview.content).toEqual({
+      kind: "pptx",
+      contentUrl: `https://preview.example.test/api/control/v1/artifacts/${artifact.artifactId}/raw`,
+    });
+  });
 });
 
 function input(sessionId: string, turnId: string, operationId: string, path: string) {

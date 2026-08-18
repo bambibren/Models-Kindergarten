@@ -2,6 +2,7 @@ import { Download, FileCode2, FileText, RefreshCw, X } from "lucide-react";
 import { useCallback } from "react";
 import { controlApi } from "../api/control-api.js";
 import { HtmlPreviewFrame } from "../components/artifacts/HtmlPreviewFrame.js";
+import { PptxPreview } from "../components/artifacts/PptxPreview.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { useResource } from "./use-resource.js";
 
@@ -27,5 +28,10 @@ export function PublishedPreview({ value }: { value: Awaited<ReturnType<typeof c
   if (value.content.kind === "markdown" || value.content.kind === "text") return <pre className="artifact-text">{value.content.kind === "markdown" ? value.content.markdown : value.content.text}</pre>;
   if (value.content.kind === "image") return <img alt={value.artifact.displayName} src={value.content.contentUrl} />;
   if (value.content.kind === "pdf") return <iframe src={value.content.contentUrl} title={value.artifact.displayName} />;
+  if (value.content.kind === "pptx") return <PptxPreview
+    contentUrl={value.content.contentUrl}
+    title={value.artifact.displayName}
+    loadPlayback={() => controlApi.artifactPptxPlayback(value.artifact.artifactId)}
+  />;
   return <div className="product-state"><FileText size={20} /><strong>该格式仅支持下载</strong><a href={value.content.contentUrl}>下载 Artifact</a></div>;
 }

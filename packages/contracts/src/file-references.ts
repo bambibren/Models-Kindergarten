@@ -1,4 +1,4 @@
-export type FilePreviewKind = "markdown" | "static_html" | "text" | "image" | "pdf" | "unsupported";
+export type FilePreviewKind = "markdown" | "static_html" | "text" | "image" | "pdf" | "pptx" | "unsupported";
 
 export interface FileReference {
   schemaVersion: 1;
@@ -23,6 +23,7 @@ export type FilePreviewResponse = {
     | { kind: "text"; text: string }
     | { kind: "image"; contentUrl: string }
     | { kind: "pdf"; contentUrl: string }
+    | { kind: "pptx"; contentUrl: string }
     | { kind: "unsupported" };
 };
 
