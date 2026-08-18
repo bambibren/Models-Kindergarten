@@ -12,6 +12,7 @@ import type {
   SkillBinding,
   TurnTokenUsage,
   ConcreteReasoningProfile,
+  ArtifactMention,
   ResolvedReasoningSnapshot,
   TurnState,
 } from "@kindergarten/contracts";
@@ -76,6 +77,7 @@ export interface SessionMessageEntry {
   turnId: string;
   messageId: string;
   createdAt: string;
+  artifactMentions?: ArtifactMention[];
 }
 
 export interface SessionThoughtEntry {

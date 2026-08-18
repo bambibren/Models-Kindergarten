@@ -50,10 +50,17 @@ function split(path: string): string[] {
 }
 
 function matchSegments(pattern: string[], path: string[]): Record<string, string> | undefined {
-  if (pattern.length !== path.length) return undefined;
+  const wildcardIndex = pattern.findIndex((item) => item.startsWith("*"));
+  if (wildcardIndex >= 0 && wildcardIndex !== pattern.length - 1) return undefined;
+  if (wildcardIndex < 0 && pattern.length !== path.length) return undefined;
+  if (wildcardIndex >= 0 && path.length < wildcardIndex) return undefined;
   const params: Record<string, string> = {};
   for (let index = 0; index < pattern.length; index += 1) {
     const expected = pattern[index] ?? "";
+    if (expected.startsWith("*")) {
+      params[expected.slice(1)] = path.slice(index).join("/");
+      return params;
+    }
     const actual = path[index] ?? "";
     if (expected.startsWith(":")) params[expected.slice(1)] = actual;
     else if (expected !== actual) return undefined;

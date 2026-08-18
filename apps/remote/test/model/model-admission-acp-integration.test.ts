@@ -157,7 +157,6 @@ describe("model admission -> ACP reasoning integration", () => {
         experimentBinding: async () => undefined,
       }),
       undefined,
-      undefined,
       models,
     ).createApp();
     const client = acp.client({ name: "admission-acp-test" }).connect(app);

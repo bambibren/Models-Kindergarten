@@ -41,4 +41,24 @@ describe("SessionLaunchService reasoning override", () => {
     expect(Date.parse(created.expiresAt) - Date.parse(created.createdAt))
       .toBe(PRODUCT_CONFIG.sessionLaunch.draftTtlMs);
   });
+
+  it("在主页启动草稿中只保存 Artifact 的稳定 ID", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-session-launch-mention-"));
+    dirs.push(dir);
+    const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
+      builtinToolIds: () => [], readySkillInstallationIds: () => [], mcpCapabilities: () => [],
+    });
+    const agent = await agents.create({
+      name: "Agent", systemPrompt: "test", builtinTools: [], skillInstallationIds: [], mcps: [],
+      historyPolicy: { mode: "none" }, memoryPolicy: { mode: "off" },
+    });
+    const service = new SessionLaunchService(join(dir, "launches.json"), agents, new ModelStudentCatalog(new FixtureProvider(), "ready"));
+    const base = { modelStudentId: "fixture-student", agentId: agent.agentId, promptText: "使用已有海报" };
+
+    const created = await service.create({ ...base, artifactMentions: [{ artifactId: "artifact_12345678" }] });
+    expect(created.artifactMentions).toEqual([{ artifactId: "artifact_12345678" }]);
+    expect((await service.get(created.launchId)).artifactMentions).toEqual([{ artifactId: "artifact_12345678" }]);
+    await expect(service.create({ ...base, artifactMentions: [{ displayName: "伪造展示字段" }] }))
+      .rejects.toThrow("artifactMentions 格式无效");
+  });
 });

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import type * as acp from "@agentclientprotocol/sdk";
-import type { ModelReasoningCapability, ReasoningProfile, TurnState } from "@kindergarten/contracts";
+import type { ArtifactMentionInput, ModelReasoningCapability, ReasoningProfile, TurnState } from "@kindergarten/contracts";
 import { AcpWebClient } from "./acp/acp-client.js";
 import { ChatViewport } from "./components/chat/ChatViewport.js";
 import { Composer } from "./components/composer/Composer.js";
@@ -19,12 +19,11 @@ import {
 } from "./prompt-turn/prompt-turn-types.js";
 import { useAppStore } from "./store/app-store.js";
 import { controlApi } from "./api/control-api.js";
-import { ArtifactPanel } from "./product/ArtifactPanel.js";
+import { PublishedArtifactPanel } from "./product/PublishedArtifactPanel.js";
 import { projectReasoningConfig } from "./reasoning/reasoning-config.js";
 import { isMissingAgentError, projectSessionAvailability, type SessionAgentAvailability } from "./session/session-identity.js";
 import { sessionResumeMeta } from "./chat/chat-resume.js";
 import { clampArtifactWidth, defaultArtifactWidth } from "./session/artifact-split-pane.js";
-import { useArtifactPreview } from "./session/use-artifact-preview.js";
 
 const ACP_URL = import.meta.env.VITE_ACP_URL ?? "ws://127.0.0.1:7331/acp";
 const REMOTE_CWD = "/workspace";
@@ -40,12 +39,7 @@ export default function App() {
   const [identity, setIdentity] = useState<SessionIdentity>({ agentName: "Agent", modelName: "ModelStudent", agentAvailability: "loading" });
   const [configOptions, setConfigOptions] = useState<acp.SessionConfigOption[]>([]);
   const [reasoningBusy, setReasoningBusy] = useState(false);
-  const {
-    artifact,
-    open: openArtifact,
-    close: closeArtifact,
-    fileLoaded: artifactFileLoaded,
-  } = useArtifactPreview(chat.sessionId, chat.historyChatEntries, chat.streamingChatEntries);
+  const [publishedArtifactId, setPublishedArtifactId] = useState<string | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(520);
   const [narrowView, setNarrowView] = useState<"artifact" | "chat">("artifact");
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -62,12 +56,12 @@ export default function App() {
         artifactWidthRef.current = width;
         setArtifactWidth(width);
       }
-      openArtifact(id);
+      setPublishedArtifactId(id);
       setNarrowView("artifact");
     };
-    window.addEventListener("mk-open-file-reference", open);
-    return () => window.removeEventListener("mk-open-file-reference", open);
-  }, [openArtifact]);
+    window.addEventListener("mk-open-artifact", open);
+    return () => window.removeEventListener("mk-open-artifact", open);
+  }, []);
 
   useEffect(() => {
     const stop = (event: PointerEvent) => {
@@ -141,6 +135,7 @@ export default function App() {
               sessionId: value.sessionId,
               turn: value.turn,
               restoredText: restoredTurnPrompt(store().chat, value.turn.turnId),
+              restoredArtifactMentions: restoredTurnArtifactMentions(store().chat, value.turn.turnId),
             });
             const after = store().promptTurn;
             console.warn("[turn-machine] remote transition", {
@@ -243,7 +238,7 @@ export default function App() {
               const configured = await client.setConfigOption(created.sessionId, configId, launch.reasoningProfileOverride);
               setConfigOptions(configured.configOptions);
             }
-            await send(launch.promptText);
+            await send(launch.promptText, launch.artifactMentions ?? []);
           } else {
             const first = result.sessions[0];
             if (first) {
@@ -407,15 +402,15 @@ export default function App() {
     }
   }
 
-  async function send(text: string): Promise<void> {
+  async function send(text: string, artifactMentions: ArtifactMentionInput[] = [], retryOperationId?: string): Promise<boolean> {
     const client = clientRef.current;
     const state = useAppStore.getState();
     const sessionId = state.chat.sessionId;
-    if (!client || !sessionId || isPromptTurnActive(state.promptTurn)) return;
+    if (!client || !sessionId || isPromptTurnActive(state.promptTurn)) return false;
 
-    const operationId = crypto.randomUUID();
+    const operationId = retryOperationId ?? crypto.randomUUID();
     const turnId = crypto.randomUUID();
-    const request = { operationId, sessionId, turnId, text };
+    const request = { operationId, sessionId, turnId, text, ...(artifactMentions.length ? { artifactMentions } : {}) };
     state.dispatchChat({
       type: "stream/start",
       operationId,
@@ -426,7 +421,7 @@ export default function App() {
     state.dispatchPromptTurn({ type: "turn/start", request });
 
     try {
-      const response = await client.prompt(sessionId, text, { turnId });
+      const response = await client.prompt(sessionId, text, { turnId, operationId, ...(artifactMentions.length ? { artifactMentions } : {}) });
       const store = useAppStore.getState();
       store.dispatchChat({ type: "stream/commit", operationId });
       if (response.stopReason === "cancelled") {
@@ -441,6 +436,7 @@ export default function App() {
       void refreshSessions(client).catch((cause: unknown) => {
         console.error("刷新 Session 列表失败", cause);
       });
+      return true;
     } catch (cause) {
       const store = useAppStore.getState();
       const turn = store.promptTurn;
@@ -448,7 +444,7 @@ export default function App() {
         (store.connection.phase === "disconnected" || clientRef.current !== client) &&
         isPromptTurnActive(turn) &&
         turn.request.operationId === operationId
-      ) return;
+      ) return false;
       store.dispatchChat({ type: "stream/commit", operationId });
       store.dispatchPromptTurn({
         type: "turn/fail",
@@ -460,6 +456,7 @@ export default function App() {
           message: errorMessage(cause),
         },
       });
+      return false;
     }
   }
 
@@ -490,7 +487,9 @@ export default function App() {
       return;
     }
     const state = useAppStore.getState().promptTurn;
-    if (state.status === "failed") void send(state.request.text);
+    if (state.status === "failed" || state.status === "interrupted") {
+      void send(state.request.text, state.request.artifactMentions ?? [], state.request.operationId);
+    }
   }
 
   const active = isPromptTurnActive(promptTurn);
@@ -508,6 +507,7 @@ export default function App() {
   );
   const reasoning = projectReasoningConfig(configOptions, identity.reasoningCapability);
   const workspaceStyle = { "--artifact-width": `${artifactWidth}px` } as CSSProperties;
+  const hasArtifact = Boolean(publishedArtifactId);
 
   function startArtifactResize(event: ReactPointerEvent<HTMLDivElement>): void {
     const workspace = workspaceRef.current;
@@ -531,18 +531,14 @@ export default function App() {
       onCreate={() => void createSession()}
       onSelect={(session) => void selectSession(session)}
     />
-    <section className={`session-main ${artifact ? "has-artifact" : ""}`}>
-      {artifact && <div aria-label="窄屏视图" className="session-narrow-switch">
+    <section className={`session-main ${hasArtifact ? "has-artifact" : ""}`}>
+      {hasArtifact && <div aria-label="窄屏视图" className="session-narrow-switch">
         <button className={narrowView === "artifact" ? "active" : ""} type="button" onClick={() => setNarrowView("artifact")}>产物</button>
         <button className={narrowView === "chat" ? "active" : ""} type="button" onClick={() => setNarrowView("chat")}>聊天</button>
       </div>}
       <div className={`session-workspace narrow-${narrowView}`} ref={workspaceRef} style={workspaceStyle}>
-        {artifact && <ArtifactPanel
-          fileReferenceId={artifact.fileReferenceId}
-          onClose={closeArtifact}
-          onFileLoaded={artifactFileLoaded}
-        />}
-        {artifact && <div
+        {publishedArtifactId && <PublishedArtifactPanel artifactId={publishedArtifactId} onClose={() => setPublishedArtifactId(null)} />}
+        {hasArtifact && <div
           aria-label="调整产物与聊天宽度"
           aria-orientation="vertical"
           className="artifact-resizer"
@@ -691,4 +687,15 @@ function restoredTurnPrompt(chat: ReturnType<typeof useAppStore.getState>["chat"
     }
   }
   return "";
+}
+
+function restoredTurnArtifactMentions(chat: ReturnType<typeof useAppStore.getState>["chat"], turnId: string): ArtifactMentionInput[] {
+  for (const collection of [chat.streamingChatEntries, chat.historyChatEntries]) {
+    for (let index = collection.order.length - 1; index >= 0; index -= 1) {
+      const entry = collection.byId[collection.order[index]!];
+      if (entry?.type !== "message" || entry.role !== "user" || entry.turnId !== turnId) continue;
+      return (entry.artifactMentions ?? []).map((mention) => ({ artifactId: mention.artifactId }));
+    }
+  }
+  return [];
 }

@@ -98,7 +98,7 @@ export class ContextAssembler {
         (entry.type === "message" && hiddenMessageIds.has(entryKey(entry.turnId, entry.messageId)))
       ) continue;
       if (entry.type === "message") {
-        const message = { role: entry.role, content: entry.text } satisfies ModelMessage;
+        const message = { role: entry.role, content: sessionMessageText(entry) } satisfies ModelMessage;
         history.push({ message, observation: observation(message, "session_history", entry.messageId) });
         continue;
       }
@@ -205,6 +205,16 @@ export class ContextAssembler {
       ])],
     };
   }
+}
+
+function sessionMessageText(entry: Extract<SessionEntry, { type: "message" }>): string {
+  if (!entry.artifactMentions?.length) return entry.text;
+  return [
+    entry.text,
+    "<artifact_mentions>",
+    JSON.stringify(entry.artifactMentions),
+    "</artifact_mentions>",
+  ].join("\n");
 }
 
 export class SkillCatalogContextSource implements ContextSource {

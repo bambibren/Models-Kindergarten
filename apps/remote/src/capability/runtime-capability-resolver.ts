@@ -20,6 +20,8 @@ import { ToolRuntime } from "../tools/tool-runtime.js";
 import type { TurnScope } from "../runtime/turn-scope.js";
 import type { SkillInstallationService } from "../skills/skill-installation-service.js";
 import { EnsureAgentSkillsToolProvider } from "../skills/ensure-agent-skills-tool.js";
+import type { ArtifactService } from "../artifacts/artifact-service.js";
+import { ArtifactToolProvider } from "../artifacts/artifact-tool-provider.js";
 
 export interface ResolvedRuntimeCapabilities {
   scope: TurnScope;
@@ -46,6 +48,7 @@ export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort 
     private readonly mcp: McpClientManager,
     private readonly workspacesRoot: string,
     private readonly skillInstallations?: SkillInstallationService,
+    private readonly artifacts?: ArtifactService,
   ) {
     this.models = modelOrCatalog instanceof ModelStudentCatalog
       ? modelOrCatalog
@@ -97,6 +100,7 @@ export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort 
       : installationIds;
     const providers = [
       new ToolRegistry(sandbox, undefined, undefined, builtinBindings),
+      ...(this.artifacts ? [new ArtifactToolProvider(this.artifacts, scope, builtinBindings)] : []),
       new McpToolProvider(this.mcp, agent.mcps),
       new SkillToolProvider(this.skills, skillNames),
       ...(this.skillInstallations && currentUserMessage

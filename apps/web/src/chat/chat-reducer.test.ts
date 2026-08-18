@@ -4,6 +4,26 @@ import { describe, expect, it } from "vitest";
 import { chatReducer, emptyChat } from "./chat-reducer.js";
 
 describe("chatReducer", () => {
+  it("把 ACP MessageMeta 中的 Artifact Mention 投影到用户消息", () => {
+    let state = chatReducer(emptyChat, { type: "session/open", sessionId: "session-a" });
+    state = chatReducer(state, { type: "stream/start", operationId: "op-a", source: "prompt", turnId: "turn-a", optimisticContent: [{ type: "text", text: "使用它" }] });
+    state = chatReducer(state, { type: "acp/update", value: {
+      sessionId: "session-a",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "message-a",
+        content: { type: "text", text: "使用它" },
+        _meta: makeAcpMeta({
+          schemaVersion: 1, turnId: "turn-a", chunkIndex: 0, final: true,
+          artifactMentions: [{ artifactId: "artifact_12345678", uri: "artifact://artifact_12345678", displayName: "海报", kind: "file", mimeType: "image/png", byteLength: 10 }],
+        }),
+      },
+    } });
+    expect(state.streamingChatEntries.byId["message:message-a"]).toMatchObject({
+      type: "message",
+      artifactMentions: [{ artifactId: "artifact_12345678", displayName: "海报" }],
+    });
+  });
   it("在 PromptResponse 前只更新 streamingChatEntries，结束后整体提交", () => {
     let state = openStream("prompt", [{ type: "text", text: "你好" }]);
 

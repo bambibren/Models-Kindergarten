@@ -72,16 +72,17 @@ describe("V1.6 Agent Runtime", () => {
     expect(JSON.stringify(observer.contextSummaries[0])).not.toContain("重复写入");
   });
 
-  it("权限拒绝后相同命令再次调用仍独立请求授权", async () => {
+  it("权限拒绝后相同写入再次调用仍独立请求授权", async () => {
     const sandbox = await makeSandbox();
-    const provider = new RepeatingProvider("run_command", {
-      command: "printf forbidden > denied.txt",
+    const provider = new RepeatingProvider("write_file", {
+      path: "denied.txt",
+      content: "forbidden",
     });
     const observer = new TestObserver(false);
     const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
 
     const result = await runtime.run(
-      { text: "运行命令", sessionEntries: [] },
+      { text: "写入文件", sessionEntries: [] },
       observer,
       new AbortController().signal,
     );
@@ -133,7 +134,6 @@ describe("V1.6 Agent Runtime", () => {
       "list_files",
       "read_file",
       "write_file",
-      "run_command",
       "web_search",
       "web_fetch",
       "ask_user",
@@ -141,7 +141,7 @@ describe("V1.6 Agent Runtime", () => {
     expect(names).not.toContain("update_plan");
   });
 
-  it("写文件权限原样遵守 Agent 配置，终端仍保持强制询问", async () => {
+  it("写文件权限原样遵守 Agent 配置，命令工具即使绑定也不暴露", async () => {
     const sandbox = await makeSandbox();
     const write = (permission: "allow" | "ask" | "deny") => new ToolRegistry(
       sandbox,
@@ -160,11 +160,11 @@ describe("V1.6 Agent Runtime", () => {
         arguments: { path: "index.html", content: "ok" },
       }, "fallback").permission).toBe(permission);
     }
-    expect(write("ask").prepare({
+    expect(() => write("ask").prepare({
       id: "command",
       name: "run_command",
       arguments: { command: "pwd" },
-    }, "fallback").permission).toBe("always_ask");
+    }, "fallback")).toThrow("当前 Agent 未启用 Built-in Tool: run_command");
   });
 
   it("普通参数错误展开真实 Schema，不猜测或改写模型参数", async () => {
@@ -213,7 +213,7 @@ describe("V1.6 Agent Runtime", () => {
     expect(first.dedupeKey).toBe(second.dedupeKey);
   });
 
-  it.runIf(process.platform === "darwin")("终端允许沙箱内写入并拒绝沙箱外写入", async () => {
+  it.runIf(process.platform === "darwin")("保留的终端沙箱实现仍限制在 Workspace 内", async () => {
     const sandbox = await makeSandbox();
     const processSandbox = new ProcessSandbox(sandbox);
     const signal = new AbortController().signal;
@@ -222,14 +222,6 @@ describe("V1.6 Agent Runtime", () => {
     expect(inside.changedFiles).toEqual(["inside.txt"]);
     expect(inside.deletedFiles).toEqual([]);
     expect(await readFile(join(sandbox.root, "inside.txt"), "utf8")).toBe("ok");
-
-    const registry = new ToolRegistry(sandbox, processSandbox);
-    const update = await registry.execute(registry.prepare({
-      id: "command-update",
-      name: "run_command",
-      arguments: { command: "printf changed > inside.txt" },
-    }, "fallback"), { signal, askUser: async () => "" });
-    expect(update.effects?.fileRelativePaths).toEqual(["inside.txt"]);
 
     const outside = await processSandbox.run(
       `printf no > /tmp/models-kindergarten-outside-${Date.now()}.txt`,
@@ -289,6 +281,16 @@ describe("V1.6 Agent Runtime", () => {
     expect(provider.lastInput?.systemPrompt).toContain("工具调用");
     expect(provider.lastInput?.systemPrompt).toContain("非空的最终正文");
     expect(provider.lastInput?.systemPrompt).toContain("thinking");
+    expect(provider.lastInput?.systemPrompt).toContain("【文件产物交付契约】");
+    expect(provider.lastInput?.systemPrompt).toContain("写入 Workspace 只是中间步骤");
+    expect(provider.lastInput?.systemPrompt).toContain("只有成功发布得到的 Artifact 才能预览");
+    expect(provider.lastInput?.systemPrompt).toContain("不得结束本轮");
+    expect(provider.lastInput?.systemPrompt).toContain("同一会话中继续修改同一个 Artifact");
+    expect(provider.lastInput?.systemPrompt).toContain("跨会话修改");
+    expect(provider.lastInput?.systemPrompt).toContain("服务端自动创建新 ID 和下一个 vN");
+    expect(provider.lastInput?.systemPrompt).toContain("只有用户明确要求回滚");
+    expect(provider.lastInput?.systemPrompt).not.toContain("run_command");
+    expect(provider.lastInput?.systemPrompt).not.toContain("publish_html_bundle");
     expect(provider.lastInput?.systemPrompt).toContain("【Skill 使用协议】");
     expect(provider.lastInput?.systemPrompt).toContain("当前 JSON Schema");
   });

@@ -5,12 +5,13 @@ import {
   type TokenUsageComponent,
   type TokenUsageNotification,
 } from "@kindergarten/contracts";
+import type { ArtifactMention } from "@kindergarten/contracts";
 import type { ChatEntry, ChatState, EntryCollection, MessageEntry, StreamSource, ThoughtEntry, ToolCallEntry } from "./chat-types.js";
 import { emptyEntries } from "./chat-types.js";
 
 export type ChatAction =
   | { type: "session/open"; sessionId: string }
-  | { type: "stream/start"; operationId: string; source: StreamSource; turnId: string; optimisticContent?: ContentBlock[] }
+  | { type: "stream/start"; operationId: string; source: StreamSource; turnId: string; optimisticContent?: ContentBlock[]; optimisticArtifactMentions?: ArtifactMention[] }
   | { type: "stream/load-complete"; operationId: string; activeTurn?: { operationId: string; turnId: string } }
   | { type: "stream/commit"; operationId: string }
   | { type: "context/summary"; value: ContextSummaryNotification }
@@ -31,7 +32,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   }
   if (action.type === "stream/start") {
     const optimistic = action.optimisticContent
-      ? optimisticMessage(action.operationId, action.turnId, action.optimisticContent)
+      ? optimisticMessage(action.operationId, action.turnId, action.optimisticContent, action.optimisticArtifactMentions)
       : undefined;
     return {
       ...state,
@@ -129,6 +130,7 @@ function reduceMessage(state: ChatState, role: MessageEntry["role"], messageId: 
         ...optimistic, id, messageId,
         content: textOf([content]) === textOf(optimistic.content) ? optimistic.content : [content],
         status: meta.final ? "done" : "streaming",
+        ...(meta.artifactMentions ? { artifactMentions: meta.artifactMentions } : {}),
       });
       streaming = { ...streaming, optimisticUserEntryId: id };
       return { ...state, streamingChatEntries: collection, streaming };
@@ -140,12 +142,14 @@ function reduceMessage(state: ChatState, role: MessageEntry["role"], messageId: 
     collection = upsert(collection, {
       type: "message", id, messageId, turnId: meta.turnId, role,
       content: [content], status: meta.final ? "done" : "streaming",
+      ...(meta.artifactMentions ? { artifactMentions: meta.artifactMentions } : {}),
     });
   } else if (current.type === "message") {
     collection = upsert(collection, {
       ...current,
       content: appendContent(current.content, content),
       status: meta.final ? "done" : current.status,
+      ...(meta.artifactMentions ? { artifactMentions: meta.artifactMentions } : {}),
     });
   }
   return { ...state, streamingChatEntries: collection, streaming };
@@ -198,8 +202,8 @@ function patchTool(current: ToolCallEntry, update: ToolCall | ToolCallUpdate, cr
   };
 }
 
-function optimisticMessage(operationId: string, turnId: string, content: ContentBlock[]): MessageEntry {
-  return { type: "message", id: `optimistic:${operationId}`, messageId: null, turnId, role: "user", content, status: "done" };
+function optimisticMessage(operationId: string, turnId: string, content: ContentBlock[], artifactMentions?: ArtifactMention[]): MessageEntry {
+  return { type: "message", id: `optimistic:${operationId}`, messageId: null, turnId, role: "user", content, status: "done", ...(artifactMentions?.length ? { artifactMentions } : {}) };
 }
 
 function toolPlaceholder(turnId: string, toolCallId: string): ToolCallEntry {

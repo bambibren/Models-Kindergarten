@@ -7,6 +7,7 @@ import { AgentEditorPage } from "./product/AgentEditorPage.js";
 import { ContextLabPage } from "./product/ContextLabPage.js";
 import { McpPage } from "./product/McpPage.js";
 import { MePage } from "./product/MePage.js";
+import { ArtifactDetailPage } from "./product/ArtifactDetailPage.js";
 import { ModelAdmissionPage } from "./product/ModelAdmissionPage.js";
 import "./product/product.css";
 import "./styles.css";
@@ -42,6 +43,8 @@ function route() {
   if (/^\/sessions\/[^/]+$/.test(path)) return <App />;
   if (path === "/context-lab") return <ContextLabPage />;
   if (path === "/me") return <MePage />;
+  const artifact = path.match(/^\/artifacts\/([^/]+)$/)?.[1];
+  if (artifact) return <ArtifactDetailPage artifactId={decodeURIComponent(artifact)} />;
   if (path === "/models/new") return <ModelAdmissionPage />;
   if (path === "/agents/new") return <AgentEditorPage />;
   const agent = path.match(/^\/agents\/([^/]+)$/)?.[1];

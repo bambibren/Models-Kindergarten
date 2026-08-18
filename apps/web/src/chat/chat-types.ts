@@ -9,6 +9,7 @@ import type {
   ContextSummary,
   TokenUsageComponent,
   TurnTokenUsage,
+  ArtifactMention,
 } from "@kindergarten/contracts";
 
 export type EntryId = string;
@@ -27,6 +28,7 @@ export interface MessageEntry extends EntryBase {
   content: ContentBlock[];
   status: "streaming" | "done";
   tokenEstimate?: TokenUsageComponent;
+  artifactMentions?: ArtifactMention[];
 }
 
 export interface ThoughtEntry extends EntryBase {

@@ -1,5 +1,4 @@
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
-import { withRetry } from "../resilience/retry.js";
 import {
   modelEnvelope,
   type PreparedToolCall,
@@ -28,7 +27,7 @@ export interface ToolBatchResult {
 export class ToolCallLedger {
 }
 
-/** ToolRuntime 在模型已经提出调用后，统一执行权限、局部重试和 Handler。 */
+/** ToolRuntime 在模型已经提出调用后，统一执行权限与 Handler；产品层不做隐式自动重试。 */
 export class ToolRuntime {
   constructor(
     readonly registry: ToolRegistryPort,
@@ -98,15 +97,8 @@ export class ToolRuntime {
         askUser: (question, toolCallId) => observer.askUser(question, toolCallId),
         signal,
       });
-      const result = call.retry === "transient"
-        ? await withRetry(execute, {
-            maxAttempts: 3,
-            initialDelayMs: 250,
-            maxDelayMs: 2_000,
-            jitter: true,
-            shouldRetry: isTransientToolError,
-          }, signal)
-        : await execute();
+      // 产品层不做隐式自动重试；可重试错误由 UI 暴露给用户手动发起，避免重复副作用和付费调用。
+      const result = await execute();
       return { ...result, status: "success", retryable: false };
     } catch (error) {
       if (isAbort(error) || signal.aborted) throw error;
@@ -167,10 +159,6 @@ function errorOutcome(
     locations: call.locations,
     ...(effects ? { effects } : {}),
   };
-}
-
-function isTransientToolError(error: unknown): boolean {
-  return error instanceof ToolExecutionError && error.retryable;
 }
 
 function errorText(value: unknown): string {

@@ -3,16 +3,15 @@ import { describe, expect, it } from "vitest";
 import { buildHtmlPreviewDocument, HtmlPreviewFrame } from "./HtmlPreviewFrame.js";
 
 describe("HtmlPreviewFrame", () => {
-  it("允许脚本但不开放同源、表单、弹窗和顶层导航权限", () => {
+  it("使用普通 srcDoc 预览，不增加 sandbox 限制", () => {
     const html = renderToStaticMarkup(<HtmlPreviewFrame
       csp="script-src 'unsafe-inline'"
       html="<script>document.body.dataset.executed = 'yes'</script>"
       title="交互预览"
     />);
 
-    expect(html).toContain('sandbox="allow-scripts"');
+    expect(html).not.toContain("sandbox=");
     expect(html).toContain('referrerPolicy="no-referrer"');
-    expect(html).not.toMatch(/allow-same-origin|allow-forms|allow-popups|allow-top-navigation/);
     expect(html).toContain("document.body.dataset.executed");
   });
 

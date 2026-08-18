@@ -514,7 +514,6 @@ async function makeAgent(
       experimentBinding: async () => undefined,
     }),
     undefined,
-    undefined,
     models,
   ).createApp();
 }

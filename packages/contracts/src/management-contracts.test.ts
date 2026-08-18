@@ -34,6 +34,7 @@ describe("management contracts", () => {
     expect(input.name).toBe("代码助手");
     expect(input.systemPrompt).toBe("  先检查再修改。  ");
     expect(PRODUCT_CONFIG.agent.systemPromptMaxCharacters).toBe(32_000);
+    expect(PRODUCT_CONFIG.artifact.maxRetainedRevisions).toBe(3);
     expect(canonicalAgentInput(input).skillInstallationIds).toEqual(["skill-a", "skill-b"]);
     expect(canonicalAgentInput(input).builtinTools).toHaveLength(1);
     expect(input).not.toHaveProperty("defaultReasoningProfile");

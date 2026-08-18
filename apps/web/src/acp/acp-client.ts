@@ -16,11 +16,14 @@ import {
   type TokenUsageNotification,
   type TurnStateNotification,
   type SessionResumeMeta,
+  type ArtifactMentionInput,
 } from "@kindergarten/contracts";
 import type { PendingInteractionState } from "../prompt-turn/prompt-turn-types.js";
 
 export interface PromptIds {
   turnId: string;
+  operationId?: string;
+  artifactMentions?: ArtifactMentionInput[];
 }
 
 export interface ClientHandlers {
@@ -182,6 +185,8 @@ export class AcpWebClient {
       _meta: makePromptMeta({
         schemaVersion: 1,
         turnId: ids.turnId,
+        ...(ids.operationId ? { operationId: ids.operationId } : {}),
+        ...(ids.artifactMentions?.length ? { artifactMentions: ids.artifactMentions } : {}),
       }),
     });
   }

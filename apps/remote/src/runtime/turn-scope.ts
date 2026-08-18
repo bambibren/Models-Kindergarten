@@ -6,6 +6,7 @@ export interface TurnScope {
   ownerId: string;
   sessionId: string;
   turnId: string;
+  operationId?: string;
   purpose: "chat" | "experiment";
   modelStudentId: string;
   agentId: string;
@@ -13,12 +14,13 @@ export interface TurnScope {
   experimentRunRef?: { experimentId: string; variantId: string };
 }
 
-export function turnScope(session: SessionRecord, turnId: string): TurnScope {
+export function turnScope(session: SessionRecord, turnId: string, operationId?: string): TurnScope {
   return {
     schemaVersion: 1,
     ownerId: session.ownerId,
     sessionId: session.id,
     turnId,
+    ...(operationId ? { operationId } : {}),
     purpose: session.purpose,
     modelStudentId: session.modelStudentId,
     agentId: session.agentId,

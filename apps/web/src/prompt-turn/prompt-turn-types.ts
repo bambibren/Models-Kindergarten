@@ -1,11 +1,12 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import type { TurnActivePhase, TurnPendingInteraction, TurnWaitingState } from "@kindergarten/contracts";
+import type { ArtifactMentionInput, TurnActivePhase, TurnPendingInteraction, TurnWaitingState } from "@kindergarten/contracts";
 
 export interface PromptRequestState {
   operationId: string;
   sessionId: string;
   turnId: string;
   text: string;
+  artifactMentions?: ArtifactMentionInput[];
 }
 
 export type PendingInteractionState =

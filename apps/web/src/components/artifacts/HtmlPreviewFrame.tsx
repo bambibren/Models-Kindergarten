@@ -1,7 +1,6 @@
 export function HtmlPreviewFrame({ html, csp, title }: { html: string; csp?: string; title: string }) {
   return <iframe
     referrerPolicy="no-referrer"
-    sandbox="allow-scripts"
     srcDoc={buildHtmlPreviewDocument(html, csp)}
     title={title}
   />;
@@ -17,7 +16,6 @@ export function buildHtmlPreviewDocument(html: string, csp?: string): string {
   return head.test(html) ? html.replace(head, (opening) => `${opening}${prefix}`) : `${prefix}${html}`;
 }
 
-// sandboxed srcDoc 使用不透明源，原生 #hash 导航会把 iframe 导向空白文档。
 // 与 JoyCode 的预览导航桥一致：捕获当前文档锚点，阻止默认行为和内联 onclick，再由桥接层完成滚动。
 const SAME_DOCUMENT_NAVIGATION_BRIDGE = `<script data-models-kindergarten-preview-navigation>
 (() => {

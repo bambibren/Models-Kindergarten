@@ -1,8 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
+  makePromptMeta,
   readContextSummaryNotification,
+  readPromptMeta,
   readTokenUsageNotification,
 } from "./index.js";
+
+describe("Artifact prompt meta", () => {
+  it("保留手动重试 operationId，并且 Mention 只接收稳定 Artifact ID", () => {
+    const value = readPromptMeta(makePromptMeta({
+      schemaVersion: 1,
+      turnId: "turn-retry",
+      operationId: "operation-stable",
+      artifactMentions: [{ artifactId: "artifact_12345678" }],
+    }));
+
+    expect(value).toEqual({
+      schemaVersion: 1,
+      turnId: "turn-retry",
+      operationId: "operation-stable",
+      artifactMentions: [{ artifactId: "artifact_12345678" }],
+    });
+  });
+});
 
 describe("Context summary notification", () => {
   it("保留当前模型适配层的原文快照", () => {

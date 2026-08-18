@@ -103,6 +103,10 @@ export type ToolName =
   | "web_fetch"
   | "ask_user";
 
+// 终端实现暂时保留，便于以后恢复；当前产品阶段统一在 Registry 出口短路，
+// 不进入模型 Tool Schema，也不进入 Agent 能力配置。
+const EXPOSE_RUN_COMMAND_TOOL = false;
+
 /** Registry 只拥有 Tool Schema、参数规范化和具体 Handler。 */
 export class ToolRegistry implements ToolRegistryPort {
   readonly providerId = "builtin";
@@ -118,7 +122,9 @@ export class ToolRegistry implements ToolRegistryPort {
   ) {
     this.process = process ?? new ProcessSandbox(sandbox);
     this.web = web ?? new WebAccess();
-    this.definitions = definitions.filter((definition) => this.bindings === undefined || this.bindings.get(definition.function.name)?.enabled === true);
+    this.definitions = definitions.filter((definition) =>
+      (EXPOSE_RUN_COMMAND_TOOL || definition.function.name !== "run_command") &&
+      (this.bindings === undefined || this.bindings.get(definition.function.name)?.enabled === true));
   }
 
   prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
@@ -140,9 +146,7 @@ export class ToolRegistry implements ToolRegistryPort {
     if (name === "write_file") {
       const path = stringArg(call.arguments, "path");
       const content = stringArg(call.arguments, "content", true);
-      return prepared(id, name, `写入 ${path}`, "edit", { path, content }, "ask", [
-        { path: this.sandbox.preview(path) },
-      ], "none", this.permission(name, "ask"));
+      return prepared(id, name, `写入 ${path}`, "edit", { path, content }, "ask", [], "none", this.permission(name, "ask"));
     }
     if (name === "run_command") {
       const command = stringArg(call.arguments, "command");
@@ -193,10 +197,11 @@ export class ToolRegistry implements ToolRegistryPort {
       );
       const rawOutput = { path: value.path, bytes: Buffer.byteLength(value.newText, "utf8") };
       return {
-        modelContent: modelEnvelope(call, true, rawOutput),
+        modelContent: modelEnvelope(call, true, rawOutput, undefined,
+          "The file exists only in the Session Workspace and is not published, deliverable, or previewable. If the user requested a file, continue by calling publish_artifact or publish_artifact_version as appropriate; do not finish yet."),
         rawOutput,
         content: [{ type: "diff", path: value.path, oldText: value.oldText, newText: value.newText }],
-        locations: [{ path: value.path }],
+        locations: [],
         effects: { fileRelativePaths: [relative(this.sandbox.root, value.path).split("\\").join("/")] },
       };
     }
@@ -220,7 +225,9 @@ export class ToolRegistry implements ToolRegistryPort {
         );
       }
       return {
-        ...result(call, value, modelEnvelope(call, true, value)),
+        ...result(call, value, modelEnvelope(call, true, value, undefined, value.changedFiles.length > 0
+          ? "Files changed by this command exist only in the Session Workspace and are not published, deliverable, or previewable. If the user requested a file, continue by calling the appropriate publish tool; do not finish yet."
+          : undefined)),
         ...(value.changedFiles.length > 0
           ? { effects: { fileRelativePaths: value.changedFiles } }
           : {}),
@@ -333,11 +340,11 @@ const definitions: ModelToolDefinition[] = [
   definition("read_file", "读取沙箱中的 UTF-8 文本文件。", {
     path: { type: "string", description: "沙箱内相对 POSIX 路径" },
   }, ["path"]),
-  definition("write_file", "创建或完整覆盖沙箱中的 UTF-8 文本文件，执行前需要用户授权。", {
+  definition("write_file", "创建或完整覆盖 Session Workspace 中的 UTF-8 文本文件。此工具只写入工作区，不发布、不交付、也不提供预览；用户要求生成文件时，写入后必须继续调用 publish_artifact 或 publish_artifact_version，发布成功后才能向用户交付。是否询问由当前 Agent permission 配置决定。", {
     path: { type: "string", description: "沙箱内相对 POSIX 路径" },
     content: { type: "string", description: "完整文件内容" },
   }, ["path", "content"]),
-  definition("run_command", "在受限 macOS 沙箱中运行终端命令。每次执行都需要用户授权。", {
+  definition("run_command", "在受限 macOS 沙箱中运行终端命令。命令产生的文件只存在于 Session Workspace，不会自动发布或提供预览；用户要求生成文件时，必须继续调用适用的发布工具。每次执行都需要用户授权。", {
     command: { type: "string", description: "要运行的单条 shell 命令" },
     cwd: { type: "string", description: "沙箱内相对工作目录，默认 ." },
     timeout_ms: {

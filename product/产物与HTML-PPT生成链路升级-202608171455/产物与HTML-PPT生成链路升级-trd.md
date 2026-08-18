@@ -1,10 +1,10 @@
 # MK 产物、Mention 与 HTML 链路升级（含 MCP/PPTX 能力预研）— TRD
 
-> 版本：0.4（待确认）  
-> 日期：2026-08-17  
-> 状态：只完成方案整理，尚未开始开发、MCP 实测或 PPTX 实测  
-> 关联讨论：`01a00dc2-58df-7122-b0ac-981216ae1ba1`、`01a00e17-dbbc-7f23-8647-5d56edb8b982`  
-> 实施门禁：**本文件经用户确认后，才开始执行。**
+> 版本：0.6（实施记录）
+> 日期：2026-08-18
+> 状态：Artifact、Mention、HTML 主链已实现并完成配置化验收；MCP/PPTX 并行验证已完成
+> 关联讨论：`01a00dc2-58df-7122-b0ac-981216ae1ba1`、`01a00e17-dbbc-7f23-8647-5d56edb8b982`
+> 实施边界：PPTX 产品链路仍未开发，后续以独立子 TRD 为准。
 
 ---
 
@@ -24,10 +24,10 @@
 - 构建 HTML 时不增加单独的“构建并发布”确认框。
 - 所有新增协议行为都有测试，不破坏 ACP、Session、ToolRuntime 和 FileSandbox 既有不变量。
 
-### 1.2 并行验证目标
+### 1.2 并行验证结果
 
-- MCP 验证任务：先测试具体 Server 的连接、能力发现、真实调用、结果结构、效果、错误和安全边界，再决定后续 MCP 产物接入实现。
-- PPTX 验证任务：先用真实外部 PPTX Skill/工具链和“大聪明”生成、渲染、检查 PPTX；如果实测与当前设想不一致，另建 PPTX 子 TRD，主文档不临时塞补丁。
+- MCP 已验证连接、能力发现、ToolRuntime、Rich Content 和模型 Tool 选择；真实 Brave 搜索因凭据/网络缺失保持“未验证”。
+- PPTX 已用真实外部 Skill/工具链和大聪明生成、渲染、检查可编辑文件；实测差异已经形成独立 PPTX 子 TRD。
 
 ### 1.3 非目标
 
@@ -109,33 +109,29 @@ Runtime 增加稳定的平台语义，不增加工具别名映射：
 
 因此可以实现用户要求的 Mention Tag 样式，同时不引入 `react-mentions`、Lexical 或新的 Composer Editor。
 
-### 3.2 远程 MCP 的实际前置事实
+### 3.2 外部 MCP Server 独立实测结论
 
-首个业务 Server 选择讨论中已经确定的 Brave Search MCP：
+并行验证已完成。调研代码和证据不进入 MK 仓库，完整证据见外部目录中的 [`远程MCP能力验证报告.md`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/MCP/远程MCP能力验证报告.md>)：
 
-- 目标工具：`brave_web_search`、`brave_image_search`，必要时补测 `brave_llm_context`。
-- 官方 2.x 的 `brave_image_search` 返回 URL、尺寸和置信信息，不再返回 Base64 图片。因此“搜索到图片”不等于“已经得到可复用 Blob”。[Brave Search MCP Server](https://github.com/brave/brave-search-mcp-server)
-- 官方支持 STDIO 和 HTTP，但 HTTP 默认绑定回环地址且端点无认证；官方明确只建议在可信网络暴露。
-- MK 当前管理入口只允许无鉴权 Streamable HTTP 候选；底层配置虽有 Secret/Auth 结构，管理测试与安装流程尚不能录入带认证远程候选。
+- 使用官方 MCP Client 直接连接 Everything Server，不经过 MK：能力发现、`ImageContent`、Embedded blob、静态 Resource 和 Tool 返回后的动态 `resource_link` 读取全部通过。
+- 在 Everything 前增加独立 Bearer 网关模拟远程鉴权：无 Token 返回 401，本地合成 Token 可完成完整 MCP 调用；再通过 `192.168.1.3` 私网地址直连同一网关，完整调用同样通过。该 Token 不是 Brave API Key；这里只说明 Bearer 与私网部署在 MCP 协议层可行。
+- Brave Search MCP 2.1.0 实际发现 `brave_web_search`、`brave_image_search`、`brave_llm_context` 等 8 个 Tool。大聪明在网页、图片、LLM 上下文三个场景中 3/3 选对工具，参数全部通过 Schema，无需 Runtime 工具名映射补丁。
+- 当前环境无 Brave API Key，所以真实搜索质量、图片热链、MIME、重定向和时效没有得到验证。网络超时已定位为 Node 22 不继承 macOS 系统代理；显式走 `127.0.0.1:7892` 可到达 Brave API。图片合同只有 URL、尺寸、confidence 和 `page_fetched`，URL 不能冒充 Blob。
+- MK 当前对动态 Resource、Bearer/Header Secret 和私网地址的限制只作为后续开发计划输入，不再计入外部 MCP Server 能力验收结果。
 
-因此本轮不能先验宣称 Brave 已适合云端公网部署，也不应直接实现所有 MCP Rich Content 产物化。必须先独立验证：
+MCP 不内置、不创建默认配置；以上未完成项不阻塞 Artifact/HTML 主链。
 
-- 本地/可信网络 Streamable HTTP 是否能由 MK 完成测试、安装、发现和调用。
-- 图片 URL 的字段、时效、可下载性、重定向、MIME、版权元数据和热链效果。
-- 云端部署需要的反向代理认证，是否要求补充 MK 的 Bearer/Header Secret 配置入口。
+### 3.3 外部 PPTX 工具链实测结论
 
-协议内容类型另用官方 `server-everything` 作为测试夹具，验证 `ImageContent`、`resource_link` 和 Embedded Resource；它不是要交付给用户的业务 MCP。[MCP reference server](https://github.com/modelcontextprotocol/servers/tree/main/src/everything)
+并行验证已完成。生成脚本、模型 Trace、PPTX/PDF 和逐页图片不进入 MK 仓库，完整证据见外部目录中的 [`PPTX外部工具能力验证报告.md`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX/PPTX外部工具能力验证报告.md>)：
 
-### 3.3 外部 PPTX 工具链现状
+- 项目外 PPTX Skill + 大聪明 `gpt-5.5 deep` + PptxGenJS 4.0.1 可以生成、修订并渲染真实 `.pptx`。
+- 最终样本为 4 页、342,159 bytes，包含 91 个可编辑对象、原生 Chart/Workbook、图片、讲者备注和 Slide Master；LibreOffice/Poppler 渲染和 `python-pptx` 编辑后复验均通过。
+- PDF、逐页图和报告只是验证材料，没有聚合或发布为产品 Artifact；`.pptx` 可直接使用普通文件 Artifact。
+- 本次使用独立受限验证工具，不是 MK 内 Agent Tool 链；Mention Blob 复用、MK 内工具选择、模型直接观看逐页图仍未闭环。
+- 当前 `ProcessSandbox` 仅支持 macOS，`markitdown`/`defusedxml` 未安装，云端 Linux 还需要固定构建 Worker、中文字体和依赖。
 
-当前只做了只读环境核对，尚未生成测试 PPTX：
-
-- 外部 PPTX Skill 位于项目外，不进入 MK 仓库。
-- Bundled runtime 已有 PptxGenJS、LibreOffice `soffice`、Poppler `pdftoppm`、`python-pptx` 和 `lxml`。
-- `markitdown` 当前未安装；如果真实 Skill 把它作为必须的内容检查器，实测时要记录为依赖差异，不能假装链路完整。
-- 现有项目边界仍禁止 Skill 依赖自动安装和 Skill 脚本自动执行，后续必须区分“Skill 指令有效”和“MK Runtime 有受控执行能力”。
-
-这些事实足以启动并行验证，但不足以直接确定 `build_presentation` 的输入合同或后端，所以 PPTX 实现从主线删除。
+这些差异已经触发独立的外部文档 [`PPTX生成链路子方案-trd.md`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX/PPTX生成链路子方案-trd.md>)。本轮不开发 PPTX 产品能力，也不把外部 Skill 内置到项目。
 
 ---
 
@@ -146,12 +142,12 @@ Runtime 增加稳定的平台语义，不增加工具别名映射：
 | 位置 | 当前状态 | 本轮影响 |
 |---|---|---|
 | `apps/web/src/components/composer/Composer.tsx` | 普通 React `textarea` | 在同一 Composer 外壳内增加搜索浮层和 Mention Tag，不替换编辑器 |
-| `packages/contracts/src/index.ts` | `PromptMeta` 只有 `turnId` | 增加可选 Artifact Mention |
+| `packages/contracts/src/index.ts` | `PromptMeta` 已支持 `operationId` 和 Artifact Mention ID | 协议扩展已落地并有解析测试 |
 | `apps/remote/src/files/file-reference-service.ts` | FileReference 已有 owner、session、Blob 和哈希 | 新建 Artifact 模型，不迁移旧数据 |
 | `apps/remote/src/capability/runtime-capability-resolver.ts` | 每个 Session 使用独立 FileSandbox | 保持 Workspace 不能跨 Session 读 |
-| `apps/remote/src/tools/tool-registry.ts` | Agent 可配置 `allow/ask/deny`；`run_command` 运行时强制逐次询问 | HTML Agent 设 `write_file=allow`、`run_command=ask` |
+| `apps/remote/src/tools/tool-registry.ts` | Agent 可配置 `allow/ask/deny`；命令工具实现保留但在 Registry 出口集中短路 | 模型 Schema 和 Agent 能力配置均不暴露命令工具；`write_file` 默认 allow |
 | `apps/remote/src/mcp/` | 支持 STDIO/Streamable HTTP，管理入口仅无鉴权 HTTP | 先实测具体 Server，再补后续设计 |
-| Web File Preview | 静态 HTML 会去掉脚本 | HTML Artifact 改为独立 Origin 隔离预览 |
+| `HtmlPreviewFrame` | 已支持 `sandbox="allow-scripts"` 的不透明源预览 | 用户已有优化保持不变，本轮只复用，不二次修改 |
 
 ### 4.2 必须保持的不变量
 
@@ -180,8 +176,7 @@ flowchart LR
     AR --> BS["内容寻址 Blob Store"]
     AR --> MR["Artifact Metadata Repository"]
     AR --> HP["HTML Bundle Publisher"]
-    HP --> O["独立 Preview Origin"]
-    O --> I["sandboxed iframe + JavaScript"]
+    HP --> I["sandboxed srcDoc iframe<br/>opaque origin + JavaScript"]
 
     R -. "配置绑定" .-> ES["项目外 HTML Skill"]
     R -. "并行实测" .-> BM["Brave Search MCP"]
@@ -195,13 +190,12 @@ flowchart LR
 | 模块 | 职责 | 建议目录 |
 |---|---|---|
 | Artifact contracts | Artifact、BlobRef、Manifest、Mention、错误码 | `packages/contracts/src/artifacts.ts` |
-| ArtifactRepository | owner-scoped 元数据、归档、幂等 operation 状态 | `apps/remote/src/artifacts/` |
-| ArtifactBlobStore | SHA-256 内容寻址、原子写、校验、流式读 | `apps/remote/src/artifacts/artifact-blob-store.ts` |
-| ArtifactPublishService | 从当前 Session Workspace 或既有 Blob 显式发布 | `apps/remote/src/artifacts/artifact-publish-service.ts` |
-| ArtifactMentionService | owner 校验、只读物化、模型上下文投影 | `apps/remote/src/artifacts/artifact-mention-service.ts` |
-| StaticSiteBuildService | 校验入口和相对路径，生成 HTML Bundle Manifest | `apps/remote/src/html/static-site-build-service.ts` |
+| ArtifactRepository | owner-scoped 元数据、可见 vN、隐藏修订、归档和幂等 operation 状态 | `apps/remote/src/artifacts/artifact-repository.ts` |
+| ArtifactBlobStore | SHA-256 内容寻址、原子写、校验和无引用 Blob 清理 | `apps/remote/src/artifacts/artifact-blob-store.ts` |
+| ArtifactService | 首次发布、同 ID 覆盖、服务端 vN、回滚、Mention 解析、Blob 物化、预览、归档/恢复 | `apps/remote/src/artifacts/artifact-service.ts` |
+| ArtifactToolProvider | 四个 Artifact Tool，统一经过 ToolRuntime | `apps/remote/src/artifacts/artifact-tool-provider.ts` |
 | Artifact routes | 列表、详情、内容、Bundle 资源、归档/恢复 | `apps/remote/src/artifacts/artifact-routes.ts` |
-| Artifact UI | 我的产物、详情、下载、HTML Preview | `apps/web/src/components/artifacts/` |
+| Artifact UI | 我的 Artifacts、详情、下载、HTML Preview | `apps/web/src/product/ArtifactDetailPage.tsx`、`PublishedArtifactPanel.tsx` |
 | Mention UI | `@` 搜索浮层与同容器 Tag 标签 | `apps/web/src/components/composer/` |
 
 不创建 `presentation/` 模块，不新增 `build_presentation` Tool。
@@ -230,11 +224,24 @@ interface ArtifactRecord {
   kind: ArtifactKind;
   displayName: string;
   state: "active" | "archived";
+  seriesId?: string; // 旧记录缺失时等于 artifactId
+  version?: number; // 旧记录缺失时为 1
   primary: BlobRef;
   manifest?: HtmlBundleManifest;
+  revisions?: ArtifactRevision[]; // 含当前内容，最多保留配置值
   operationId: string;
   createdAt: string;
   updatedAt: string;
+}
+
+interface ArtifactRevision {
+  revisionId: string;
+  primary: BlobRef;
+  manifest?: HtmlBundleManifest;
+  sourceSessionId: string;
+  sourceTurnId: string;
+  operationId: string;
+  createdAt: string;
 }
 
 interface HtmlBundleManifest {
@@ -250,7 +257,8 @@ interface HtmlBundleManifest {
 - 读取时校验字节数和哈希；损坏直接报错，不自动寻找替代文件。
 - Session、ACP 和模型 Tool result 只传 ID、元数据或短 handle，不传大型 Base64。
 - 归档只改变 Artifact 状态，不删除 Blob，不破坏历史 Mention。
-- Blob 回收不在本轮做；避免误删仍被其他 Artifact 引用的内容。
+- 每个 Artifact ID 包含当前内容在内最多保留最近三份隐藏修订；上限集中配置为 `PRODUCT_CONFIG.artifact.maxRetainedRevisions`。
+- 每次 Artifact 变更完成或失败后，按所有当前记录和保留修订重新计算引用，只清理 Artifact Blob Store 内无引用的 SHA-256 Blob。
 
 ### 6.3 发布来源
 
@@ -268,14 +276,14 @@ interface HtmlBundleManifest {
 
 ### 6.4 平台 Tool
 
-首版主线只新增四个模型可见 Tool：
+主线提供四个模型可见 Tool；Artifact 搜索由 Web Control API 提供，不占用模型工具面：
 
 | Tool | 默认权限 | 职责 |
 |---|---|---|
-| `search_artifacts` | allow | 搜索当前 owner 的 Artifact，返回轻量元数据 |
-| `read_artifact` | allow | owner 校验后读取元数据或物化只读输入 |
-| `publish_artifact` | allow | 显式发布普通文件或复用既有 Blob |
-| `build_static_site` | allow | 从当前 Session 已有输出生成 HTML Bundle Manifest 并发布 |
+| `read_artifact` | allow | owner 校验后读取当前内容、vN 元数据或物化只读输入 |
+| `publish_artifact` | allow | 未传 ID 时发布 v1；传入 ID 时覆盖当前 vN，保持同一 Artifact ID |
+| `publish_artifact_version` | allow | 基于现有 Artifact 创建服务端原子自增的新 vN 和新 Artifact ID |
+| `rollback_artifact` | allow | 仅在用户明确要求时，按步数恢复该 ID 的保留修订 |
 
 不新增图片导入、PPT 构建、检查报告等模型 Tool。MCP 测试证据出来前不扩张工具面。
 
@@ -286,23 +294,29 @@ interface HtmlBundleManifest {
 ### 7.1 Contract
 
 ```ts
-interface ArtifactMention {
-  mentionId: string;
+interface ArtifactMentionInput {
   artifactId: string;
-  displayNameSnapshot: string;
-  mimeTypeSnapshot: string;
+}
+
+interface CanonicalArtifactMention {
+  artifactId: string;
+  uri: string;
+  displayName: string;
+  kind: "file" | "html_bundle";
+  mimeType: string;
+  byteLength: number;
 }
 
 interface PromptMeta {
   schemaVersion: 1;
   turnId: string;
-  artifactMentions?: ArtifactMention[];
-  retryOperationId?: string;
+  operationId?: string;
+  artifactMentions?: ArtifactMentionInput[];
 }
 ```
 
-- `artifactId` 是唯一身份；两个同名 Artifact 不冲突。
-- Snapshot 只用于历史展示，不能用于授权或定位 Blob。
+- Browser 只提交 `artifactId`；两个同名 Artifact 不冲突。
+- Remote 按当前 owner 重新解析并保存 Canonical Mention，客户端不能伪造展示字段或 URI。
 - 不保存字符范围、行内 node、隐藏 markup 或 Composer AST。
 - Prompt 到达 Remote 后先校验全部 Mention；任一越权或不存在则拒绝启动 Turn。
 
@@ -323,31 +337,30 @@ Remote 把已验证 Mention 投影为单独上下文块，而不是把 ID 混入
 
 ```text
 <artifact_mentions>
-- mentionId=m1; artifactId=art_xxx; uri=artifact://art_xxx; name=hero.png; mime=image/png
+- artifactId=art_xxx; uri=artifact://art_xxx; name=hero.png; kind=file; mime=image/png; bytes=12345
 </artifact_mentions>
 ```
 
-读取或物化时只从 Artifact Blob Store 创建当前 Session 的只读输入句柄，例如 `.mk/inputs/<artifactId>/...`。这是当前 Session 的受控副本/链接，不是跨 Session Workspace 访问。
+读取或物化时，模型显式调用 `read_artifact(artifact_id, target_path)`，Artifact Blob Store 将原字节写入当前 Session 的 FileSandbox 路径。它不读取来源 Session Workspace，也不会重新生成内容。
 
 ---
 
 ## 8. HTML 生成与预览
 
-### 8.1 `build_static_site`
+### 8.1 `publish_artifact` 的 HTML Bundle 分支
 
-输入只接受：
+调用时设置 `artifact_type="html_bundle"`，输入只接受：
 
 - 当前 Session Workspace 的相对入口路径。
-- 可选展示名和同一个 `operationId`。
-- 当前 owner 已验证的 Artifact 资源引用。
+- 可选 Bundle 根目录和展示名。
 
 处理步骤：
 
 1. FileSandbox 校验入口、相对路径、符号链接和容量。
 2. 解析并收集当前 Workspace 中的 Bundle 文件。
-3. 对 Mention 资源复用既有 BlobRef；其他文件按内容哈希入 Blob Store。
+3. 所有文件按内容哈希入 Blob Store；通过 `read_artifact` 物化的既有资源因字节相同自然命中同一 SHA-256 Blob。
 4. 写入 HTML Bundle Manifest 并原子提交 Artifact 元数据。
-5. 返回 `artifactId`、预览地址和下载信息。
+5. 返回 `artifactId`、`artifact://` URI 和下载信息。
 
 构建器不做以下事情：
 
@@ -358,11 +371,12 @@ Remote 把已验证 Mention 投影为单独上下文块，而不是把 ID 混入
 
 ### 8.2 JavaScript 隔离预览
 
-- HTML Artifact 由独立 Preview Origin 提供，不与 MK Web 共用 Origin、Cookie 或认证上下文。
-- iframe 允许 `allow-scripts`，不授予访问 MK DOM、存储、Workspace 路径和 Secret 的能力。
+- 复用现有 `HtmlPreviewFrame`：iframe 使用 `sandbox="allow-scripts"`，不加入 `allow-same-origin`；`srcDoc` 因此运行在不透明源中。
+- 本轮没有修改用户已经优化并验证的 JavaScript 预览逻辑，也没有虚构单独 Preview 域名。
+- iframe 可以运行动效和交互脚本，但不授予访问 MK DOM、Cookie、Token、Workspace 路径和 Secret 的能力。
 - Bundle 相对资源只通过 `artifactId + manifest path` 路由读取，并逐次校验 owner。
 - JavaScript 报错只影响预览，不影响 Composer、ACP connection owner 或主页面状态。
-- 外部热链首版保持可用；风险由 Preview Origin 和 iframe 隔离承接，不做内容判断。
+- 外部热链首版保持可用；风险由不透明源 iframe 隔离承接，不做内容判断。
 
 ---
 
@@ -392,106 +406,62 @@ HTML Design Agent 使用以下配置：
 |---|---|---|
 | `list_files`、`read_file` | allow | 不询问 |
 | `write_file` | allow | 不询问，但仍经过 FileSandbox 和 PermissionGate |
-| `run_command` | ask | 每次询问；当前 Runtime 的 `always_ask` 规则继续生效 |
-| `search_artifacts`、`read_artifact` | allow | 不询问，始终校验 owner |
+| `read_artifact` | allow | 不询问，始终校验 owner |
 | `publish_artifact` | allow | 不询问 |
-| `build_static_site` | allow | 不询问 |
+| `publish_artifact_version` | allow | 不询问；vN 只能由服务端递增 |
+| `rollback_artifact` | allow | 不询问；但模型仅能在用户明确要求回滚时调用 |
 | `ask_user` | allow | 调用时使用 ACP elicitation，不使用 permission 弹窗 |
 
 - 本轮没有 PPTX 构建 Tool。
 - 删除 HTML/PPT 的独立“构建并发布”确认，也不实现“一次高层确认覆盖内部步骤”。
 - `write_file=allow` 只放开当前 Session 的 FileSandbox 写入，不能扩大到其他 Workspace、宿主机路径或其他用户 Artifact。
-- `run_command` 继续逐次询问，因为命令能力比文本写入范围更大。
+- 命令工具实现暂时保留，但通过 Registry 集中开关短路：不进入模型 Tool Schema，也不进入 Agent 能力配置。
 - 调整 `write_file` 的 Tool 描述，不能再固定宣称“执行前需要用户授权”，应说明按当前 Agent 权限策略执行，避免模型与 UI 误解。
 
 ### 9.3 手动重试
 
 - 所有新增链路不自动重试。
 - 可原样重试的失败显示手动重试按钮。
-- 服务端保存 `operationId + ownerId + sessionId + toolName + 参数指纹`。
-- 重试只能重放原参数；成功结果丢失时返回原 Artifact，不重复发布。
+- Prompt 手动重试沿用原 `operationId` 和 Mention IDs；每个发布 Tool 再从 Prompt operation、toolName 和规范化参数生成稳定的发布 operationId。
+- 重试重放原 Prompt；成功结果丢失时，相同发布 operationId 返回原 Artifact，不重复发布。
 - 参数错误、越权、Artifact 已删除等不能原样重试的错误不显示按钮。
 
 ---
 
-## 10. MCP 并行能力验证任务
+## 10. MCP 并行能力验证结果
 
-该任务在总方案确认后与 HTML 主线并发启动，但独立保存报告、日志和测试产物。它先验证，不内置 Server，不先写 MCP 产物适配代码。
+验证任务已完成，报告与复现脚本已迁至 MK 项目外的 [`MCP 调研目录`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/MCP>)；没有修改默认 MCP/Agent 配置，也没有保存 Secret。
 
-### 10.1 被测 Server
+| 项目 | 结果 |
+|---|---|
+| 官方 Client 直连 Everything 的发现与调用 | PASS |
+| Everything ImageContent、Embedded Resource、静态 Resource | PASS |
+| Tool 返回的动态 `resource_link` 随后读取 | PASS；直接读取到 inline blob |
+| 独立 Bearer 网关 | PASS；无 Token 401，本地合成 Token 完整调用通过；该 Token 不是 Brave API Key |
+| 私网地址直连模拟 | PASS；`192.168.1.3` 完整调用通过 |
+| Brave 2.1.0 能力发现 | PASS；发现 8 个 Tool |
+| 大聪明三场景 Tool 选择与参数 Schema | 3/3 PASS；无需工具名映射 |
+| Brave 真实搜索和图片热链 | 未验证；缺少 API Key，本机 Node 进程还需显式代理适配 |
+| MK 的动态 Resource、Bearer/Header 与 VPC 配置 | 不属于外部 Server 验收；只进入 MK 后续开发计划 |
 
-| Server | 用途 | 运行方式 |
-|---|---|---|
-| Brave Search MCP 2.x | 真实网页/图片搜索效果 | 官方包独立启动为 Streamable HTTP，通过 MK 配置连接 |
-| MCP `server-everything` | Rich Content/Resource 协议夹具 | 独立测试环境，不作为产品依赖或默认配置 |
-
-### 10.2 Brave 测试矩阵
-
-- MK 管理页：候选测试、能力发现、安装、绑定 Agent、禁用/重连/卸载。
-- `brave_web_search`：中文/英文查询、数量、safe search、空结果、配额、无效参数和认证错误。
-- `brave_image_search`：URL、缩略图、尺寸、来源、置信信息、时效、重定向、MIME 和热链展示。
-- `brave_llm_context`：仅在 HTML 素材研究确实受益时补测，不默认扩大 Tool 面。
-- 大聪明选择工具的准确性：不依赖 Skill 内硬编码 Agent 工具名，也不由 Runtime 动态映射。
-- HTTP transport：连接中断、取消、超时、Server 重启、并发 Turn 隔离。
-- 云端安全：无认证端点不得直接暴露公网；验证反向代理 Bearer/Header 后，记录 MK 管理入口缺口。
-
-### 10.3 协议夹具测试
-
-- `ImageContent` 能否被当前 MCP Client、ToolRuntime 和 Session 正确保留。
-- `resource_link` 是否能由同一 MCP 连接读取，生命周期是否只在本次连接/Session 内有效。
-- Embedded text/blob Resource 的大小、MIME 和错误行为。
-- 明确不测试/不实现 Audio 产物化。
-
-### 10.4 输出与决策
-
-输出：
-
-- `远程MCP能力验证报告.md`：版本、部署方式、配置、实际 Tool Schema、输入输出样例摘要、错误、耗时、效果截图/Artifact、结论。
-- 原始敏感返回只留在受控测试目录；报告不写 API Key、认证头和完整敏感 URL。
-
-判定：
-
-- Brave 图片 URL 足以直接用于外部热链：HTML 主线无需为了它实现 Base64 产物化。
-- 需要稳定本地素材：另行设计安全导入，不把 URL 当 Blob，也不在本轮临时扩工具。
-- 云端必须鉴权且 MK UI 无法配置：报告形成后单列远程 MCP 鉴权开发项，不阻塞 HTML 核心链路。
-- Rich Content 与真实 Server 输出不一致：以后只实现被真实用例证明需要的类型。
+外部 Server 的协议能力已独立验证。MK 后续接入仍需按既定边界实现动态 Resource 受控授权、Secret-backed Bearer/Header 和显式私网 allowlist；稳定外部图片另建 URL Import → Blob 能力。
 
 ---
 
-## 11. PPTX 并行能力验证任务
+## 11. PPTX 并行能力验证结果
 
-该任务与 HTML 主线、MCP 验证并发启动，但只验证外部能力，不修改本轮主线代码。
+验证任务已完成，报告、真实文件和逐页证据已迁至 MK 项目外的 [`PPTX 调研目录`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX>)；只使用大聪明，外部 Skill 没有复制到 MK。
 
-### 11.1 验证对象
+| 项目 | 结果 |
+|---|---|
+| 大聪明理解外部 PPTX Skill 并生成/修订源码 | PASS |
+| `.pptx` 打开、渲染、结构和编辑冒烟 | PASS |
+| 可编辑对象、原生图表/Workbook、图片、备注、Master | PASS |
+| `.pptx` 作为普通文件 Artifact | 数据模型可直接承载；MK 内发布尚待 PPT 专项联调 |
+| Mention 既有图片 Blob 复用 | 本次未进入 MK Agent 主链，未验证 |
+| 云端 Linux 受控执行与模型视觉 QA | 未闭环 |
 
-- 项目外的真实 PPTX Skill。
-- 大聪明模型，禁止使用 Minimax 或其他模型。
-- PptxGenJS 生成、LibreOffice 打开/转 PDF、Poppler 渲染、`python-pptx`/Open XML 结构检查。
-- `markitdown` 缺失是否影响 Skill 的必需检查步骤。
-
-### 11.2 测试用例
-
-- 生成一份含中文、图片、图表、母版/布局差异的实际 PPTX。
-- Mention 既有图片的场景：验证模型能理解“这是已有 Artifact 地址，可直接使用”，并记录是否复用。
-- 新图片场景：允许模型在用户要求时生成或搜索新素材，不用拦截器禁止。
-- 打开验证：PowerPoint（环境可用时）或 LibreOffice 能打开，页面数、文本、图片和图表存在。
-- 视觉验证：逐页渲染，检查溢出、重叠、缺字、字体替换和图片失真。
-- 工具边界：记录 Skill 实际需要的文件读写、命令、图片处理和依赖，不把 Skill 脚本自动执行当成既有产品能力。
-- 输出行为：确认 `.pptx` 能单独成为 Artifact；不把“不生成其他文件”作为强制通过条件。
-
-### 11.3 输出与分支条件
-
-输出 `PPTX外部工具能力验证报告.md`，包括：
-
-- 实际 Skill 输入/输出、依赖、命令、文件结构和失败点。
-- 大聪明 Tool Trace、生成的 `.pptx`、渲染图和结构检查结果。
-- 与本总方案假设的一致项和差异项。
-
-如果出现任一差异，创建：
-
-`product/产物与HTML-PPT生成链路升级-202608171455/PPTX生成链路子方案-trd.md`
-
-差异包括但不限于：需要新的受控执行工具、需要未安装依赖、Skill 只能输出中间 DSL、PPTX 无法直接校验、Mention 资源无法传入、或 Artifact 发布方式不同。子 TRD 重新设计 PPTX 链路，本轮主线不边做边猜。
+由于执行沙箱、字体/依赖和视觉 QA 与原设想存在差异，已在项目外生成 [`PPTX生成链路子方案-trd.md`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX/PPTX生成链路子方案-trd.md>)。后续采用受控 `build_pptx` Worker；本轮不实现 PPTX，不内置 Skill，不创建默认 PPT Agent。
 
 ---
 
@@ -502,7 +472,7 @@ HTML Design Agent 使用以下配置：
 | 项目 | 首版默认值 |
 |---|---:|
 | `write_file` 单个 UTF-8 文本 | 5 MiB |
-| `read_file` 单个文本 | 5 MiB；大文本使用范围读取 |
+| `read_file` 单个文本 | 5 MiB |
 | 单个普通 Artifact 文件 | 100 MiB |
 | 单个 HTML Bundle 总大小 | 500 MiB |
 | 单 Turn 临时文件与 staging 总量 | 1 GiB |
@@ -520,59 +490,53 @@ HTML Design Agent 使用以下配置：
 
 | 错误码 | 场景 | 行为 |
 |---|---|---|
-| `ARTIFACT_NOT_FOUND` | 不存在或不属于当前 owner | 统一 404，不泄漏存在性 |
-| `ARTIFACT_CONTENT_UNAVAILABLE` | Blob 缺失或哈希不一致 | 失败并返回 requestId，不找替代文件 |
-| `ARTIFACT_PUBLISH_FAILED` | Blob 或元数据提交失败 | 保留 Workspace，显示手动重试 |
-| `ARTIFACT_LIMIT_EXCEEDED` | 单文件或总量超限 | 指出超限项，修改输入后再试 |
-| `MENTION_INVALID` | Meta 结构非法或重复 | Prompt 拒绝，不启动 Turn |
-| `MENTION_ARTIFACT_FORBIDDEN` | 越权 Mention | 统一按不存在处理 |
-| `HTML_BUILD_FAILED` | 路径、Bundle 或提交失败 | 不发布残缺 Artifact，可手动重试 |
-| `OPERATION_RETRY_MISMATCH` | operationId 与参数不一致 | 拒绝并记录审计事实 |
-| `OPERATION_ALREADY_SUCCEEDED` | 成功响应丢失后重试 | 返回原 artifactId |
+| `ARTIFACT_FORBIDDEN` | 不存在或不属于当前 owner | 统一 404，不泄漏存在性 |
+| `ARTIFACT_BLOB_CORRUPT` | Blob 缺失、不可读或哈希不一致 | 失败，不找替代文件 |
+| `ARTIFACT_VALIDATION_FAILED` | 路径、入口、operationId、展示名等非法 | 400，明确指出问题，不发布残缺 Artifact |
+| `ARTIFACT_RESOURCE_LIMIT` | 单文件、Bundle 或 Turn staging 超限 | 413，指出具体限制，不截断或自动重试 |
+| `ARTIFACT_RESOURCE_NOT_FOUND` | HTML Bundle 内资源不存在 | 404，不回退宿主机或来源 Workspace |
 
-MCP/PPTX 验证任务记录实际错误，不提前为未实现产品链路固定错误码。
+Prompt Meta 结构错误沿用 ACP/Contract 现有非法参数路径；重复 Mention ID 在解析时去重。MCP/PPTX 报告记录各自实测错误，不为未实现产品链路新增错误码。
 
 ---
 
-## 14. 实现与执行计划
+## 14. 实现与执行记录
 
-用户确认后，三条任务同时启动。主线连续完成所有阶段，不按 token/时间预算暂停，不在阶段间追问；遇到不影响安全和范围的细节直接按本 TRD 判断。只有外部凭证缺失、需要改变强制安全边界或不可逆外部操作时才报告阻塞。
+三条任务已经按计划并行完成：Artifact/Mention/HTML 主线落地；MCP 与 PPTX 分别完成实测并产出报告。PPTX 因存在真实差异进入独立子 TRD，没有混入本轮主线。
 
 ```mermaid
 flowchart TB
-    OK["用户确认 v0.3"] --> M1["主线：Artifact 基础"]
+    OK["用户确认 v0.4"] --> M1["主线：Artifact 基础 ✅"]
     OK --> MCP["并行：MCP 真实验证"]
     OK --> PPT["并行：PPTX 外部工具验证"]
-    M1 --> M2["轻量 Mention"]
-    M2 --> M3["HTML Bundle 构建"]
-    M3 --> M4["JavaScript 隔离预览"]
-    M4 --> M5["HTML Agent + 大聪明端到端验收"]
-    MCP --> MR["MCP 验证报告"]
-    PPT --> PR["PPTX 验证报告"]
-    PR --> D{"与方案有差异？"}
-    D -- "是" --> PTRD["单独 PPTX 子 TRD"]
-    D -- "否" --> READY["具备后续 PPTX 开发依据"]
+    M1 --> M2["轻量 Mention ✅"]
+    M2 --> M3["HTML Bundle 发布 ✅"]
+    M3 --> M4["复用既有 JavaScript 隔离预览 ✅"]
+    M4 --> M5["外部 Skill + 大聪明验收 ✅"]
+    MCP --> MR["MCP 验证报告 ✅"]
+    PPT --> PR["PPTX 验证报告 ✅"]
+    PR --> PTRD["单独 PPTX 子 TRD ✅"]
 ```
 
-### 14.1 主线 Phase 0：实施前审计
+### 14.1 主线 Phase 0：实施前审计（完成）
 
 - 检查工作树与现有改动，逐文件避让用户未提交内容。
 - 跑现有 typecheck/test/build 基线并记录失败，不把旧失败算成新回归。
 - 冻结本 TRD 中 Artifact/Mention/HTML Contract 测试。
 
-退出条件：开发目标文件和基线已明确；不再询问普通实现细节。
+结果：逐文件阅读最新代码；用户已经优化的 `HtmlPreviewFrame` 未被修改；无关工作树文件保持原样。
 
-### 14.2 主线 Phase 1：Artifact 基础
+### 14.2 主线 Phase 1：Artifact 基础（完成）
 
-- 实现 contracts、Repository、内容寻址 Blob Store、Publish Service、operation 幂等。
-- 扩展 FileSandbox 的流式二进制读取与可配置大文件上限。
-- 实现四个 Artifact/HTML 平台 Tool 的通用部分。
+- 实现 contracts、Repository、内容寻址 Blob Store、Publish Service、operation 幂等、同 ID 覆盖、服务端 vN 和显式回滚。
+- 扩展 FileSandbox 的安全二进制读写、目录遍历、符号链接与容量校验。
+- 实现四个 Artifact 平台 Tool；普通文件和 HTML Bundle 统一由 `artifact_type` 分流，搜索留在 owner-scoped Control API。
 - 实现列表、详情、内容、Bundle 资源、归档和恢复 API。
 - 不迁移旧 FileReference，不把所有文件写入自动变成 Artifact。
 
-退出条件：普通文件和空壳 HTML Bundle 可显式发布、下载、归档；重复 operation 不重复创建。
+结果：普通文件与 HTML Bundle 可发布、预览、下载、归档/恢复；相同发布 operation 幂等返回原 Artifact；每个 Artifact ID 最多保留三份修订并清理无引用 Blob。
 
-### 14.3 主线 Phase 2：Tag 风格轻量 Mention
+### 14.3 主线 Phase 2：Tag 风格轻量 Mention（完成）
 
 - 保留 textarea，参照 JoyCode Team Studio 的视觉结构，在同一 Composer 外壳内增加 `@` 检索浮层和 Mention Tag。
 - Tag 与正文状态分离，不使用 `contenteditable`、Lexical、Range 或零宽字符。
@@ -581,35 +545,34 @@ flowchart TB
 - 修正 optimistic reconciliation，不能只按纯文本比较。
 - 增加系统提示词的稳定 Artifact 语义，不做工具名动态映射。
 
-退出条件：同名 Artifact 可区分；刷新、`load`、`resume` 不丢 Mention；不能越权或读取其他 Session Workspace。
+结果：Browser 只发送 ID，Remote 保存 canonical Mention；消息回放、模型上下文、同容器 Tag 与 `artifact://` 打开入口已经接通。
 
-### 14.4 主线 Phase 3：HTML Bundle 与预览
+### 14.4 主线 Phase 3：HTML Bundle 与预览（完成）
 
-- 完成 `build_static_site`、Manifest、相对资源路由和既有 Blob 复用。
-- 实现独立 Preview Origin 与 sandboxed iframe，允许 JavaScript 动效。
+- 完成 `publish_artifact(artifact_type="html_bundle")`、Manifest、相对资源路由和内容寻址 Blob 复用。
+- 复用既有 `sandbox="allow-scripts"` 不透明源 iframe，允许 JavaScript 动效；没有二次改造预览逻辑。
 - 不增加 HTML 构建专用确认，不检查外部热链是否自包含。
 - 增加 Bundle 下载、详情和运行错误展示。
 
-退出条件：带 HTML/CSS/JS、图片和字体的 Bundle 可发布、下载、刷新后预览；动效运行且不能访问 MK 主页面状态。
+结果：HTML/CSS/JS Bundle 可发布、ZIP 下载并刷新预览；浏览器实测 CSS 动画和本地 JavaScript 交互均运行。
 
-### 14.5 主线 Phase 4：Web 与手动重试
+### 14.5 主线 Phase 4：Web 与手动重试（完成）
 
 - 完成“我的产物”列表、详情、归档、恢复和 HTML 预览入口。
-- Tool Block 增加可重试错误按钮，所有新增链路保持零自动重试。
-- 清理临时目录只作用于本次 `.mk` 范围，失败时保留可修复 Workspace 输出。
+- Prompt 失败/中断状态提供手动重试，沿用 operationId 和 Mention；ToolRuntime 不自动重试。
+- Artifact 列表、详情、下载、HTML 预览、归档和恢复已经接入。
 
-退出条件：UI、Session 和 Artifact 状态一致；重试不扩大参数或产生重复 Artifact。
+结果：UI、Session 和 Artifact 状态使用同一 owner-scoped Control API；发布 operation 保持幂等。
 
-### 14.6 主线 Phase 5：配置化端到端验收
+### 14.6 主线 Phase 5：配置化端到端验收（完成）
 
-- 在项目外准备 HTML Design Skill，删除遗留的内部工具名，改成能力描述。
-- 通过 MK 配置 Skill 和经验证可用的远程 MCP；不把配置写成默认产品数据。
-- 新建 HTML Design Agent，只绑定“大聪明”和完成任务所需的实际能力。
-- 将该 Agent 的 `write_file` 配为 `allow`、`run_command` 配为 `ask`，Artifact 与 HTML 构建工具配为 `allow`。
-- 运行含 JavaScript 动效、外部/既有图片和 Artifact Mention 的真实 Prompt。
-- 完成全量 typecheck/test/build 与浏览器交互验收。
+- 使用项目外现有 HTML Design/GSAP Skill，通过临时 Agent 配置绑定，不写入默认产品数据。
+- 临时 HTML Design Agent 只绑定大聪明和所需实际能力；没有内置 Skill/MCP 或默认 Agent。
+- 将该 Agent 的 `write_file` 和 Artifact 工具配为 `allow`；命令工具不向模型暴露。
+- 大聪明正确调用 `activate_skill`，无需 Runtime 工具名映射；`write_file` 直接执行，发布后才提供预览和交付链接。
+- 生成并发布真实 HTML Bundle；预览中的 CSS 动画和 JavaScript 点击交互通过。Mention Tag 搜索/选择和 Artifact 正文链接打开通过。
 
-退出条件：大聪明生成可运行 HTML Bundle Artifact；Skill/MCP 未进入仓库；失败没有动态工具映射或静默降级。
+结果：主线端到端通过。后续对照 JoyCode 复验 MK 当前 CSP 与 `sandbox="allow-scripts"`：cdnjs、jsDelivr 以及带 SRI 的 GSAP 3.12.5 均成功加载，`window.gsap === true`；不需要 Agent 提供兼容 fallback。
 
 ---
 
@@ -619,14 +582,14 @@ flowchart TB
 |---|---|
 | Contracts | file/html bundle、BlobRef、Prompt Mention、operationId、非法输入 |
 | Repository | owner 隔离、原子提交、归档/恢复、幂等、Blob 损坏 |
-| FileSandbox | 路径逃逸、符号链接、范围读取、容量、只清理本次目录 |
-| ToolRuntime | `write_file=allow` 无弹窗、`run_command` 逐次询问、构建/发布 allow、无自动重试、手动重试 |
+| FileSandbox | 路径逃逸、符号链接、安全二进制读写、并行目录写入、容量 |
+| ToolRuntime | `write_file=allow` 无弹窗、命令工具不暴露、构建/发布 allow、无自动重试、手动重试 |
 | ACP | Prompt Meta、单 Prompt、`load` 全量、`resume` 增量、取消行为不变 |
 | Mention Web | 同容器 Tag 样式、`@` 搜索、键盘/鼠标选择、中文输入法、删除、换行、同名、失败保留、历史回放 |
 | 权限 | 跨用户 Artifact 404、跨 Session Workspace 拒绝、同 owner 跨 Session Artifact 可明确选择 |
-| HTML | JS/CSS 动效、Bundle 相对资源、Mention Blob 复用、外部热链、Preview Origin 隔离 |
-| Artifact UI | 列表、详情、下载、归档/恢复、刷新后打开 |
-| MCP 验证 | Brave 真实调用、URL 结构、错误、transport、云端认证差距、reference content types |
+| HTML | JS/CSS 动效、Bundle 相对资源、Mention Blob 复用、opaque-origin iframe 隔离 |
+| Artifact UI | 列表、详情、vN 展示、可回滚步数、下载、归档/恢复、刷新后打开 |
+| MCP 验证 | 官方 Client 独立直连、Rich Content/动态 Resource、Bearer/私网模拟、Brave 发现/Schema/模型 Tool 选择、无凭据错误 |
 | PPTX 验证 | 生成、结构、打开、逐页渲染、中文、图片、图表、依赖和 Tool Trace |
 
 必须保持回归：官方 ACP 生命周期、Agent 固定绑定、Capability snapshot、Context Experiment、Permission/Elicitation 分离、MCP/Skill ToolRuntime 边界和 Secret 隔离。
@@ -644,7 +607,10 @@ flowchart TB
 - 用户可从自己的其他 Session 选择已发布 Artifact，但不能读取那个 Session 的 Workspace。
 - 任何跨用户 Artifact/Blob 访问都按不存在处理。
 - HTML JavaScript 动效正常，预览不能获得 MK Cookie、Token、DOM、Workspace 或 Secret。
-- HTML Agent 的 `write_file=allow`，写文件不弹窗；`run_command=ask`，命令仍逐次询问；发布和 HTML 构建均为 allow。
+- HTML Agent 的 `write_file=allow`，写文件不弹窗；命令工具不向模型或 Agent 配置暴露；发布和 HTML 构建均为 allow。
+- 首次发布创建 v1；同会话继续修改且不保留旧版时覆盖同一 ID/vN；跨会话、Mention 既有 Artifact 或明确保留旧版时创建服务端自增的新 ID/vN。
+- Mention 始终读取该 Artifact ID 的当前内容；隐藏修订没有独立 URI，只能在用户明确要求时通过 `rollback_artifact` 恢复。
+- 每个 Artifact ID 最多保留配置化的三份修订（含当前内容），淘汰修订后无引用 Blob 会被清理。
 - 所有失败不自动重试；可重试项由用户手动触发。
 
 ### 16.2 配置与模型
@@ -654,11 +620,11 @@ flowchart TB
 - HTML 端到端只使用“大聪明”；不存在 Minimax 测试记录。
 - 外部能力缺失时直接报告未绑定，不偷偷换模型、换工具或换产物。
 
-### 16.3 并行报告
+### 16.3 并行报告（完成）
 
-- MCP 报告必须包含具体 Server、版本、配置、真实调用和输出结构，不以 README 推断代替实测。
-- PPTX 报告必须包含真实 `.pptx`、打开/渲染/结构结果和大聪明 Tool Trace。
-- PPTX 实测有差异时必须生成独立子 TRD；没有证据前不进入 PPTX 主功能开发。
+- MCP 报告包含具体 Server、版本、实际发现/调用、Rich Content 和云端边界；Brave 真实搜索因凭据与网络缺失明确标为未验证。
+- PPTX 报告包含真实 `.pptx`、打开/渲染/结构/编辑结果和大聪明 Tool Trace。
+- PPTX 实测差异已生成独立子 TRD；PPTX 主功能未进入本轮代码。
 
 ---
 
@@ -668,7 +634,7 @@ flowchart TB
 
 1. Artifact Repository/Blob Store/API 与功能开关。
 2. 轻量 Mention 和 Session/ACP 扩展。
-3. HTML Bundle 构建、Preview Origin 和 Artifact UI。
+3. HTML Bundle 发布、sandboxed iframe 和 Artifact UI。
 4. HTML Design Agent 配置化验收。
 
 MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
@@ -684,7 +650,7 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 
 - 可以关闭新 Artifact 发布和 HTML Preview，但仍保留既有 Blob/元数据供恢复。
 - 回滚不覆盖用户 Workspace，不批量重建，不自动重试。
-- Preview Origin 可独立关闭，不影响普通 Artifact 下载。
+- HTML Preview UI/路由可关闭，不影响普通 Artifact 下载。
 - PPTX 本轮无实现，因此没有 PPTX 功能回滚项。
 
 ---
@@ -693,10 +659,10 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 
 | 风险 | 影响 | 处理 |
 |---|---|---|
-| JavaScript 预览越权 | 高 | 独立 Origin、最小 iframe sandbox、越权测试 |
+| JavaScript 预览越权 | 高 | `srcDoc` 不透明源、最小 iframe sandbox、越权测试 |
 | Mention 文本与 Tag 状态不一致 | 中 | 身份只认 Meta；删除引用只操作 Tag，不用正文解析授权 |
 | 同 owner 跨 Session Artifact 被误当 Workspace | 高 | 始终从 Blob Store 读取，只在当前 Session 物化 |
-| Brave 图片只有 URL | 中 | 先测热链与下载边界，不伪装成 Blob |
+| Brave 图片只有 URL | 中 | 真实热链仍未验证；URL 不伪装成 Blob，稳定素材另做受控导入 |
 | Brave HTTP 公网无认证 | 高 | 只在回环/可信网络验证；云端需反代鉴权与 MK 配置补充 |
 | PPTX Skill 与运行时不兼容 | 高 | 独立真实验证；有差异就创建 PPTX 子 TRD |
 | `markitdown` 缺失 | 中 | 在验证报告中确认是否必需，不自动安装掩盖差异 |
@@ -721,14 +687,13 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 
 ---
 
-## 20. 待确认事项
+## 20. 后续边界
 
-两条批注均已通过代码确认并收敛，不再作为技术疑问：
+本轮没有待确认的主线开发项。后续工作保持独立，不反向扩大本轮范围：
 
-- Mention 使用 textarea + 同容器 Tag 标签，不开发富文本 Composer。
-- HTML Agent 使用 `write_file=allow`、`run_command=ask`；Artifact 发布和 HTML 构建均为 `allow`，没有额外构建确认。
-
-当前只等待用户对 v0.4 总方案的整体确认。确认后直接执行，不再为普通实现细节逐项追问。PPTX 的输入结构、后端和产品 Tool 由并行实测报告/必要时的独立 PPTX 子 TRD 决定。
+- PPTX 产品实现以项目外的 [`PPTX生成链路子方案-trd.md`](</Users/bones/Documents/Codex/2026-08-18/Models-Kindergarten-产物链路调研/PPTX/PPTX生成链路子方案-trd.md>) 为准，需用户另行确认后开发。
+- MCP 动态 Resource 临时授权、云端远程鉴权/VPC allowlist 和稳定 URL Import 分别设计，不内置 Server。
+- Brave 真实效果待具备 API Key 和云端出站网络后重测，不把当前 Schema/失败路径验证写成搜索质量通过。
 
 ---
 
@@ -739,4 +704,7 @@ MCP/PPTX 验证报告与主线并发产出，不是上述代码发布阶段。
 | 0.1 | 2026-08-17 | 合并 Artifact/Mention 与 HTML/PPT 生成链；不内置 Skill/MCP；模型改为大聪明 | Codex |
 | 0.2 | 2026-08-17 | HTML 执行 JavaScript；移除 Audio、旧迁移、取消后暂存、多格式聚合和自动重试；增加手动重试与宽松容量 | Codex |
 | 0.3 | 2026-08-17 | Mention 改为 textarea 外挂选择，不开发 Composer Editor；PPTX 实现移出主线；MCP/PPTX 改为并行真实验证；PPTX 单文件与 Mention 复用改为建议而非拦截；删除构建专用确认；明确跨用户 Artifact 和跨 Session Workspace 禁止 | Codex |
-| 0.4 | 2026-08-17 | 参照 JoyCode Team Studio 将 Mention 明确为 Composer 同容器 Tag 标签；纠正权限理解，HTML Agent 配置 `write_file=allow`、`run_command=ask`，Artifact 发布与 HTML 构建均为 `allow` | Codex |
+| 0.4 | 2026-08-17 | 参照 JoyCode Team Studio 将 Mention 明确为 Composer 同容器 Tag 标签；纠正权限理解，HTML Agent 配置 `write_file=allow`，Artifact 发布与 HTML 构建均为 `allow` | Codex |
+| 0.5 | 2026-08-18 | 记录 Artifact/Mention/HTML 实现与大聪明端到端验收；按真实代码修正 Tool/Contract/预览边界；合并 MCP/PPTX 实测结论并引用独立 PPTX 子 TRD | Codex |
+| 0.6 | 2026-08-18 | 纠正 GSAP CDN 误判；改用官方 Client 绕过 MK 独立验证 MCP Server，补充动态 Resource、Bearer 网关和私网直连通过证据；MK 限制只保留为后续开发计划 | Codex |
+| 0.7 | 2026-08-18 | Artifact 发布统一为首次/覆盖与新 vN 两个工具，增加显式回滚、每 ID 最近三份修订和无引用 Blob 清理；命令工具集中短路并从模型、提示词和 Agent 配置隐藏 | Codex |

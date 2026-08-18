@@ -8,6 +8,7 @@ describe("brand headers", () => {
     const html = renderToStaticMarkup(<SessionSidebar sessions={[]} activeId={null} disabled={false} onCreate={() => undefined} onSelect={() => undefined} />);
     expect(html).toContain("模型幼儿园");
     expect(html).toContain("Models KinderGarten");
+    expect(html).toContain('href="/"');
     expect(html).not.toContain("Local ACP classroom");
   });
 
@@ -15,6 +16,7 @@ describe("brand headers", () => {
     const html = renderToStaticMarkup(<ProductNav active="home" />);
     expect(html).toContain("模型幼儿园");
     expect(html).toContain("Models KinderGarten");
+    expect(html).toContain('href="/"');
     expect(html).not.toContain("ModelStudent</strong>");
   });
 });

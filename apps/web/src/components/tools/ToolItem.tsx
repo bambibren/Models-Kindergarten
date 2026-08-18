@@ -10,7 +10,7 @@ export function ToolItem({ entry }: { entry: ToolCallEntry }) {
   const phase = toolPhase(entry.status);
   const disclosure = useAutoDisclosure(phase);
   const artifacts = entry.content.flatMap((item) =>
-    item.type === "content" && item.content.type === "resource_link" && item.content.uri.startsWith("mk-file://")
+    item.type === "content" && item.content.type === "resource_link" && item.content.uri.startsWith("artifact://")
       ? [item.content]
       : []);
   return <Collapsible.Root className={`activity-item tool-item phase-${phase}`} open={disclosure.open} onOpenChange={disclosure.setOpen}>
@@ -37,7 +37,7 @@ export function ToolItem({ entry }: { entry: ToolCallEntry }) {
 }
 
 function openArtifact(uri: string): void {
-  window.dispatchEvent(new CustomEvent("mk-open-file-reference", { detail: uri.slice("mk-file://".length) }));
+  window.dispatchEvent(new CustomEvent("mk-open-artifact", { detail: uri.slice("artifact://".length) }));
 }
 
 function Detail({ label, children }: { label: string; children: React.ReactNode }) { return <section className="tool-section"><span>{label}</span>{children}</section>; }

@@ -58,6 +58,27 @@ const MODEL_OUTPUT_CONTRACT = [
   "- thinking/analysis 只用于内部推理，不能替代工具调用或最终正文；不要用只有 thinking/analysis 的响应结束一轮。",
 ].join("\n");
 
+const FILE_ARTIFACT_DELIVERY_CONTRACT = [
+  "【文件产物交付契约】",
+  "- 当用户要求生成、创建、修改并交付任何文件时，写入 Workspace 只是中间步骤，不代表任务完成。",
+  "- 必须在最终回复前调用 publish_artifact 或 publish_artifact_version 并确认成功；普通文件和 HTML Bundle 都通过 artifact_type 选择类型。",
+  "- 首次发布不传 artifact_id，由服务端创建 v1；模型不得自行填写或猜测版本号。",
+  "- 在同一会话中继续修改同一个 Artifact，且用户没有要求保留旧版时，调用 publish_artifact 并传入现有 artifact_id，覆盖当前 vN；Artifact ID 和版本号保持不变。",
+  "- 跨会话修改、修改用户 Mention 的既有 Artifact，或用户明确要求新版本、v2、保留旧版时，调用 publish_artifact_version 并传入现有 artifact_id；服务端自动创建新 ID 和下一个 vN。",
+  "- 只有用户明确要求回滚时才能调用 rollback_artifact；不得把隐藏修订当作可访问的历史版本，也不得主动回滚。",
+  "- 适用的发布工具可用时，未成功发布前不得把 Workspace 路径或写入结果作为文件交付给用户，不得声称文件已经完成，也不得结束本轮。",
+  "- write_file 产生的 Workspace 文件不可预览；只有成功发布得到的 Artifact 才能预览、下载、Mention 和后续复用。",
+  "- 如果当前 Agent 没有适用的发布工具，必须明确说明缺少发布能力；不得用 Workspace 文件冒充已交付产物。",
+].join("\n");
+
+const ARTIFACT_MENTION_CONTRACT = [
+  "【Artifact Mention 语义】",
+  "- 用户本轮可能明确引用已有 Artifact；每项引用都包含稳定 artifactId 和只读 artifact:// 地址。",
+  "- 这些内容是当前用户已经拥有、可直接读取或复用的产物；适合任务时优先复用，不要仅因为存在生成工具就重复生成。",
+  "- 用户明确要求新版本、新素材或引用不适用时，可以生成新内容。",
+  "- 不要按文件名猜测产物身份，也不要尝试读取其他用户或其他 Session 的 Workspace。",
+].join("\n");
+
 export interface RunInput {
   text: string;
   sessionEntries: SessionEntry[];
@@ -909,6 +930,8 @@ function appendRuntimeContracts(systemPrompt: string): string {
   const prompt = systemPrompt.trimEnd();
   const contracts = [
     MODEL_OUTPUT_CONTRACT,
+    FILE_ARTIFACT_DELIVERY_CONTRACT,
+    ARTIFACT_MENTION_CONTRACT,
     skillUseProtocol(configuredSkillContextVersion()),
   ].join("\n\n");
   return prompt ? `${prompt}\n\n${contracts}` : contracts;

@@ -16,6 +16,9 @@ import type {
   SkillInstallJob,
   SkillInstallation,
   ConcreteReasoningProfile,
+  ArtifactListResponse,
+  ArtifactPreviewResponse,
+  ArtifactRecord,
 } from "@kindergarten/contracts";
 
 const CONTROL_URL = import.meta.env.VITE_CONTROL_API_URL ?? "http://127.0.0.1:7331/api/control/v1";
@@ -38,6 +41,7 @@ export interface SessionLaunchDraft {
   modelStudentId: string;
   agentId: string;
   promptText: string;
+  artifactMentions?: import("@kindergarten/contracts").ArtifactMentionInput[];
   reasoningProfileOverride?: ConcreteReasoningProfile;
 }
 
@@ -77,7 +81,7 @@ export const controlApi = {
   installModelStudent: (input: ModelStudentInstallInput) => request<ModelStudentSummary>("/model-students", "POST", input),
   removeModel: (id: string) => request<void>(`/model-students/${encodeURIComponent(id)}`, "DELETE"),
   sessions: () => get<{ items: SessionSummary[] }>("/sessions?purpose=chat"),
-  createSessionLaunch: (input: { modelStudentId: string; agentId: string; promptText: string; reasoningProfileOverride?: ConcreteReasoningProfile }) => request<SessionLaunchDraft>("/session-launches", "POST", input),
+  createSessionLaunch: (input: { modelStudentId: string; agentId: string; promptText: string; artifactMentions?: import("@kindergarten/contracts").ArtifactMentionInput[]; reasoningProfileOverride?: ConcreteReasoningProfile }) => request<SessionLaunchDraft>("/session-launches", "POST", input),
   sessionLaunch: (id: string) => get<SessionLaunchDraft>(`/session-launches/${encodeURIComponent(id)}`),
   turn: (id: string) => get<{ turnId: string; state: import("@kindergarten/contracts").TurnState }>(`/turns/${encodeURIComponent(id)}`),
   turnContext: (id: string) => get<TurnContextSnapshot>(`/turns/${encodeURIComponent(id)}/context`),
@@ -102,6 +106,11 @@ export const controlApi = {
   fileReference: (id: string) => get<FileReference>(`/files/${encodeURIComponent(id)}`),
   filePreview: (id: string) => get<FilePreviewResponse>(`/files/${encodeURIComponent(id)}/preview`),
   contentUrl: (id: string) => `${CONTROL_URL}/files/${encodeURIComponent(id)}/content`,
+  artifacts: (query = "", state: "active" | "archived" | "all" = "active") => get<ArtifactListResponse>(`/artifacts?state=${state}&query=${encodeURIComponent(query)}`),
+  artifact: (id: string) => get<ArtifactRecord>(`/artifacts/${encodeURIComponent(id)}`),
+  artifactPreview: (id: string) => get<ArtifactPreviewResponse>(`/artifacts/${encodeURIComponent(id)}/preview`),
+  artifactContentUrl: (id: string) => `${CONTROL_URL}/artifacts/${encodeURIComponent(id)}/content`,
+  setArtifactState: (id: string, action: "archive" | "restore") => request<ArtifactRecord>(`/artifacts/${encodeURIComponent(id)}/${action}`, "POST", {}),
 };
 
 export class ControlApiError extends Error {

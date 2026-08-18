@@ -1,4 +1,5 @@
 import type { TurnState } from "@kindergarten/contracts";
+import type { ArtifactMentionInput } from "@kindergarten/contracts";
 import {
   idlePromptTurn,
   type InteractionCollection,
@@ -12,7 +13,7 @@ import {
 export type PromptTurnAction =
   | { type: "turn/reset" }
   | { type: "turn/start"; request: PromptRequestState }
-  | { type: "turn/remote-state"; sessionId: string; turn: TurnState; restoredText?: string }
+  | { type: "turn/remote-state"; sessionId: string; turn: TurnState; restoredText?: string; restoredArtifactMentions?: ArtifactMentionInput[] }
   | { type: "interaction/enqueue"; interaction: PendingInteractionState }
   | { type: "interaction/remove"; id: string }
   | { type: "turn/complete"; operationId: string; reason: Exclude<import("@agentclientprotocol/sdk").StopReason, "cancelled"> }
@@ -31,7 +32,7 @@ export function promptTurnReducer(state: PromptTurnState, action: PromptTurnActi
       interactions: emptyInteractions(),
     };
   }
-  if (action.type === "turn/remote-state") return reduceRemoteState(state, action.sessionId, action.turn, action.restoredText);
+  if (action.type === "turn/remote-state") return reduceRemoteState(state, action.sessionId, action.turn, action.restoredText, action.restoredArtifactMentions);
   if (action.type === "interaction/enqueue") {
     if (state.status !== "active") return state;
     const sessionId = interactionSessionId(action.interaction);
@@ -56,7 +57,7 @@ export function promptTurnReducer(state: PromptTurnState, action: PromptTurnActi
   return { status: "cancelled", request: state.request };
 }
 
-function reduceRemoteState(state: PromptTurnState, sessionId: string, turn: TurnState, restoredText = ""): PromptTurnState {
+function reduceRemoteState(state: PromptTurnState, sessionId: string, turn: TurnState, restoredText = "", restoredArtifactMentions: ArtifactMentionInput[] = []): PromptTurnState {
   if (state.status === "idle") {
     if (turn.status !== "active") return state;
     return {
@@ -69,6 +70,7 @@ function reduceRemoteState(state: PromptTurnState, sessionId: string, turn: Turn
         sessionId,
         turnId: turn.turnId,
         text: restoredText,
+        ...(restoredArtifactMentions.length ? { artifactMentions: restoredArtifactMentions } : {}),
       },
       interactions: emptyInteractions(),
     };

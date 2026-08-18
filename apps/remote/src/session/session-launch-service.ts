@@ -6,6 +6,7 @@ import { AtomicJsonStore } from "../storage/atomic-json-store.js";
 import {
   isConcreteReasoningProfile,
   PRODUCT_CONFIG,
+  type ArtifactMentionInput,
   type ConcreteReasoningProfile,
 } from "@kindergarten/contracts";
 
@@ -16,6 +17,7 @@ export interface SessionLaunchDraft {
   modelStudentId: string;
   agentId: string;
   promptText: string;
+  artifactMentions?: ArtifactMentionInput[];
   reasoningProfileOverride?: ConcreteReasoningProfile;
   createdAt: string;
   expiresAt: string;
@@ -33,6 +35,7 @@ export class SessionLaunchService {
     if (raw.reasoningProfileOverride !== undefined && !isConcreteReasoningProfile(raw.reasoningProfileOverride)) {
       throw invalid("reasoningProfileOverride 格式无效");
     }
+    const artifactMentions = readArtifactMentions(raw.artifactMentions);
     const promptText = raw.promptText.trim();
     if (!promptText || promptText.length > PRODUCT_CONFIG.sessionLaunch.maxPromptCharacters) {
       throw invalid(`promptText 必须为 1 到 ${PRODUCT_CONFIG.sessionLaunch.maxPromptCharacters} 个字符`);
@@ -47,6 +50,7 @@ export class SessionLaunchService {
       modelStudentId: raw.modelStudentId,
       agentId: raw.agentId,
       promptText,
+      ...(artifactMentions.length > 0 ? { artifactMentions } : {}),
       ...(isConcreteReasoningProfile(raw.reasoningProfileOverride)
         ? { reasoningProfileOverride: raw.reasoningProfileOverride }
         : {}),
@@ -68,8 +72,17 @@ export class SessionLaunchService {
 function isDraft(value: unknown): value is SessionLaunchDraft {
   return record(value) && value.schemaVersion === 1 && typeof value.launchId === "string" && typeof value.ownerId === "string" &&
     typeof value.modelStudentId === "string" && typeof value.agentId === "string" && typeof value.promptText === "string" &&
+    (value.artifactMentions === undefined || isArtifactMentions(value.artifactMentions)) &&
     (value.reasoningProfileOverride === undefined || isConcreteReasoningProfile(value.reasoningProfileOverride)) &&
     typeof value.createdAt === "string" && typeof value.expiresAt === "string";
 }
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function isArtifactMentions(value: unknown): value is ArtifactMentionInput[] {
+  return Array.isArray(value) && value.every((item) => record(item) && typeof item.artifactId === "string" && item.artifactId.length > 0);
+}
+function readArtifactMentions(value: unknown): ArtifactMentionInput[] {
+  if (value === undefined) return [];
+  if (!isArtifactMentions(value)) throw invalid("artifactMentions 格式无效");
+  return value.map((item) => ({ artifactId: item.artifactId }));
+}
 function invalid(message: string): ApiProblemError { return new ApiProblemError(400, "VALIDATION_FAILED", message, false); }

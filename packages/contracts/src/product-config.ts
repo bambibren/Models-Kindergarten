@@ -4,6 +4,18 @@
  * 这些数值先保留现有行为，但不再散落在业务逻辑里；后续有产品依据时只在这里调整。
  */
 export const PRODUCT_CONFIG = {
+  artifact: {
+    /** 每个 Artifact ID 包含当前内容在内最多保留的修订总数。 */
+    maxRetainedRevisions: 3,
+    /** 普通 Artifact 首版采用较大的单文件上限，后续再按云端观测收紧。 */
+    maxFileBytes: 100 * 1024 * 1024,
+    /** HTML Bundle 的所有文件总量上限。 */
+    maxHtmlBundleBytes: 500 * 1024 * 1024,
+    /** 单个 Turn 可占用的构建/发布临时空间预算。 */
+    maxTurnStagingBytes: 1024 * 1024 * 1024,
+    /** 文本预览只进入模型/UI 的前 5 MiB；原始 Artifact 仍可完整下载。 */
+    maxTextPreviewBytes: 5 * 1024 * 1024,
+  },
   skill: {
     /** 单个 Skill 最多收集的文件数，防止安装过程失控。 */
     maxFiles: 200,
@@ -41,6 +53,10 @@ export const PRODUCT_CONFIG = {
     historyRecentTurnsMax: 50,
   },
   tools: {
+    file: {
+      /** FileSandbox 文本和普通文件 Tool 的默认读写上限。 */
+      maxBytes: 5 * 1024 * 1024,
+    },
     process: {
       /** 单条终端命令的当前字符上限。 */
       commandMaxCharacters: 2_000,

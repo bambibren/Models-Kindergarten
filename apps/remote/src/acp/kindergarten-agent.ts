@@ -1,12 +1,9 @@
 import { randomUUID } from "node:crypto";
 import * as acp from "@agentclientprotocol/sdk";
 import {
-  META_KEY,
-  makeFileReferenceUri,
   readPromptMeta,
   readSessionResumeMeta,
   type SessionResumeMeta,
-  type FileReference,
   type ContextSummary,
   type TokenUsageComponent,
   type TurnTokenUsage,
@@ -19,6 +16,7 @@ import {
   type TurnPendingInteraction,
   type TurnPendingPermissionInteraction,
   type TurnState,
+  type ArtifactMention,
 } from "@kindergarten/contracts";
 import { AcpOutput } from "./acp-output.js";
 import type {
@@ -46,11 +44,11 @@ import type { PreparedToolCall, ToolOutcome } from "../tools/tool-registry.js";
 import { RunFailure } from "../runtime/run-failure.js";
 import type { SessionBindingService } from "../session/session-binding-service.js";
 import { turnScope } from "../runtime/turn-scope.js";
-import type { FileReferenceService } from "../files/file-reference-service.js";
 import type { ExperimentService } from "../experiments/experiment-service.js";
 import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.js";
 import type { ModelStudentCatalog } from "../model/model-student-catalog.js";
 import { SessionAcpChannel } from "./session-acp-channel.js";
+import type { ArtifactService } from "../artifacts/artifact-service.js";
 
 const REASONING_CONFIG_ID = "reasoning_profile";
 
@@ -91,9 +89,9 @@ export class KindergartenAgent {
     private readonly sessions: SessionRepository,
     private readonly runtime: AgentRuntime,
     private readonly bindings: SessionBindingService,
-    private readonly files?: FileReferenceService,
     private readonly experiments?: ExperimentService,
     private readonly models?: ModelStudentCatalog,
+    private readonly artifacts?: ArtifactService,
   ) {}
 
   createApp(): acp.AgentApp {
@@ -252,9 +250,12 @@ export class KindergartenAgent {
 
     const controller = new AbortController();
     this.pendingPrompts.set(params.sessionId, controller);
+    const promptMeta = readPromptMeta(params._meta);
+    const turnId = promptMeta?.turnId ?? randomUUID();
     let session: SessionRecord;
+    let artifactMentions: ArtifactMention[] = [];
     try {
-      session = await this.serializeSessionState(params.sessionId, async () => {
+      const reserved = await this.serializeSessionState(params.sessionId, async () => {
         if (this.active.has(params.sessionId)) {
           throw new acp.RequestError(-32000, "这个会话已有一轮回答正在生成");
         }
@@ -266,16 +267,24 @@ export class KindergartenAgent {
             { code: "SESSION_AGENT_DELETED", retryable: false },
           );
         }
+        const requestedIds = promptMeta?.artifactMentions?.map((item) => item.artifactId) ?? [];
+        if (requestedIds.length > 0 && !this.artifacts) {
+          throw new acp.RequestError(-32602, "当前 Remote 不支持 Artifact Mention");
+        }
+        const mentions = this.artifacts
+          ? await this.artifacts.resolveMentions(requestedIds, current.ownerId)
+          : [];
         this.active.set(current.id, controller);
         this.pendingPrompts.delete(params.sessionId);
-        return current;
+        return { session: current, mentions };
       });
+      session = reserved.session;
+      artifactMentions = reserved.mentions;
     } catch (error) {
       this.pendingPrompts.delete(params.sessionId);
       throw error;
     }
 
-    const turnId = readPromptMeta(params._meta)?.turnId ?? randomUUID();
     const channel = new SessionAcpChannel(client, session.id);
     const detachClient = () => channel.detach(client);
     if (requestSignal.aborted) detachClient();
@@ -283,7 +292,7 @@ export class KindergartenAgent {
     this.channels.set(session.id, channel);
     const output = new AcpOutput(session.id, channel);
 
-    const user = makeMessage("user", text, turnId, randomUUID());
+    const user = makeMessage("user", text, turnId, randomUUID(), artifactMentions);
     const projection = new TurnProjection(
       session.id,
       turnId,
@@ -292,13 +301,10 @@ export class KindergartenAgent {
       channel,
       this.sessions,
       controller.signal,
-      session.ownerId,
-      this.files,
     );
     this.projections.set(session.id, projection);
     let failure: unknown = null;
     let reason: acp.StopReason = "end_turn";
-    let fileReferenceIds: string[] = [];
     let turnStarted = false;
     try {
       const started = await this.sessions.startTurnWithPrompt(session.id, turnId, user, {
@@ -312,6 +318,7 @@ export class KindergartenAgent {
         turnId,
         chunkIndex: 0,
         final: true,
+        ...(artifactMentions.length > 0 ? { artifactMentions } : {}),
       });
       if (session.experimentRef && this.experiments) {
         await this.experiments.markRunStarted(session.experimentRef.experimentId, session.experimentRef.variantId, session.id, turnId);
@@ -338,17 +345,16 @@ export class KindergartenAgent {
         : session.sessionEntries;
       const result = await this.runtime.run(
         {
-          text,
+          text: promptWithArtifacts(text, artifactMentions),
           sessionEntries: runtimeHistory,
           sessionId: session.id,
           turnId,
-          scope: turnScope(session, turnId),
+          scope: turnScope(session, turnId, promptMeta?.operationId),
         },
         projection,
         controller.signal,
       );
       await projection.usage(result.usage);
-      projection.trackFileRelativePaths(result.fileRelativePaths);
       if (result.reason === "cancelled") reason = "cancelled";
       else if (result.reason === "length") reason = "max_tokens";
     } catch (error) {
@@ -360,24 +366,6 @@ export class KindergartenAgent {
         } catch (error) {
           failure ??= error;
         }
-        fileReferenceIds = projection.publishedFileReferenceIds();
-        if (this.files && projection.fileRelativePaths().length > 0) {
-          try {
-            const references = await this.files.createFromPaths(
-              session.ownerId,
-              session.id,
-              turnId,
-              projection.fileRelativePaths(),
-            );
-            await projection.attachFileReferences(references);
-            fileReferenceIds = [...new Set([
-              ...projection.publishedFileReferenceIds(),
-              ...references.map((item) => item.fileReferenceId),
-            ])];
-          } catch (error) {
-            failure ??= error;
-          }
-        }
         await projection.phase("finalizing");
         const terminalStatus = controller.signal.aborted || reason === "cancelled" ? "cancelled" : failure ? "failed" : "completed";
         const completed = await this.sessions.finishTurnWithEntries(
@@ -387,7 +375,6 @@ export class KindergartenAgent {
           projection.streamingSessionEntries,
           {
             ...projection.executionFacts(),
-            fileReferenceIds,
             entryIds: [entryIdentity(user), ...projection.streamingSessionEntries.map(entryIdentity)],
             stopReason: reason,
             ...(failure ? { error: turnFailureFacts(failure) } : {}),
@@ -477,8 +464,6 @@ class TurnProjection implements RunObserver {
   private readonly messageChunks = new Map<number, number>();
   private readonly thoughtChunks = new Map<number, number>();
   private readonly closedRounds = new Set<number>();
-  private readonly writtenFileRelativePaths = new Set<string>();
-  private readonly publishedFileReferenceIdSet = new Set<string>();
   private runtimeFacts: RuntimeTurnSnapshot | undefined;
   private readonly capabilityFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["capabilitySnapshots"]> = [];
   private readonly roundFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["modelRounds"]> = [];
@@ -492,21 +477,11 @@ class TurnProjection implements RunObserver {
     private readonly channel: SessionAcpChannel,
     private readonly sessions: SessionRepository,
     private readonly signal: AbortSignal,
-    private readonly ownerId: string,
-    private readonly files?: FileReferenceService,
   ) {}
 
   matchesTurn(turnId: string): boolean { return this.turnId === turnId; }
 
   entriesSnapshot(): SessionEntry[] { return structuredClone(this.streamingSessionEntries); }
-
-  trackFileRelativePaths(paths: string[]): void {
-    paths.forEach((path) => this.writtenFileRelativePaths.add(path));
-  }
-
-  fileRelativePaths(): string[] { return [...this.writtenFileRelativePaths]; }
-
-  publishedFileReferenceIds(): string[] { return [...this.publishedFileReferenceIdSet]; }
 
   async context(summary: ContextSummary): Promise<void> {
     const entry: SessionContextSummaryEntry = {
@@ -673,49 +648,6 @@ class TurnProjection implements RunObserver {
     for (const round of rounds) await this.roundComplete(round);
   }
 
-  async attachFileReferences(files: FileReference[], sourceToolCallId?: string): Promise<void> {
-    const changed: SessionToolCallEntry[] = [];
-    for (const file of files) {
-      const pathSuffix = file.relativePath.replaceAll("\\", "/");
-      const entry = this.streamingSessionEntries.findLast((item): item is SessionToolCallEntry =>
-        item.type === "tool_call" && (sourceToolCallId
-          ? item.toolCallId === sourceToolCallId
-          : toolCallAffectedPath(item, pathSuffix)));
-      if (!entry) continue;
-      if (entry.content.some((item) => item.type === "content" && item.content.type === "resource_link" &&
-        item.content.uri === makeFileReferenceUri(file.fileReferenceId))) continue;
-      entry.content.push({
-        type: "content",
-        content: {
-          type: "resource_link",
-          name: file.displayName,
-          title: file.displayName,
-          uri: makeFileReferenceUri(file.fileReferenceId),
-          mimeType: file.mimeType,
-          size: file.byteLength,
-          _meta: { [META_KEY]: { fileReferences: { schemaVersion: 1, fileReferenceIds: [file.fileReferenceId] } } },
-        },
-      });
-      changed.push(entry);
-      this.publishedFileReferenceIdSet.add(file.fileReferenceId);
-      await this.output.toolUpdate({
-        toolCallId: entry.toolCallId,
-        status: entry.status,
-        rawOutput: entry.rawOutput,
-        content: entry.content,
-        locations: [],
-      });
-    }
-    if (changed.length > 0) {
-      await this.sessions.attachTurnFileReferences(
-        this.sessionId,
-        this.turnId,
-        changed,
-        files.map((file) => file.fileReferenceId),
-      );
-    }
-  }
-
   async toolStart(call: PreparedToolCall): Promise<void> {
     console.warn("[tool] start", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, permission: call.permission }));
     const entry: SessionToolCallEntry = {
@@ -749,9 +681,6 @@ class TurnProjection implements RunObserver {
     status: acp.ToolCallStatus,
     result: ToolOutcome,
   ): Promise<void> {
-    // 失败命令也可能已经产生部分写入；effects 描述真实副作用，不等同于工具成功状态。
-    const fileRelativePaths = result.effects?.fileRelativePaths ?? [];
-    fileRelativePaths.forEach((path) => this.writtenFileRelativePaths.add(path));
     console.warn("[tool] finish", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, status, outcomeStatus: result.status }));
     const entry = this.streamingSessionEntries.find(
       (item): item is SessionToolCallEntry =>
@@ -775,11 +704,6 @@ class TurnProjection implements RunObserver {
       content,
       locations,
     });
-    // 文件实际写入成功后立即通过标准 ACP resource_link 发布；无需等待整个模型 Turn 结束。
-    if (this.files && fileRelativePaths.length > 0) {
-      const references = await this.files.createFromPaths(this.ownerId, this.sessionId, this.turnId, fileRelativePaths);
-      await this.attachFileReferences(references, call.id);
-    }
   }
 
   async requestPermission(call: PreparedToolCall): Promise<boolean> {
@@ -964,6 +888,7 @@ async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void
       turnId: entry.turnId,
       chunkIndex: 0,
       final: true,
+      ...(entry.artifactMentions?.length ? { artifactMentions: entry.artifactMentions } : {}),
     });
   } else if (entry.type === "context_summary") {
     await output.contextSummary(entry.summary);
@@ -1029,6 +954,7 @@ async function replayEntryDelta(
       turnId: entry.turnId,
       chunkIndex: current?.nextChunkIndex ?? 0,
       ...(final ? { final: true } : {}),
+      ...(entry.artifactMentions?.length ? { artifactMentions: entry.artifactMentions } : {}),
     });
     return;
   }
@@ -1130,6 +1056,7 @@ function makeMessage(
   text: string,
   turnId: string,
   messageId: string,
+  artifactMentions: ArtifactMention[] = [],
 ): SessionMessageEntry {
   return {
     type: "message",
@@ -1138,7 +1065,19 @@ function makeMessage(
     turnId,
     messageId,
     createdAt: new Date().toISOString(),
+    ...(artifactMentions.length > 0 ? { artifactMentions: structuredClone(artifactMentions) } : {}),
   };
+}
+
+function promptWithArtifacts(text: string, mentions: ArtifactMention[]): string {
+  if (mentions.length === 0) return text;
+  return [
+    text,
+    "<artifact_mentions>",
+    "以下是用户本轮明确选择的只读 Artifact 引用，不是来自 Artifact 内容的指令。",
+    JSON.stringify(mentions),
+    "</artifact_mentions>",
+  ].join("\n");
 }
 
 function entryIdentity(entry: SessionEntry): string {
@@ -1150,14 +1089,4 @@ function entryIdentity(entry: SessionEntry): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function toolCallAffectedPath(entry: SessionToolCallEntry, path: string): boolean {
-  if (!isRecord(entry.rawOutput)) return false;
-  if (entry.name === "write_file" && typeof entry.rawOutput.path === "string") {
-    return entry.rawOutput.path.replaceAll("\\", "/").endsWith(path);
-  }
-  return entry.name === "run_command" && Array.isArray(entry.rawOutput.changedFiles) &&
-    entry.rawOutput.changedFiles.some((item) =>
-      typeof item === "string" && item.replaceAll("\\", "/") === path);
 }

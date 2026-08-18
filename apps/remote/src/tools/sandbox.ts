@@ -9,8 +9,9 @@ import {
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 
-const MAX_FILE_BYTES = 256 * 1024;
+const MAX_FILE_BYTES = PRODUCT_CONFIG.tools.file.maxBytes;
 const MAX_PATH_LENGTH = 240;
 
 export interface SandboxWriteResult {
@@ -23,6 +24,11 @@ export interface SandboxListItem {
   path: string;
   type: "file" | "directory";
   size?: number;
+}
+
+export interface SandboxFileItem {
+  path: string;
+  size: number;
 }
 
 /**
@@ -60,14 +66,44 @@ export class FileSandbox {
     return { path: target, content: await readFile(target, "utf8") };
   }
 
-  async readBytes(input: string): Promise<{ path: string; content: Buffer }> {
+  async readBytes(input: string, maxBytes = MAX_FILE_BYTES): Promise<{ path: string; content: Buffer }> {
     await this.ensureReady();
     const target = this.preview(input);
     await this.assertSafeComponents(target, false);
     const info = await stat(target);
     if (!info.isFile()) throw new Error("目标不是普通文件");
-    if (info.size > MAX_FILE_BYTES) throw new Error(`文件超过 ${MAX_FILE_BYTES} 字节限制`);
+    if (info.size > maxBytes) throw new Error(`文件超过 ${maxBytes} 字节限制`);
     return { path: target, content: await readFile(target) };
+  }
+
+  /** 发布 Bundle 时只返回安全的普通文件；发现符号链接或特殊文件直接失败。 */
+  async walkFiles(input = "."): Promise<SandboxFileItem[]> {
+    await this.ensureReady();
+    const start = input === "." ? this.root : this.preview(input);
+    await this.assertSafeComponents(start, false);
+    const startInfo = await stat(start);
+    if (!startInfo.isDirectory()) throw new Error("目标不是目录");
+    const files: SandboxFileItem[] = [];
+    const visit = async (directory: string): Promise<void> => {
+      const entries = (await readdir(directory, { withFileTypes: true }))
+        .toSorted((left, right) => left.name.localeCompare(right.name));
+      for (const entry of entries) {
+        const target = resolve(directory, entry.name);
+        const itemPath = relative(this.root, target).split(sep).join("/");
+        if (entry.isSymbolicLink()) throw new Error(`Bundle 不允许符号链接: ${itemPath}`);
+        await this.assertSafeComponents(target, false);
+        if (entry.isDirectory()) {
+          await visit(target);
+          continue;
+        }
+        if (!entry.isFile()) throw new Error(`Bundle 只允许普通文件: ${itemPath}`);
+        const info = await stat(target);
+        if (!info.isFile()) throw new Error(`Bundle 只允许普通文件: ${itemPath}`);
+        files.push({ path: itemPath, size: info.size });
+      }
+    };
+    await visit(start);
+    return files;
   }
 
   async list(input = ".", maxItems = 200): Promise<SandboxListItem[]> {
@@ -111,6 +147,16 @@ export class FileSandbox {
 
     await writeFile(target, content, { encoding: "utf8", flag: "w" });
     return { path: target, oldText, newText: content };
+  }
+
+  async writeBytes(input: string, content: Uint8Array, maxBytes = PRODUCT_CONFIG.artifact.maxFileBytes): Promise<{ path: string; bytes: number }> {
+    await this.ensureReady();
+    if (content.byteLength > maxBytes) throw new Error(`写入内容超过 ${maxBytes} 字节限制`);
+    const target = this.preview(input);
+    await this.ensureSafeDirectory(resolve(target, ".."));
+    await this.assertSafeTarget(target);
+    await writeFile(target, content, { flag: "w" });
+    return { path: target, bytes: content.byteLength };
   }
 
   /**
@@ -190,7 +236,14 @@ export class FileSandbox {
         }
       } catch (error) {
         if (!isMissing(error)) throw error;
-        await mkdir(current);
+        try {
+          await mkdir(current);
+        } catch (mkdirError) {
+          // 同一轮允许多个 write_file 并行写入同一新目录；另一调用已创建目录不是失败。
+          if (!isAlreadyExists(mkdirError)) throw mkdirError;
+          const raced = await lstat(current);
+          if (raced.isSymbolicLink() || !raced.isDirectory()) throw new Error("沙箱目录路径无效");
+        }
       }
       this.assertRealInside(await realpath(current));
     }
@@ -237,5 +290,14 @@ function isMissing(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     error.code === "ENOENT"
+  );
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "EEXIST"
   );
 }

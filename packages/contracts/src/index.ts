@@ -1,5 +1,6 @@
 import { META_KEY } from "./common.js";
 import type { FileReferencesMeta, OperationProjectionMeta } from "./control-api.js";
+import type { ArtifactMention, ArtifactMentionInput } from "./artifacts.js";
 import type { ExperimentRunRefMeta, SessionBindingMeta } from "./session-binding.js";
 import type { SessionResumeMeta } from "./session-resume.js";
 
@@ -101,11 +102,14 @@ export interface MessageMeta {
   turnId: string;
   chunkIndex: number;
   final?: boolean;
+  artifactMentions?: ArtifactMention[];
 }
 
 export interface PromptMeta {
   schemaVersion: 1;
   turnId: string;
+  operationId?: string;
+  artifactMentions?: ArtifactMentionInput[];
 }
 
 export interface KindergartenMeta {
@@ -153,6 +157,9 @@ export function readMessageMeta(value: unknown): MessageMeta | undefined {
     turnId: meta.turnId,
     chunkIndex: meta.chunkIndex,
     ...(typeof meta.final === "boolean" ? { final: meta.final } : {}),
+    ...(Array.isArray(meta.artifactMentions)
+      ? { artifactMentions: meta.artifactMentions.map(readArtifactMention) }
+      : {}),
   };
 }
 
@@ -172,6 +179,39 @@ export function readPromptMeta(value: unknown): PromptMeta | undefined {
   return {
     schemaVersion: 1,
     turnId: meta.turnId,
+    ...(typeof meta.operationId === "string" ? { operationId: meta.operationId } : {}),
+    ...(Array.isArray(meta.artifactMentions)
+      ? { artifactMentions: meta.artifactMentions.map(readArtifactMentionInput) }
+      : {}),
+  };
+}
+
+function readArtifactMentionInput(value: unknown): ArtifactMentionInput {
+  if (!isRecord(value) || typeof value.artifactId !== "string" || value.artifactId.length === 0) {
+    throw new Error("Artifact Mention 缺少 artifactId");
+  }
+  return { artifactId: value.artifactId };
+}
+
+function readArtifactMention(value: unknown): ArtifactMention {
+  if (
+    !isRecord(value) ||
+    typeof value.artifactId !== "string" ||
+    typeof value.uri !== "string" ||
+    typeof value.displayName !== "string" ||
+    (value.kind !== "file" && value.kind !== "html_bundle") ||
+    typeof value.mimeType !== "string" ||
+    typeof value.byteLength !== "number"
+  ) {
+    throw new Error("Artifact Mention 格式无效");
+  }
+  return {
+    artifactId: value.artifactId,
+    uri: value.uri,
+    displayName: value.displayName,
+    kind: value.kind,
+    mimeType: value.mimeType,
+    byteLength: value.byteLength,
   };
 }
 
@@ -349,6 +389,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export * from "./agent-management.js";
+export * from "./artifacts.js";
 export * from "./common.js";
 export * from "./control-api.js";
 export * from "./experiments.js";

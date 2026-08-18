@@ -20,7 +20,6 @@ import { FileSandbox } from "../src/tools/sandbox.js";
 import { ToolRegistry } from "../src/tools/tool-registry.js";
 import { ToolCallLedger, ToolRuntime, type ToolObserver } from "../src/tools/tool-runtime.js";
 import { SessionBindingService } from "../src/session/session-binding-service.js";
-import type { FileReferenceService } from "../src/files/file-reference-service.js";
 
 const tempDirs: string[] = [];
 
@@ -245,32 +244,16 @@ describe("Tool Loop", () => {
     await expect(access(join(dir, "sandbox", "denied", "result.html"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("文件工具完成后在 Turn 继续生成期间立即发布预览引用", async () => {
+  it("文件工具完成后不创建预览引用，等待显式发布", async () => {
     const dir = await tempDir();
     const sandbox = new FileSandbox(join(dir, "sandbox"));
     await sandbox.initialize();
     const sessions = new SessionRepository(join(dir, "data"));
     const provider = new WriteThenWaitProvider();
-    const createFromPaths = vi.fn(async (_ownerId: string, sessionId: string, turnId: string) => [{
-      schemaVersion: 1 as const,
-      fileReferenceId: "file_streamed1234567890abcdef1234567890",
-      ownerId: "local-admin",
-      sessionId,
-      turnId,
-      displayName: "index.html",
-      relativePath: "index.html",
-      mimeType: "text/html",
-      byteLength: 15,
-      sha256: "a".repeat(64),
-      previewKind: "static_html" as const,
-      createdAt: "2026-08-17T00:00:00.000Z",
-    }]);
-    const files = { createFromPaths } as unknown as FileReferenceService;
     const agent = new KindergartenAgent(
       sessions,
       AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox)),
       testBindings(),
-      files,
     ).createApp();
     const updates: acp.SessionNotification[] = [];
     const client = acp.client({ name: "streamed-artifact-page" })
@@ -295,11 +278,13 @@ describe("Tool Loop", () => {
 
     await vi.waitFor(() => expect(updates.some((notice) => {
       const update = notice.update;
-      return update.sessionUpdate === "tool_call_update" && update.content?.some((item) =>
-        item.type === "content" && item.content.type === "resource_link" &&
-        item.content.uri === "mk-file://file_streamed1234567890abcdef1234567890");
+      return update.sessionUpdate === "tool_call_update" && update.toolCallId === "streamed-write" && update.status === "completed";
     })).toBe(true));
-    expect(createFromPaths).toHaveBeenCalledTimes(1);
+    expect(updates.some((notice) => {
+      const update = notice.update;
+      return update.sessionUpdate === "tool_call_update" && update.content?.some((item) =>
+        item.type === "content" && item.content.type === "resource_link" && item.content.uri.startsWith("mk-file://"));
+    })).toBe(false);
 
     provider.continueSecondRound();
     await prompt;
@@ -307,33 +292,17 @@ describe("Tool Loop", () => {
     await client.closed;
   });
 
-  it.runIf(process.platform === "darwin")("终端真实改写文件后同样立即发布预览引用", async () => {
+  it.runIf(process.platform === "darwin")("模型即使请求已隐藏的命令工具也不会执行或创建预览引用", async () => {
     const dir = await tempDir();
     const sandbox = new FileSandbox(join(dir, "sandbox"));
     await sandbox.initialize();
     await sandbox.writeText("index.html", "<h1>旧版本</h1>");
     const sessions = new SessionRepository(join(dir, "data"));
     const provider = new CommandThenWaitProvider();
-    const createFromPaths = vi.fn(async (_ownerId: string, sessionId: string, turnId: string) => [{
-      schemaVersion: 1 as const,
-      fileReferenceId: "file_command1234567890abcdef123456789",
-      ownerId: "local-admin",
-      sessionId,
-      turnId,
-      displayName: "index.html",
-      relativePath: "index.html",
-      mimeType: "text/html",
-      byteLength: 18,
-      sha256: "b".repeat(64),
-      previewKind: "static_html" as const,
-      createdAt: "2026-08-17T00:00:00.000Z",
-    }]);
-    const files = { createFromPaths } as unknown as FileReferenceService;
     const agent = new KindergartenAgent(
       sessions,
       AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox)),
       testBindings(),
-      files,
     ).createApp();
     const updates: acp.SessionNotification[] = [];
     const client = acp.client({ name: "command-artifact-page" })
@@ -356,17 +325,12 @@ describe("Tool Loop", () => {
     });
     await provider.waitForSecondRound();
 
-    expect(createFromPaths).toHaveBeenCalledWith(
-      "local-admin",
-      session.sessionId,
-      "command-artifact-turn",
-      ["index.html"],
-    );
     expect(updates.some((notice) => {
       const update = notice.update;
       return update.sessionUpdate === "tool_call_update" && update.toolCallId === "streamed-command" &&
         update.content?.some((item) => item.type === "content" && item.content.type === "resource_link");
-    })).toBe(true);
+    })).toBe(false);
+    expect(await sandbox.readText("index.html")).toMatchObject({ content: "<h1>旧版本</h1>" });
 
     provider.continueSecondRound();
     await prompt;
@@ -374,31 +338,15 @@ describe("Tool Loop", () => {
     await client.closed;
   });
 
-  it("文件写入成功后，即使 Turn 后续失败也保留预览引用", async () => {
+  it("文件写入成功后，即使 Turn 后续失败也不创建预览引用", async () => {
     const dir = await tempDir();
     const sandbox = new FileSandbox(join(dir, "sandbox"));
     await sandbox.initialize();
     const sessions = new SessionRepository(join(dir, "data"));
-    const createFromPaths = vi.fn(async (_ownerId: string, sessionId: string, turnId: string) => [{
-      schemaVersion: 1 as const,
-      fileReferenceId: "file_1234567890abcdef1234567890abcdef",
-      ownerId: "local-admin",
-      sessionId,
-      turnId,
-      displayName: "index.html",
-      relativePath: "index.html",
-      mimeType: "text/html",
-      byteLength: 15,
-      sha256: "a".repeat(64),
-      previewKind: "static_html" as const,
-      createdAt: "2026-08-17T00:00:00.000Z",
-    }]);
-    const files = { createFromPaths } as unknown as FileReferenceService;
     const agent = new KindergartenAgent(
       sessions,
       AgentRuntime.fromRegistry(new WriteThenFailProvider(), new ToolRegistry(sandbox)),
       testBindings(),
-      files,
     ).createApp();
     const client = acp.client({ name: "failed-artifact-page" })
       .onRequest(acp.methods.client.session.requestPermission, () => ({
@@ -421,23 +369,12 @@ describe("Tool Loop", () => {
     const stored = await sessions.get(session.sessionId);
     expect(stored.turns[0]).toMatchObject({
       state: { status: "failed" },
-      fileReferenceIds: ["file_1234567890abcdef1234567890abcdef"],
     });
+    expect(stored.turns[0]?.fileReferenceIds).toBeUndefined();
     const write = stored.sessionEntries.find((entry): entry is SessionToolCallEntry =>
       entry.type === "tool_call" && entry.name === "write_file");
-    expect(write?.content).toContainEqual(expect.objectContaining({
-      type: "content",
-      content: expect.objectContaining({
-        type: "resource_link",
-        uri: "mk-file://file_1234567890abcdef1234567890abcdef",
-      }),
-    }));
-    expect(createFromPaths).toHaveBeenCalledWith(
-      "local-admin",
-      session.sessionId,
-      "failed-artifact-turn",
-      ["index.html"],
-    );
+    expect(write?.content.some((item) => item.type === "content" && item.content.type === "resource_link"))
+      .toBe(false);
     expect(await readFile(join(dir, "sandbox", "index.html"), "utf8")).toBe("<h1>完成</h1>");
 
     client.close();
