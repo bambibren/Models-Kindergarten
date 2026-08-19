@@ -1,10 +1,12 @@
 import * as acp from "@agentclientprotocol/sdk";
 import {
   CONTEXT_SUMMARY_NOTIFICATION,
+  CONTEXT_WINDOW_USAGE_NOTIFICATION,
   TOKEN_USAGE_NOTIFICATION,
   TURN_STATE_NOTIFICATION,
   makeAcpMeta,
   type ContextSummary,
+  type ContextWindowUsageState,
   type MessageMeta,
   type TurnTokenUsage,
   type TurnState,
@@ -72,6 +74,13 @@ export class AcpOutput {
       sessionId: this.sessionId,
       usage,
     }), `token_usage/${usage.turnId}`);
+  }
+
+  async contextWindowUsage(state: ContextWindowUsageState): Promise<void> {
+    await this.channel.project((client) => client.notify(CONTEXT_WINDOW_USAGE_NOTIFICATION, {
+      sessionId: this.sessionId,
+      state,
+    }), `context_window_usage/${state.afterTurnId}`);
   }
 
   async turnState(turn: TurnState): Promise<void> {

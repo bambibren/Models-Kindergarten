@@ -7,6 +7,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import type {
   ContextSummary,
+  ContextWindowUsageState,
   TokenUsageComponent,
   TurnTokenUsage,
   ArtifactMention,
@@ -63,12 +64,18 @@ export interface TokenUsageEntry extends EntryBase {
   usage: TurnTokenUsage;
 }
 
+export interface ContextWindowUsageEntry extends EntryBase {
+  type: "context_window_usage";
+  state: ContextWindowUsageState;
+}
+
 export type ChatEntry =
   | MessageEntry
   | ContextSummaryEntry
   | ThoughtEntry
   | ToolCallEntry
-  | TokenUsageEntry;
+  | TokenUsageEntry
+  | ContextWindowUsageEntry;
 
 export interface EntryCollection {
   order: EntryId[];

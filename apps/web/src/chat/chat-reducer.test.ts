@@ -91,6 +91,20 @@ describe("chatReducer", () => {
         },
       },
     });
+    state = chatReducer(state, {
+      type: "context-window/usage",
+      value: {
+        sessionId: "session-1",
+        state: {
+          schemaVersion: 1,
+          status: "available",
+          afterTurnId: "turn-1",
+          estimatedTokens: 1_200,
+          windowTokens: 8_000,
+          basis: "next_prompt_base",
+        },
+      },
+    });
 
     expect(state.historyChatEntries.order).toHaveLength(0);
     expect(values(state.streamingChatEntries)).toMatchObject([
@@ -109,13 +123,14 @@ describe("chatReducer", () => {
         tokenEstimate: { category: "answer", estimatedTokens: 1 },
       },
       { type: "token_usage", usage: { inputTokens: 18, outputTokens: 7 } },
+      { type: "context_window_usage", state: { estimatedTokens: 1_200, windowTokens: 8_000 } },
     ]);
 
     state = chatReducer(state, {
       type: "stream/commit",
       operationId: "operation-1",
     });
-    expect(state.historyChatEntries.order).toHaveLength(4);
+    expect(state.historyChatEntries.order).toHaveLength(5);
     expect(state.streamingChatEntries.order).toHaveLength(0);
     expect(state.streaming).toBeNull();
   });
@@ -204,6 +219,17 @@ describe("chatReducer", () => {
       value: {
         ...messageNotice("assistant", "message-1", "串线", 0, true),
         sessionId: "session-2",
+      },
+    });
+    expect(state.streamingChatEntries.order).toHaveLength(0);
+  });
+
+  it("忽略其他 session 的上下文窗口快照", () => {
+    const state = chatReducer(openStream("load"), {
+      type: "context-window/usage",
+      value: {
+        sessionId: "session-2",
+        state: { schemaVersion: 1, status: "unavailable", afterTurnId: "turn-1", reason: "unknown_window" },
       },
     });
     expect(state.streamingChatEntries.order).toHaveLength(0);

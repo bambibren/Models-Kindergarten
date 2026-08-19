@@ -22,12 +22,17 @@ export interface WebToolClient {
   fetch(url: string, signal: AbortSignal): Promise<WebFetchResult>;
 }
 
-/** 无密钥搜索用于本地演示；所有目标 URL 都先做私网与响应大小校验。 */
+const DEFAULT_EXA_MCP_ENDPOINT = "https://mcp.exa.ai/mcp";
+const EXA_SEARCH_TOOL = "web_search_exa";
+const EXA_CONTEXT_MAX_CHARACTERS = 3_000;
+const EXA_SNIPPET_MAX_CHARACTERS = 800;
+
+/** 无密钥 Exa MCP 搜索用于本地演示；所有目标 URL 都先做私网与响应大小校验。 */
 export class WebAccess implements WebToolClient {
   private readonly circuits = new DependencyCircuits();
 
   constructor(
-    private readonly searchEndpoint = process.env.WEB_SEARCH_ENDPOINT ?? "https://www.bing.com/search",
+    private readonly searchEndpoint = process.env.WEB_SEARCH_ENDPOINT ?? DEFAULT_EXA_MCP_ENDPOINT,
   ) {}
 
   async search(
@@ -52,19 +57,56 @@ export class WebAccess implements WebToolClient {
         false,
       );
     }
-    const url = new URL(this.searchEndpoint);
-    url.searchParams.set("q", query);
-    const response = await this.request(url, signal, {
-      headers: {
-        "user-agent": "Models-Kindergarten/0.3",
-      },
-    });
-    const html = await response.text();
-    return parseBing(html).slice(0, clamp(
+    const resultLimit = clamp(
       maxResults,
       PRODUCT_CONFIG.tools.web.minSearchResults,
       PRODUCT_CONFIG.tools.web.maxSearchResults,
-    ));
+    );
+    const url = new URL(this.searchEndpoint);
+    const response = await this.request(url, signal, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        "user-agent": "Models-Kindergarten/0.3",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: EXA_SEARCH_TOOL,
+          arguments: {
+            query,
+            type: "fast",
+            numResults: resultLimit,
+            livecrawl: "fallback",
+            contextMaxCharacters: EXA_CONTEXT_MAX_CHARACTERS,
+          },
+        },
+      }),
+    });
+    const body = await response.text();
+    const parsed = parseExaResponse(body);
+    if (parsed.error) {
+      throw new ToolExecutionError(
+        "web_search_upstream_error",
+        "network",
+        `Exa 搜索服务失败: ${parsed.error.message}`,
+        true,
+        { provider: "exa", code: parsed.error.code },
+      );
+    }
+    if (!parsed.recognized) {
+      throw new ToolExecutionError(
+        "web_search_invalid_response",
+        "execution",
+        "Exa 搜索服务返回了无法解析的响应",
+        true,
+        { provider: "exa" },
+      );
+    }
+    return parsed.results.slice(0, resultLimit);
   }
 
   async fetch(input: string, signal: AbortSignal): Promise<WebFetchResult> {
@@ -210,20 +252,103 @@ function responseTooLarge(maxBytes: number): ToolExecutionError {
   );
 }
 
-function parseBing(html: string): WebSearchResult[] {
+interface ExaResponse {
+  recognized: boolean;
+  results: WebSearchResult[];
+  error?: { code?: number; message: string };
+}
+
+function parseExaResponse(body: string): ExaResponse {
+  const payloads = parseExaPayloads(body);
+  if (payloads.length === 0) return { recognized: false, results: [] };
+
   const results: WebSearchResult[] = [];
-  const itemPattern = /<li[^>]+class="[^"]*b_algo[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
-  for (const itemMatch of html.matchAll(itemPattern)) {
-    const item = itemMatch[1] ?? "";
-    const match = item.match(/<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
-    if (!match) continue;
-    const href = decodeHtml(match[1] ?? "");
-    const title = htmlToText(match[2] ?? "");
-    if (!href || !title) continue;
-    const snippetMatch = item.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
-    results.push({ title, url: href, snippet: htmlToText(snippetMatch?.[1] ?? "") });
+  const seenUrls = new Set<string>();
+  let recognized = false;
+  for (const payload of payloads) {
+    if (!isRecord(payload)) continue;
+    const error = payload.error;
+    if (isRecord(error) && typeof error.message === "string") {
+      return {
+        recognized: true,
+        results: [],
+        error: {
+          ...(typeof error.code === "number" ? { code: error.code } : {}),
+          message: error.message,
+        },
+      };
+    }
+    const result = payload.result;
+    if (!isRecord(result) || !Array.isArray(result.content)) continue;
+    recognized = true;
+    for (const item of result.content) {
+      if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
+      for (const candidate of parseExaSearchText(item.text)) {
+        if (seenUrls.has(candidate.url)) continue;
+        seenUrls.add(candidate.url);
+        results.push(candidate);
+      }
+    }
+  }
+  return { recognized, results };
+}
+
+function parseExaPayloads(body: string): unknown[] {
+  const payloads: unknown[] = [];
+  for (const line of body.split(/\r?\n/)) {
+    if (!line.startsWith("data:")) continue;
+    const value = line.slice("data:".length).trim();
+    if (!value || value === "[DONE]") continue;
+    try {
+      payloads.push(JSON.parse(value));
+    } catch {
+      // 单个 SSE 事件损坏时继续检查后续事件；全部损坏会由上层报告协议错误。
+    }
+  }
+  if (payloads.length > 0) return payloads;
+
+  try {
+    return [JSON.parse(body)];
+  } catch {
+    return [];
+  }
+}
+
+function parseExaSearchText(text: string): WebSearchResult[] {
+  const results: WebSearchResult[] = [];
+  for (const block of text.split(/\r?\n---\r?\n/g)) {
+    const urlValue = block.match(/^URL:\s*(\S+)\s*$/m)?.[1];
+    if (!urlValue || !isPublicResultUrl(urlValue)) continue;
+    const title = block.match(/^Title:\s*(.+?)\s*$/m)?.[1]?.trim() || urlValue;
+    const detail = block.match(/^(?:Highlights|Summary|Content|Text):\s*([\s\S]*)$/mi)?.[1] ?? "";
+    results.push({
+      title,
+      url: urlValue,
+      snippet: normalizeExaSnippet(detail),
+    });
   }
   return results;
+}
+
+function isPublicResultUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeExaSnippet(value: string): string {
+  return value
+    .replace(/\[([^\]]+)]\([^\s)]+\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, EXA_SNIPPET_MAX_CHARACTERS);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function htmlToText(value: string): string {

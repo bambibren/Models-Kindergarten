@@ -11,7 +11,7 @@ export function selectEntryBlocks(collection: EntryCollection): ChatBlock[] {
   for (const id of collection.order) {
     const entry = collection.byId[id];
     if (!entry) continue;
-    if (entry.type === "token_usage") continue;
+    if (entry.type === "token_usage" || entry.type === "context_window_usage") continue;
     if (isActivity(entry)) {
       if (!activity || activity.turnId !== entry.turnId) {
         activity = { type: "activity", id: `activity:${entry.turnId}:${id}`, turnId: entry.turnId, itemIds: [] };

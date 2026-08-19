@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { AgentInput, AgentRecord, ExperimentContextPolicy } from "@kindergarten/contracts";
+import type { AgentInput, AgentRecord, ExperimentContextPolicy, ExperimentTestSnapshotV2 } from "@kindergarten/contracts";
 import { stableJson } from "@kindergarten/contracts";
 import type { AgentService } from "../agent/agent-service.js";
 import { RuntimeCapabilityCatalog } from "./runtime-capability-catalog.js";
@@ -34,6 +34,7 @@ export interface ResolvedRuntimeCapabilities {
   context: ContextAssembler;
   fileSandbox: FileSandbox;
   capabilityHash: string;
+  expectedFirstProviderInputHash?: string;
 }
 
 export interface RuntimeCapabilityResolverPort {
@@ -42,6 +43,7 @@ export interface RuntimeCapabilityResolverPort {
 
 export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort {
   private readonly models: ModelStudentCatalog;
+  private experimentSnapshot?: (experimentId: string, testId: string) => Promise<ExperimentTestSnapshotV2 | undefined>;
 
   constructor(
     private readonly agents: AgentService,
@@ -59,8 +61,39 @@ export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort 
 
   async resolve(scope: TurnScope, currentUserMessage = ""): Promise<ResolvedRuntimeCapabilities> {
     const model = this.models.requireProvider(scope.modelStudentId);
+    if (scope.experimentRunRef && this.experimentSnapshot) {
+      const snapshot = await this.experimentSnapshot(scope.experimentRunRef.experimentId, scope.experimentRunRef.variantId);
+      if (!snapshot) throw new Error("EXPERIMENT_SNAPSHOT_UNAVAILABLE: 冻结的 Test 快照不存在");
+      if (snapshot.model.modelStudentId !== scope.modelStudentId) throw new Error("EXPERIMENT_SNAPSHOT_MISMATCH: ModelStudent 不一致");
+      const input = this.agents.validateContextPolicy(snapshot.policy);
+      const now = snapshot.frozenAt;
+      const agent: AgentRecord = {
+        schemaVersion: 1,
+        agentId: snapshot.sourceAgent.agentId,
+        ownerId: scope.ownerId,
+        recordKind: "experiment_policy",
+        ...agentRecordFields(input),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const resolved = await this.resolveAgent(scope, agent, currentUserMessage, model);
+      if (resolved.agentSnapshotHash !== snapshot.agentSnapshotHash || resolved.capabilityHash !== snapshot.model.capabilityHash) {
+        throw new Error("EXPERIMENT_SNAPSHOT_STALE: 冻结依赖已变化，拒绝以不同输入运行");
+      }
+      return { ...resolved, expectedFirstProviderInputHash: snapshot.firstRequestPreview.providerInputHash };
+    }
     const agent = await this.agents.get(scope.agentId, scope.ownerId);
     return this.resolveAgent(scope, agent, currentUserMessage, model);
+  }
+
+  setExperimentSnapshotResolver(
+    resolver: (experimentId: string, testId: string) => Promise<ExperimentTestSnapshotV2 | undefined>,
+  ): void {
+    this.experimentSnapshot = resolver;
+  }
+
+  modelSummary(modelStudentId: string) {
+    return this.models.get(modelStudentId);
   }
 
   async preview(

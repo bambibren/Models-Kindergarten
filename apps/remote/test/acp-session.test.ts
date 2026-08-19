@@ -4,15 +4,18 @@ import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import {
   CONTEXT_SUMMARY_NOTIFICATION,
+  CONTEXT_WINDOW_USAGE_NOTIFICATION,
   TOKEN_USAGE_NOTIFICATION,
   TURN_STATE_NOTIFICATION,
   makePromptMeta,
   makeSessionResumeMeta,
   makeSessionBindingMeta,
   readContextSummaryNotification,
+  readContextWindowUsageNotification,
   readTokenUsageNotification,
   readTurnStateNotification,
   type ContextSummaryNotification,
+  type ContextWindowUsageNotification,
   type TokenUsageNotification,
   type TurnStateNotification,
 } from "@kindergarten/contracts";
@@ -52,7 +55,9 @@ describe("ACP 会话语义", () => {
     const secondSummaries: ContextSummaryNotification[] = [];
     const firstUsages: TokenUsageNotification[] = [];
     const secondUsages: TokenUsageNotification[] = [];
-    const first = await openClient(agent, firstUpdates, firstSummaries, firstUsages);
+    const firstWindows: ContextWindowUsageNotification[] = [];
+    const secondWindows: ContextWindowUsageNotification[] = [];
+    const first = await openClient(agent, firstUpdates, firstSummaries, firstUsages, [], firstWindows);
 
     // initialize 本身不应产生任何 session/update。
     expect(firstUpdates).toHaveLength(0);
@@ -109,8 +114,19 @@ describe("ACP 会话语义", () => {
       expect.objectContaining({ category: "current_prompt", estimatedTokens: 1 }),
       expect.objectContaining({ category: "answer", estimatedTokens: 2 }),
     ]));
+    expect(firstWindows).toEqual([
+      expect.objectContaining({
+        sessionId: created.sessionId,
+        state: expect.objectContaining({
+          status: "available",
+          afterTurnId: "turn-1",
+          windowTokens: 128_000,
+          basis: "next_prompt_base",
+        }),
+      }),
+    ]);
 
-    const second = await openClient(agent, secondUpdates, secondSummaries, secondUsages);
+    const second = await openClient(agent, secondUpdates, secondSummaries, secondUsages, [], secondWindows);
     const firstCount = firstUpdates.length;
     const loaded = await second.agent.request(acp.methods.agent.session.load, {
       sessionId: created.sessionId,
@@ -129,10 +145,12 @@ describe("ACP 会话语义", () => {
     expect(secondSummaries[0]?.summary).toEqual(firstSummaries[0]?.summary);
     expect(secondUsages).toHaveLength(1);
     expect(secondUsages[0]?.usage).toEqual(firstUsages[0]?.usage);
+    expect(secondWindows).toEqual(firstWindows);
 
     secondUpdates.length = 0;
     secondSummaries.length = 0;
     secondUsages.length = 0;
+    secondWindows.length = 0;
     const resumed = await second.agent.request(acp.methods.agent.session.resume, {
       sessionId: created.sessionId,
       cwd: "/workspace",
@@ -142,11 +160,18 @@ describe("ACP 会话语义", () => {
     expect(secondUpdates).toHaveLength(0);
     expect(secondSummaries).toHaveLength(0);
     expect(secondUsages).toHaveLength(0);
+    expect(secondWindows).toHaveLength(0);
 
     firstUpdates.length = 0;
     await sendPrompt(first, created.sessionId, "第二问", "turn-2");
     expect(firstUpdates.length).toBeGreaterThan(0);
     expect(firstSummaries).toHaveLength(2);
+    expect(firstWindows).toHaveLength(2);
+    expect(firstWindows[1]?.state).toMatchObject({
+      status: "available",
+      afterTurnId: "turn-2",
+      windowTokens: 128_000,
+    });
     const historyRaw = firstSummaries[1]?.summary.items.find(
       (item) => item.kind === "session_history",
     )?.raw?.value;
@@ -156,6 +181,7 @@ describe("ACP 会话语义", () => {
     expect(secondUpdates).toHaveLength(0);
     expect(secondSummaries).toHaveLength(0);
     expect(secondUsages).toHaveLength(0);
+    expect(secondWindows).toHaveLength(0);
 
     await closeClient(first);
     await closeClient(second);
@@ -256,7 +282,8 @@ describe("ACP 会话语义", () => {
     const agent = await makeAgent(provider);
     const firstUpdates: acp.SessionNotification[] = [];
     const firstStates: TurnStateNotification[] = [];
-    const first = await openClient(agent, firstUpdates, [], [], firstStates);
+    const firstWindows: ContextWindowUsageNotification[] = [];
+    const first = await openClient(agent, firstUpdates, [], [], firstStates, firstWindows);
     const created = await first.agent.request(acp.methods.agent.session.new, {
       cwd: "/workspace",
       mcpServers: [],
@@ -280,7 +307,8 @@ describe("ACP 会话语义", () => {
 
     const resumedUpdates: acp.SessionNotification[] = [];
     const resumedStates: TurnStateNotification[] = [];
-    const resumed = await openClient(agent, resumedUpdates, [], [], resumedStates);
+    const resumedWindows: ContextWindowUsageNotification[] = [];
+    const resumed = await openClient(agent, resumedUpdates, [], [], resumedStates, resumedWindows);
     await resumed.agent.request(acp.methods.agent.session.resume, {
       sessionId: created.sessionId,
       cwd: "/workspace",
@@ -303,6 +331,16 @@ describe("ACP 会话语义", () => {
       turnId: "turn-resume",
       status: "completed",
     });
+    expect(resumedWindows).toEqual([
+      expect.objectContaining({
+        sessionId: created.sessionId,
+        state: expect.objectContaining({
+          status: "available",
+          afterTurnId: "turn-resume",
+          windowTokens: 128_000,
+        }),
+      }),
+    ]);
     await closeClient(resumed);
   });
 
@@ -528,6 +566,7 @@ async function openClient(
   summaries: ContextSummaryNotification[] = [],
   usages: TokenUsageNotification[] = [],
   turns: TurnStateNotification[] = [],
+  windows: ContextWindowUsageNotification[] = [],
 ): Promise<acp.ClientConnection> {
   const app = acp
     .client({ name: "test-client" })
@@ -553,6 +592,13 @@ async function openClient(
       readTurnStateNotification,
       ({ params }) => {
         turns.push(params);
+      },
+    )
+    .onNotification(
+      CONTEXT_WINDOW_USAGE_NOTIFICATION,
+      readContextWindowUsageNotification,
+      ({ params }) => {
+        windows.push(params);
       },
     );
   const connection = app.connect(agent);
@@ -584,6 +630,7 @@ const testStudent: ModelStudent = {
   name: "Test Student",
   sizeClass: "large",
   provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
+  contextWindowTokens: 128_000,
   generationDefaults: {},
 };
 

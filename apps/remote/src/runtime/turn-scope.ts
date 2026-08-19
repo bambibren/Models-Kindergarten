@@ -1,5 +1,6 @@
 import type { SessionRecord } from "../repository/session-types.js";
 import type { ConcreteReasoningProfile } from "@kindergarten/contracts";
+import type { ResolvedReasoningSnapshot } from "@kindergarten/contracts";
 
 export interface TurnScope {
   schemaVersion: 1;
@@ -11,6 +12,7 @@ export interface TurnScope {
   modelStudentId: string;
   agentId: string;
   reasoningOverride?: ConcreteReasoningProfile;
+  frozenReasoning?: ResolvedReasoningSnapshot;
   experimentRunRef?: { experimentId: string; variantId: string };
 }
 
@@ -25,6 +27,7 @@ export function turnScope(session: SessionRecord, turnId: string, operationId?: 
     modelStudentId: session.modelStudentId,
     agentId: session.agentId,
     ...(session.reasoningOverride ? { reasoningOverride: session.reasoningOverride } : {}),
+    ...(session.experimentReasoning ? { frozenReasoning: structuredClone(session.experimentReasoning) } : {}),
     ...(session.experimentRef ? { experimentRunRef: structuredClone(session.experimentRef) } : {}),
   };
 }

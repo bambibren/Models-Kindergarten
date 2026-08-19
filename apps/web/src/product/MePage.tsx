@@ -1,4 +1,4 @@
-import { Archive, Beaker, Blocks, Bot, Braces, Download, ExternalLink, FileBox, Plus, RotateCcw, Sparkles, Trash2, UserRound } from "lucide-react";
+import { Archive, Blocks, Bot, Braces, Download, ExternalLink, FileBox, Plus, RotateCcw, Sparkles, Trash2, UserRound } from "lucide-react";
 import { Children, useState } from "react";
 import type { SkillSource } from "@kindergarten/contracts";
 import { controlApi } from "../api/control-api.js";
@@ -8,15 +8,15 @@ import { ErrorState, LoadingState } from "./LoadState.js";
 import { ProductNav } from "./ProductNav.js";
 import { useResource } from "./use-resource.js";
 
-type Tab = "experiments" | "artifacts" | "agents" | "models" | "mcps" | "skills";
-const tabs: Array<{ id: Tab; label: string; icon: typeof Beaker }> = [
-  { id: "experiments", label: "我的对照实验", icon: Beaker }, { id: "agents", label: "我的 Agents", icon: Braces },
-  { id: "artifacts", label: "我的 Artifacts", icon: FileBox },
+type Tab = "artifacts" | "agents" | "models" | "mcps" | "skills";
+const tabs: Array<{ id: Tab; label: string; icon: typeof Braces }> = [
+  // 上下文实验功能调研期间不展示“我的对照实验”板块。
+  { id: "artifacts", label: "我的 Artifacts", icon: FileBox }, { id: "agents", label: "我的 Agents", icon: Braces },
   { id: "models", label: "我的 Models", icon: Bot }, { id: "mcps", label: "我的 MCPs", icon: Blocks }, { id: "skills", label: "我的 Skills", icon: Sparkles },
 ];
 export function MePage() {
   const initial = new URLSearchParams(location.search).get("tab") as Tab | null;
-  const [tab, setTab] = useState<Tab>(tabs.some((item) => item.id === initial) ? initial! : "experiments");
+  const [tab, setTab] = useState<Tab>(tabs.some((item) => item.id === initial) ? initial! : "artifacts");
   function select(next: Tab) { setTab(next); const url = new URL(location.href); url.searchParams.set("tab", next); history.replaceState(null, "", url); }
   return <main className="product-page"><ProductNav active="me" /><div className="product-me-shell"><aside><div><UserRound size={23} /></div><strong>Admin</strong><span>本地管理员</span><p>本轮使用固定 local-admin；账号系统不在当前范围内。</p></aside><section><header><span>ADMIN · PERSONAL SPACE</span><h1>我的</h1></header><nav className="product-tabs">{tabs.map((item) => { const Icon = item.icon; return <button className={tab === item.id ? "active" : ""} key={item.id} type="button" onClick={() => select(item.id)}><Icon size={14} />{item.label}</button>; })}</nav>
     {/* 各 Tab 返回的数据结构不同；切换时必须重建加载状态，不能让新面板读取上一 Tab 的旧数据。 */}
@@ -27,8 +27,7 @@ function ResourcePanel({ tab }: { tab: Tab }) {
   if (tab === "agents") return <ResourceLoader load={loadAgents}>{(data, retry) => <Panel title="可复用 Agent" action={<a href="/agents/new"><Plus size={13} />创建 Agent</a>}>{data.items.map((item) => <ResourceRow href={`/agents/${item.agentId}`} icon={<Braces size={15} />} key={item.agentId} title={item.name} detail={item.description ?? "未填写说明"} onDelete={item.deletable === true ? () => remove(`Agent「${item.name}」`, () => controlApi.removeAgent(item.agentId), retry) : undefined} />)}</Panel>}</ResourceLoader>;
   if (tab === "models") return <ResourceLoader load={loadModels}>{(data, retry) => <Panel title="我的 Models" action={<a href="/models/new"><Plus size={13} />新模型入园</a>}>{data.items.map((item) => <ResourceRow icon={<Bot size={15} />} key={item.modelStudentId} title={item.displayName} detail={joinMetadata([formatContextWindow(item.contextWindowTokens), item.model, item.providerKind])} state={item.status === "ready" ? "可用" : "不可用"} onDelete={item.deletable === true ? () => remove(`Model「${item.displayName}」`, () => controlApi.removeModel(item.modelStudentId), retry) : undefined} />)}</Panel>}</ResourceLoader>;
   if (tab === "mcps") return <ResourceLoader load={loadMcps}>{(data, retry) => <Panel title="我的 MCPs" action={<a href="/mcp/new"><Plus size={13} />添加远程 MCP</a>}>{data.map((item) => <ResourceRow href={`/mcp/${item.mcpInstallationId}`} icon={<Blocks size={15} />} key={item.mcpInstallationId} title={item.name} detail={item.url} state={item.state} onDelete={item.deletable === true ? () => remove(`MCP「${item.name}」`, () => controlApi.removeMcp(item.mcpInstallationId), retry) : undefined} />)}</Panel>}</ResourceLoader>;
-  if (tab === "skills") return <ResourceLoader load={loadSkills}>{(data, retry) => <SkillPanel items={data.items} retry={retry} />}</ResourceLoader>;
-  return <ResourceLoader load={loadExperiments}>{(data, retry) => <Panel title="已保存的 Contexts">{data.map((item) => <ResourceRow href={experimentUrl(item.experimentId)} icon={<Beaker size={15} />} key={item.experimentId} title={item.name} detail={item.promptText} state={item.status} onDelete={() => remove(`Context「${item.name}」`, () => controlApi.removeExperiment(item.experimentId), retry)} />)}</Panel>}</ResourceLoader>;
+  return <ResourceLoader load={loadSkills}>{(data, retry) => <SkillPanel items={data.items} retry={retry} />}</ResourceLoader>;
 }
 function ResourceLoader<T>({ load, children }: { load: () => Promise<T>; children: (data: T, retry: () => void) => React.ReactNode }) {
   const { state, retry } = useResource(load);
@@ -40,7 +39,7 @@ const loadAgents = () => controlApi.agents();
 const loadModels = () => controlApi.models();
 const loadMcps = () => controlApi.mcps();
 const loadSkills = () => controlApi.skills();
-const loadExperiments = () => controlApi.experiments(true);
+// 上下文实验功能调研期间不从“我的”加载或展示实验记录。
 const loadArtifacts = async () => {
   const [artifacts, sessions] = await Promise.all([
     controlApi.artifacts("", "all"),
@@ -103,5 +102,3 @@ function skillSourceLabel(source: SkillSource): string {
   if (source.kind === "github_tree") return `${source.repository}/${source.subdirectory}`;
   return source.kind === "resource_bundle" ? source.url : source.sourceId;
 }
-
-function experimentUrl(id: string): string { return new URL(`/evaluation/experiments/${encodeURIComponent(id)}`, import.meta.env.VITE_EVALUATION_WEB_URL ?? "http://127.0.0.1:5175").toString(); }

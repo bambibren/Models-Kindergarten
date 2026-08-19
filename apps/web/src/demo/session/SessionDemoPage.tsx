@@ -13,6 +13,7 @@ import { DemoTopNav } from "../shared/DemoTopNav.js";
 import { ReasoningProfileSelect } from "../../components/reasoning/ReasoningProfileSelect.js";
 import { loadDemoSessionReasoning, saveDemoSessionReasoning } from "../reasoning/demo-reasoning-state.js";
 import { ArtifactPanel } from "./ArtifactPanel.js";
+import { ContextWindowUsageIndicator } from "../../components/composer/ContextWindowUsageIndicator.js";
 import { SkillInstallBanner } from "./SkillInstallBanner.js";
 import { clampArtifactWidth, defaultArtifactWidth } from "./split-pane.js";
 import "./session-demo.css";
@@ -147,7 +148,10 @@ export function SessionDemoPage() {
                   onChange={changeReasoning}
                   value={reasoningProfile}
                 />}
-                <button disabled aria-label="发送 Demo 消息" type="submit">发送</button>
+                <div className="mk-session-actions">
+                  <ContextWindowUsageIndicator demo value={{ afterTurnId: "demo-turn", estimatedTokens: 38_400, windowTokens: 128_000, remainingTokens: 89_600, percent: 30, ringPercent: 30, level: "normal" }} />
+                  <button disabled aria-label="发送 Demo 消息" type="submit">发送</button>
+                </div>
               </form>
             </div>
           </section>

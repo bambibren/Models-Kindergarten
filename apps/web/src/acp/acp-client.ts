@@ -2,6 +2,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { createWebSocketStream } from "@agentclientprotocol/sdk/experimental/ws-client";
 import {
   CONTEXT_SUMMARY_NOTIFICATION,
+  CONTEXT_WINDOW_USAGE_NOTIFICATION,
   TOKEN_USAGE_NOTIFICATION,
   TURN_STATE_NOTIFICATION,
   makeExperimentRunRefMeta,
@@ -10,9 +11,11 @@ import {
   makeSessionResumeMeta,
   makeSessionBindingMeta,
   readContextSummaryNotification,
+  readContextWindowUsageNotification,
   readTokenUsageNotification,
   readTurnStateNotification,
   type ContextSummaryNotification,
+  type ContextWindowUsageNotification,
   type TokenUsageNotification,
   type TurnStateNotification,
   type SessionResumeMeta,
@@ -30,6 +33,7 @@ export interface ClientHandlers {
   onUpdate: (value: acp.SessionNotification) => void;
   onContextSummary: (value: ContextSummaryNotification) => void;
   onTokenUsage: (value: TokenUsageNotification) => void;
+  onContextWindowUsage: (value: ContextWindowUsageNotification) => void;
   onTurnState: (value: TurnStateNotification) => void;
   onInteraction: (value: PendingInteractionState) => void;
   onInteractionResolved: (id: string) => void;
@@ -70,6 +74,11 @@ export class AcpWebClient {
         TOKEN_USAGE_NOTIFICATION,
         { parse: readTokenUsageNotification },
         ({ params }) => handlers.onTokenUsage(params),
+      )
+      .onNotification(
+        CONTEXT_WINDOW_USAGE_NOTIFICATION,
+        { parse: readContextWindowUsageNotification },
+        ({ params }) => handlers.onContextWindowUsage(params),
       )
       .onNotification(
         TURN_STATE_NOTIFICATION,

@@ -1,11 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   calculateExecutionScores,
-  parseExperimentDraftInput,
+  parseExperimentDraftV2,
   scoreManualDimensions,
-  type ExperimentDraftInput,
-  type ExperimentRecord,
+  stableJson,
+  type AnyExperimentRecord,
+  type ExperimentRecordV2,
+  type ExperimentRunV2,
   type ExperimentScorecard,
+  type ExperimentTestSnapshotV2,
   type ExecutionMetricsSnapshot,
   type OutputAnnotationFacts,
   type PlanningAnnotationFacts,
@@ -19,6 +22,7 @@ import type { EvaluationTraceExporter } from "@kindergarten/evaluation-exporter"
 import type { ExperimentRepository } from "./experiment-repository.js";
 import type { EvaluationRecordReader } from "./evaluation-record-client.js";
 import type { AnnotationWorksheetGenerator } from "./annotation-worksheet-generator.js";
+import type { ContextPreviewService } from "./context-preview-service.js";
 
 export class ExperimentService {
   constructor(
@@ -29,44 +33,27 @@ export class ExperimentService {
     private readonly evaluations: EvaluationRecordReader,
     private readonly exporter?: EvaluationTraceExporter,
     private readonly worksheetGenerator?: AnnotationWorksheetGenerator,
+    private readonly previews?: ContextPreviewService,
   ) {}
 
-  async create(raw: unknown, ownerId = "local-admin"): Promise<ExperimentRecord> {
-    let input: ExperimentDraftInput;
-    try { input = parseExperimentDraftInput(raw); }
+  async create(raw: unknown, ownerId = "local-admin"): Promise<ExperimentRecordV2> {
+    let input;
+    try { input = parseExperimentDraftV2(raw); }
     catch (error) { throw new ApiProblemError(400, "VALIDATION_FAILED", publicMessage(error), false); }
-    if (!this.models.isReady(input.modelStudentId)) throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "ModelStudent 不可用", false);
-    await this.agents.get(input.sourceAgentId, ownerId);
-    if (input.mode === "history_turn") await this.assertSourceTurn(input, ownerId);
-    const experimentId = randomUUID();
-    const runs = [];
-    for (const variant of input.variants) {
-      const agent = await this.agents.createExperimentPolicy(experimentId, variant, ownerId);
-      runs.push({
-        runId: randomUUID(),
-        variantId: variant.variantId,
-        agentId: agent.agentId,
-        mode: variant.mode,
-        status: "pending" as const,
-        ...(variant.mode === "reuse_snapshot" && input.sourceTurnId ? { reusedTurnId: input.sourceTurnId } : {}),
-        answerTexts: [],
-      });
-    }
+    await this.validateDraftDependencies(input, ownerId);
     const now = new Date().toISOString();
-    const record: ExperimentRecord = {
-      schemaVersion: 1,
-      experimentId,
+    const record: ExperimentRecordV2 = {
+      schemaVersion: 2,
+      experimentId: randomUUID(),
       ownerId,
       name: input.name,
-      mode: input.mode,
-      status: "ready",
-      modelStudentId: input.modelStudentId,
-      sourceAgentId: input.sourceAgentId,
+      status: "draft",
       promptText: input.promptText,
-      ...(input.sourceTurnId ? { sourceTurnId: input.sourceTurnId } : {}),
+      ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
       toolUseWasExpected: input.toolUseWasExpected,
-      variants: input.variants,
-      runs,
+      worksheetModelStudentId: input.worksheetModelStudentId,
+      tests: input.tests,
+      runs: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -74,22 +61,97 @@ export class ExperimentService {
     return record;
   }
 
-  async list(ownerId = "local-admin", savedOnly = false): Promise<ExperimentRecord[]> {
+  async update(experimentId: string, raw: unknown, ownerId = "local-admin"): Promise<ExperimentRecordV2> {
+    const current = await this.getV2(experimentId, ownerId);
+    if (current.status !== "draft") throw new ApiProblemError(409, "EXPERIMENT_READ_ONLY", "Experiment 已冻结，不能再修改", false);
+    let input;
+    try { input = parseExperimentDraftV2(raw); }
+    catch (error) { throw new ApiProblemError(400, "VALIDATION_FAILED", publicMessage(error), false); }
+    await this.validateDraftDependencies(input, ownerId);
+    return this.repository.update(experimentId, (record) => {
+      if (record.schemaVersion !== 2) throw legacyReadOnly();
+      const { sourceRef: _sourceRef, ...withoutSourceRef } = record;
+      return {
+        ...withoutSourceRef,
+        name: input.name,
+        promptText: input.promptText,
+        ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
+        toolUseWasExpected: input.toolUseWasExpected,
+        worksheetModelStudentId: input.worksheetModelStudentId,
+        tests: input.tests,
+        updatedAt: new Date().toISOString(),
+      };
+    }) as Promise<ExperimentRecordV2>;
+  }
+
+  async prepareRun(experimentId: string, idempotencyKey: string, ownerId = "local-admin"): Promise<ExperimentRecordV2> {
+    if (!idempotencyKey.trim()) throw new ApiProblemError(400, "VALIDATION_FAILED", "prepare-run 缺少 Idempotency-Key", false);
+    const experiment = await this.getV2(experimentId, ownerId);
+    if (experiment.status !== "draft") {
+      if (experiment.prepareKey === idempotencyKey) return experiment;
+      throw new ApiProblemError(409, "EXPERIMENT_READ_ONLY", "Experiment 已冻结，不能重复准备", false);
+    }
+    if (!this.previews) throw new ApiProblemError(503, "EXPERIMENT_PREVIEW_UNAVAILABLE", "上下文预检服务不可用", true);
+    const previews = await Promise.all(experiment.tests.map((test) => this.previews!.previewTest(experiment.promptText, test, ownerId)));
+    const diagnostics = previews.flatMap((preview, index) => preview.diagnostics.map((item) => ({
+      path: `tests.${index}.${item.path ?? "configuration"}`,
+      message: item.message,
+    })));
+    if (diagnostics.length > 0) {
+      throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "至少一个 Test 的实际运行配置不可用", false, diagnostics);
+    }
+    if (new Set(previews.map((item) => item.effectiveConfigurationHash)).size < 2) {
+      throw new ApiProblemError(409, "EXPERIMENT_NO_EFFECTIVE_DIFFERENCE", "至少两个 Test 的实际运行配置需要不同", false);
+    }
+    const frozenAt = new Date().toISOString();
+    const snapshots: ExperimentTestSnapshotV2[] = experiment.tests.map((test, index) => snapshotFromPreview(test, previews[index]!, frozenAt));
+    const runs: ExperimentRunV2[] = snapshots.map((snapshot) => ({
+      runId: randomUUID(),
+      testId: snapshot.testId,
+      snapshotId: snapshot.snapshotId,
+      status: "pending",
+      answerTexts: [],
+    }));
+    return this.repository.update(experimentId, (record) => {
+      if (record.schemaVersion !== 2 || record.status !== "draft") throw new ApiProblemError(409, "EXPERIMENT_READ_ONLY", "Experiment 已冻结", false);
+      return { ...record, status: "prepared", snapshots, runs, prepareKey: idempotencyKey, updatedAt: frozenAt };
+    }) as Promise<ExperimentRecordV2>;
+  }
+
+  async list(ownerId = "local-admin", savedOnly = false): Promise<AnyExperimentRecord[]> {
     return (await this.repository.list()).filter((item) => item.ownerId === ownerId && (!savedOnly || item.savedAt))
       .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
-  async get(id: string, ownerId = "local-admin"): Promise<ExperimentRecord> {
+  async get(id: string, ownerId = "local-admin"): Promise<AnyExperimentRecord> {
     const value = await this.repository.get(id);
     if (!value || value.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "Experiment 不存在", false);
     return value;
   }
 
-  async binding(experimentId: string, variantId: string): Promise<{ modelStudentId: string; agentId: string } | undefined> {
+  private async getV2(id: string, ownerId = "local-admin"): Promise<ExperimentRecordV2> {
+    const value = await this.get(id, ownerId);
+    if (value.schemaVersion !== 2) throw legacyReadOnly();
+    return value;
+  }
+
+  async binding(experimentId: string, testId: string): Promise<{ modelStudentId: string; agentId: string; experimentReasoning: import("@kindergarten/contracts").ResolvedReasoningSnapshot } | undefined> {
     const experiment = await this.repository.get(experimentId);
-    const run = experiment?.runs.find((item) => item.variantId === variantId);
-    if (!experiment || !run || run.mode !== "rerun" || !["ready", "running", "partially_failed"].includes(experiment.status)) return undefined;
-    return { modelStudentId: experiment.modelStudentId, agentId: run.agentId };
+    if (!experiment || experiment.schemaVersion !== 2 || !["prepared", "running"].includes(experiment.status)) return undefined;
+    const run = experiment.runs.find((item) => item.testId === testId);
+    const snapshot = experiment.snapshots?.find((item) => item.testId === testId && item.snapshotId === run?.snapshotId);
+    if (!run || !snapshot || !["pending", "session_created", "running"].includes(run.status)) return undefined;
+    return {
+      modelStudentId: snapshot.model.modelStudentId,
+      agentId: snapshot.sourceAgent.agentId,
+      experimentReasoning: structuredClone(snapshot.reasoning),
+    };
+  }
+
+  async snapshot(experimentId: string, testId: string): Promise<ExperimentTestSnapshotV2 | undefined> {
+    const experiment = await this.repository.get(experimentId);
+    if (!experiment || experiment.schemaVersion !== 2) return undefined;
+    return structuredClone(experiment.snapshots?.find((item) => item.testId === testId));
   }
 
   async markSessionCreated(experimentId: string, variantId: string, sessionId: string): Promise<void> {
@@ -102,18 +164,18 @@ export class ExperimentService {
     }), "running");
   }
 
-  async markRunClientFailure(experimentId: string, variantId: string, ownerId = "local-admin"): Promise<ExperimentRecord> {
+  async markRunClientFailure(experimentId: string, variantId: string, ownerId = "local-admin"): Promise<ExperimentRecordV2> {
     await this.get(experimentId, ownerId);
     const updated = await this.updateRun(experimentId, variantId, (run) => {
       if (["completed", "failed", "cancelled", "interrupted"].includes(run.status)) return run;
       return {
         ...run,
         status: "failed",
-        error: { code: "INTERNAL_ERROR", message: "该实验 lane 未能启动或运行失败", retryable: true },
+        error: { code: "INTERNAL_ERROR", message: "该实验 lane 未能启动或运行失败", retryable: false },
         completedAt: new Date().toISOString(),
       };
     });
-    return this.refreshStatus(updated.experimentId);
+    return this.refreshStatus(updated.experimentId) as Promise<ExperimentRecordV2>;
   }
 
   async markRunFinished(
@@ -125,7 +187,7 @@ export class ExperimentService {
     answerTexts: string[],
     error?: unknown,
   ): Promise<void> {
-    const experiment = await this.get(experimentId);
+    const experiment = await this.getV2(experimentId);
     let metrics: ExecutionMetricsSnapshot | undefined;
     try { metrics = await this.executionMetrics(experiment, variantId, sessionId, turnId); }
     catch (error) { console.warn(`Experiment 执行指标暂不可用：${publicMessage(error)}`); }
@@ -146,44 +208,64 @@ export class ExperimentService {
     await this.refreshStatus(updated.experimentId);
   }
 
-  async completeReuseSnapshot(experimentId: string, variantId: string, ownerId = "local-admin"): Promise<ExperimentRecord> {
+  async save(experimentId: string, ownerId = "local-admin"): Promise<AnyExperimentRecord> {
     const experiment = await this.get(experimentId, ownerId);
-    const run = experiment.runs.find((item) => item.variantId === variantId);
-    if (!run || run.mode !== "reuse_snapshot" || !run.reusedTurnId) {
-      throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "该 lane 不是可复用历史快照", false);
-    }
-    const reusedTurnId = run.reusedTurnId;
-    const source = await this.findTurn(reusedTurnId, ownerId);
-    this.assertSourceModelStudent(experiment.modelStudentId, source.modelStudentId);
-    const answerTexts = source.sessionEntries.flatMap((entry) =>
-      entry.type === "message" && entry.role === "assistant" && entry.turnId === reusedTurnId ? [entry.text] : []);
-    const metrics = await this.executionMetrics(experiment, variantId, source.id, reusedTurnId);
-    const sourceTurn = source.turns.find((item) => item.turnId === reusedTurnId);
-    await this.updateRun(experimentId, variantId, (current) => ({
-      ...current,
-      status: "completed",
-      acpSessionId: source.id,
-      turnId: reusedTurnId,
-      answerTexts,
-      executionMetrics: metrics,
-      ...(sourceTurn ? { runtimeFacts: runtimeFactsFromTurn(sourceTurn) } : {}),
-      ...(sourceTurn?.startedAt ? { startedAt: sourceTurn.startedAt } : {}),
-      completedAt: sourceTurn?.completedAt ?? new Date().toISOString(),
-    }));
-    return this.refreshStatus(experimentId);
-  }
-
-  async save(experimentId: string, ownerId = "local-admin"): Promise<ExperimentRecord> {
-    await this.get(experimentId, ownerId);
+    if (experiment.schemaVersion === 1) throw legacyReadOnly();
     return this.repository.update(experimentId, (item) => ({ ...item, savedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
   }
 
   async delete(experimentId: string, ownerId = "local-admin"): Promise<{ removedExperimentSessionIds: string[] }> {
     const experiment = await this.get(experimentId, ownerId);
-    for (const run of experiment.runs) await this.agents.delete(run.agentId, ownerId).catch(() => undefined);
+    if (experiment.schemaVersion === 1) {
+      for (const run of experiment.runs) await this.agents.delete(run.agentId, ownerId).catch(() => undefined);
+    }
     const removedExperimentSessionIds = await this.sessions.removeExperimentSessions(experimentId, ownerId);
     await this.repository.remove(experimentId);
     return { removedExperimentSessionIds };
+  }
+
+  async cancel(experimentId: string, ownerId = "local-admin"): Promise<{ experiment: ExperimentRecordV2; activeSessionIds: string[] }> {
+    const experiment = await this.getV2(experimentId, ownerId);
+    if (["completed", "partially_failed", "failed", "cancelled", "interrupted"].includes(experiment.status)) {
+      return { experiment, activeSessionIds: [] };
+    }
+    const activeSessionIds = experiment.runs.flatMap((run) =>
+      run.acpSessionId && ["session_created", "running"].includes(run.status) ? [run.acpSessionId] : []);
+    const now = new Date().toISOString();
+    const updated = await this.repository.update(experimentId, (record) => {
+      if (record.schemaVersion !== 2) throw legacyReadOnly();
+      return {
+        ...record,
+        status: "cancelled",
+        runs: record.runs.map((run) => ["pending", "session_created", "running"].includes(run.status)
+          ? { ...run, status: "cancelled" as const, completedAt: now }
+          : run),
+        updatedAt: now,
+      };
+    });
+    return { experiment: updated as ExperimentRecordV2, activeSessionIds };
+  }
+
+  async recordIntervention(experimentId: string, testId: string, raw: unknown, ownerId = "local-admin"): Promise<ExperimentRecordV2> {
+    await this.getV2(experimentId, ownerId);
+    if (!record(raw) || typeof raw.interactionId !== "string" ||
+      (raw.kind !== "permission" && raw.kind !== "elicitation") ||
+      typeof raw.summary !== "string" || typeof raw.decision !== "string") {
+      throw new ApiProblemError(400, "VALIDATION_FAILED", "人工介入事实格式无效", false);
+    }
+    const fact: import("@kindergarten/contracts").ExperimentInterventionFact = {
+      interactionId: raw.interactionId,
+      kind: raw.kind,
+      summary: raw.summary.slice(0, 1000),
+      decision: raw.decision.slice(0, 200),
+      operatorId: ownerId,
+      resolvedAt: new Date().toISOString(),
+    };
+    return this.updateRun(experimentId, testId, (run) => ({
+      ...run,
+      hadHumanIntervention: true,
+      interventions: [...(run.interventions ?? []).filter((item) => item.interactionId !== fact.interactionId), fact],
+    }));
   }
 
   async putAnnotations(
@@ -191,7 +273,7 @@ export class ExperimentService {
     raw: unknown,
     ownerId = "local-admin",
   ): Promise<ExperimentScorecard> {
-    const experiment = await this.get(experimentId, ownerId);
+    const experiment = await this.getV2(experimentId, ownerId);
     if (!record(raw)) throw new ApiProblemError(400, "VALIDATION_FAILED", "人工注释必须是对象", false);
     const understanding = parseUnderstanding(raw.understanding);
     const planning = parsePlanning(raw.planning);
@@ -201,10 +283,10 @@ export class ExperimentService {
     if (metrics.length !== experiment.runs.length) throw new ApiProblemError(409, "SCORECARD_INCOMPLETE", "所有 lane 完成运行后才能计算评分", false);
     const execution = calculateExecutionScores(metrics);
     const manual = scoreManualDimensions({
-      variantIds: experiment.variants.map((item) => item.variantId),
+      variantIds: experiment.tests.map((item) => item.testId),
       understanding,
       planning,
-      output: { ...output, answers: experiment.runs.map((run) => ({ variantId: run.variantId, text: run.answerTexts.join("\n") })) },
+      output: { ...output, answers: experiment.runs.map((run) => ({ variantId: run.testId, text: run.answerTexts.join("\n") })) },
     });
     const variants = execution.map((item) => {
       const dimensions = manual.byVariant[item.variantId] ?? {};
@@ -241,9 +323,14 @@ export class ExperimentService {
     return this.repository.getScorecard(experimentId);
   }
 
-  async generateAnnotationWorksheet(experimentId: string, force = false, ownerId = "local-admin") {
-    const experiment = await this.get(experimentId, ownerId);
-    if (experiment.annotationWorksheet && !force) return experiment.annotationWorksheet;
+  async generateAnnotationWorksheet(experimentId: string, force = false, ownerId = "local-admin", worksheetModelStudentId?: string) {
+    const experiment = await this.getV2(experimentId, ownerId);
+    const selectedModelStudentId = worksheetModelStudentId?.trim() || experiment.worksheetModelStudentId;
+    const replacingModel = selectedModelStudentId !== experiment.worksheetModelStudentId;
+    if (experiment.annotationWorksheet && !force && !replacingModel) return experiment.annotationWorksheet;
+    if (!this.models.isReady(selectedModelStudentId)) {
+      throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "所选评测辅助 ModelStudent 不可用", false);
+    }
     if (!this.worksheetGenerator) throw new ApiProblemError(503, "WORKSHEET_GENERATOR_UNAVAILABLE", "标注题目生成器不可用", true);
     if (!experiment.runs.every((run) => run.status === "completed")) {
       throw new ApiProblemError(409, "WORKSHEET_NOT_READY", "所有 lane 完成后才能生成标注题目", true);
@@ -258,87 +345,95 @@ export class ExperimentService {
           : []) ?? [];
       }
       evidence.push({
-        variantId: run.variantId,
-        label: experiment.variants.find((item) => item.variantId === run.variantId)?.label ?? run.variantId,
+        variantId: run.testId,
+        label: experiment.tests.find((item) => item.testId === run.testId)?.label ?? run.testId,
         answer: run.answerTexts.join("\n"),
         toolEvents,
       });
     }
-    const worksheet = await this.worksheetGenerator.generate(experiment, evidence);
-    await this.repository.update(experimentId, (item) => ({ ...item, annotationWorksheet: worksheet, updatedAt: new Date().toISOString() }));
-    if (force) await this.repository.deleteScorecard(experimentId);
+    const generationExperiment = replacingModel ? { ...experiment, worksheetModelStudentId: selectedModelStudentId } : experiment;
+    const worksheet = await this.worksheetGenerator.generate(generationExperiment, evidence);
+    await this.repository.update(experimentId, (item) => ({
+      ...item,
+      worksheetModelStudentId: selectedModelStudentId,
+      annotationWorksheet: worksheet,
+      updatedAt: new Date().toISOString(),
+    }));
+    if (force || replacingModel) await this.repository.deleteScorecard(experimentId);
     return worksheet;
   }
 
   async runtimeHistory(experimentId: string, ownerId = "local-admin") {
     const experiment = await this.get(experimentId, ownerId);
-    if (experiment.mode !== "history_turn" || !experiment.sourceTurnId) return [];
-    const source = await this.findTurn(experiment.sourceTurnId, ownerId);
-    this.assertSourceModelStudent(experiment.modelStudentId, source.modelStudentId);
-    return entriesBeforeTurn(source.sessionEntries, experiment.sourceTurnId);
+    if (experiment.schemaVersion !== 2) throw legacyReadOnly();
+    return [];
   }
 
   private async updateRun(
     experimentId: string,
     variantId: string,
-    change: (run: ExperimentRecord["runs"][number]) => ExperimentRecord["runs"][number],
-    status?: ExperimentRecord["status"],
-  ): Promise<ExperimentRecord> {
+    change: (run: ExperimentRunV2) => ExperimentRunV2,
+    status?: ExperimentRecordV2["status"],
+  ): Promise<ExperimentRecordV2> {
     return this.repository.update(experimentId, (experiment) => {
-      if (!experiment.runs.some((run) => run.variantId === variantId)) throw new Error(`Experiment lane 不存在: ${variantId}`);
+      if (experiment.schemaVersion !== 2) throw legacyReadOnly();
+      if (!experiment.runs.some((run) => run.testId === variantId)) throw new Error(`Experiment Test 不存在: ${variantId}`);
       return {
         ...experiment,
         ...(status ? { status } : {}),
-        runs: experiment.runs.map((run) => run.variantId === variantId ? change(run) : run),
+        runs: experiment.runs.map((run) => run.testId === variantId ? change(run) : run),
         updatedAt: new Date().toISOString(),
       };
-    });
+    }) as Promise<ExperimentRecordV2>;
   }
 
-  private async refreshStatus(id: string): Promise<ExperimentRecord> {
+  private async refreshStatus(id: string): Promise<ExperimentRecordV2> {
     return this.repository.update(id, (experiment) => {
+      if (experiment.schemaVersion !== 2) throw legacyReadOnly();
       const statuses = experiment.runs.map((run) => run.status);
       const terminal = statuses.every((status) => ["completed", "failed", "cancelled", "interrupted"].includes(status));
       const completed = statuses.filter((status) => status === "completed").length;
       const status = terminal
-        ? completed === statuses.length ? "completed" : completed > 0 ? "partially_failed" : "failed"
+        ? completed === statuses.length
+          ? "completed"
+          : statuses.every((item) => item === "cancelled")
+            ? "cancelled"
+            : statuses.every((item) => item === "interrupted")
+              ? "interrupted"
+              : completed > 0
+                ? "partially_failed"
+                : "failed"
         : statuses.some((item) => item === "running" || item === "session_created") ? "running" : experiment.status;
       return { ...experiment, status, updatedAt: new Date().toISOString() };
-    });
+    }) as Promise<ExperimentRecordV2>;
   }
 
   private async executionMetrics(
-    experiment: ExperimentRecord,
+    experiment: ExperimentRecordV2,
     variantId: string,
     sessionId: string,
     turnId: string,
   ): Promise<ExecutionMetricsSnapshot> {
     await this.exporter?.flush();
-    const trace = this.exporter?.trace(sessionId, turnId);
-    let record: Awaited<ReturnType<EvaluationRecordReader["get"]>>;
-    try { record = await this.evaluations.get(sessionId, turnId); }
-    catch (error) {
-      if (!trace) throw error;
-      console.warn(`Evaluation API 暂不可用，使用 Remote 内存 Trace：${publicMessage(error)}`);
-    }
-    if (!record && !trace) throw new ApiProblemError(409, "TURN_SNAPSHOT_UNAVAILABLE", "该 Turn 没有可验证的 Runtime 指标", false);
+    const record = await this.evaluations.get(sessionId, turnId);
     const result = record?.result;
+    if (!result) throw new ApiProblemError(409, "TURN_SNAPSHOT_UNAVAILABLE", "该 Turn 没有可验证的 Runtime 指标", false);
     return {
-      evaluationRecordId: record ? `${sessionId}:${turnId}` : trace?.traceId ?? `${sessionId}:${turnId}:pending`,
+      evaluationRecordId: `${sessionId}:${turnId}`,
       variantId,
-      normallyCompleted: result?.normallyCompleted ?? trace!.status === "completed",
-      ...(result?.firstTokenLatencyMs !== undefined ? { firstTokenLatencyMs: result.firstTokenLatencyMs } : {}),
-      totalDurationMs: result?.totalDurationMs ?? (trace ? Math.max(0, trace.completedAt - trace.startedAt) : 0),
+      normallyCompleted: result.normallyCompleted,
+      ...(result.firstTokenLatencyMs !== undefined ? { firstTokenLatencyMs: result.firstTokenLatencyMs } : {}),
+      totalDurationMs: requiredMetric(result.totalDurationMs, "totalDurationMs"),
       toolUseWasExpected: experiment.toolUseWasExpected,
-      toolSuccessCount: result?.toolSuccessCount ?? trace?.toolCalls.filter((item) => item.status === "success").length ?? 0,
-      toolFailureCount: result?.toolFailureCount ?? trace?.toolCalls.filter((item) => item.status === "error").length ?? 0,
-      errorCount: result?.errorCount ?? trace?.errors.length ?? 0,
-      permissionViolationCount: result?.permissionViolationCount ?? 0,
-      hasRepeatedToolCall: result?.hasRepeatedToolCall ?? false,
-      modelRoundCount: result?.modelRoundCount ?? trace?.modelRounds.length ?? 0,
-      toolCallCount: result?.toolCallCount ?? trace?.toolCalls.length ?? 0,
-      totalContextTokens: result?.totalContextTokens ?? 0,
-      totalOutputTokens: result?.totalOutputTokens ?? 0,
+      toolSuccessCount: requiredMetric(result.toolSuccessCount, "toolSuccessCount"),
+      toolFailureCount: requiredMetric(result.toolFailureCount, "toolFailureCount"),
+      errorCount: requiredMetric(result.errorCount, "errorCount"),
+      permissionViolationCount: requiredMetric(result.permissionViolationCount, "permissionViolationCount"),
+      hasRepeatedToolCall: result.hasRepeatedToolCall,
+      modelRoundCount: requiredMetric(result.modelRoundCount, "modelRoundCount"),
+      toolCallCount: requiredMetric(result.toolCallCount, "toolCallCount"),
+      totalContextTokens: requiredMetric(result.totalContextTokens, "totalContextTokens"),
+      totalOutputTokens: requiredMetric(result.totalOutputTokens, "totalOutputTokens"),
     };
   }
 
@@ -361,34 +456,23 @@ export class ExperimentService {
     };
   }
 
-  private async assertSourceTurn(input: ExperimentDraftInput, ownerId: string): Promise<void> {
-    const source = await this.findTurn(input.sourceTurnId!, ownerId);
-    this.assertSourceModelStudent(input.modelStudentId, source.modelStudentId);
-    if (!source.turns.some((item) => item.turnId === input.sourceTurnId && item.state.status === "completed")) {
-      throw new ApiProblemError(409, "TURN_SNAPSHOT_UNAVAILABLE", "历史 Turn 没有可复用的完成快照", false);
+  private async validateDraftDependencies(input: import("@kindergarten/contracts").ExperimentDraftV2, ownerId: string): Promise<void> {
+    if (!this.models.isReady(input.worksheetModelStudentId)) {
+      throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "评测辅助 ModelStudent 不可用", false);
     }
-  }
-
-  /**
-   * Session 在 V1 固定绑定一个 ModelStudent。历史实验会复用 Provider 私有续接事实，
-   * 因而源 Turn 和目标 lane 不能跨 ModelStudent；旧持久化记录同样在读取边界复核。
-   */
-  private assertSourceModelStudent(targetModelStudentId: string, sourceModelStudentId: string): void {
-    if (targetModelStudentId === sourceModelStudentId) return;
-    throw new ApiProblemError(
-      409,
-      "EXPERIMENT_NOT_RUNNABLE",
-      "历史 Turn 与实验目标必须绑定同一个 ModelStudent",
-      false,
-      [{ path: "modelStudentId", message: "必须与 sourceTurnId 所属 Session 的 modelStudentId 一致" }],
-    );
-  }
-
-  private async findTurn(turnId: string, ownerId: string) {
-    for (const session of await this.sessions.allForRuntime("chat")) {
-      if (session.ownerId === ownerId && session.turns.some((item) => item.turnId === turnId)) return session;
+    for (const [index, test] of input.tests.entries()) {
+      if (!this.models.isReady(test.modelStudentId)) {
+        throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", `Test ${test.label} 的 ModelStudent 不可用`, false, [
+          { path: `tests.${index}.modelStudentId`, message: "ModelStudent 必须为 Ready" },
+        ]);
+      }
+      const agent = await this.agents.get(test.sourceAgent.agentId, ownerId);
+      if (agent.name !== test.sourceAgent.name || agent.updatedAt !== test.sourceAgent.updatedAt) {
+        throw new ApiProblemError(409, "EXPERIMENT_SOURCE_CHANGED", `Test ${test.label} 的来源 Agent 已变化，请重新导入`, false, [
+          { path: `tests.${index}.sourceAgent`, message: "来源 Agent 快照标识已过期" },
+        ]);
+      }
     }
-    throw new ApiProblemError(404, "TURN_SNAPSHOT_UNAVAILABLE", "历史 Turn 不存在", false);
   }
 }
 
@@ -421,10 +505,10 @@ function parseOutput(value: unknown): OutputAnnotationFacts {
     return { variantId: item.variantId, answerSectionId: item.answerSectionId, start: item.start, end: item.end, verdict: item.verdict as "effective" | "partial" | "none", quotedTextHash: item.quotedTextHash };
   }), ...(typeof value.completedAt === "string" ? { completedAt: value.completedAt } : {}) };
 }
-function validateAnnotationReferences(experiment: ExperimentRecord, understanding: UnderstandingAnnotationFacts, planning: PlanningAnnotationFacts, output: OutputAnnotationFacts): void {
+function validateAnnotationReferences(experiment: ExperimentRecordV2, understanding: UnderstandingAnnotationFacts, planning: PlanningAnnotationFacts, output: OutputAnnotationFacts): void {
   const worksheet = experiment.annotationWorksheet;
   if (!worksheet) throw new ApiProblemError(409, "WORKSHEET_NOT_READY", "请先生成标注题目", true);
-  const variants = new Set(experiment.variants.map((item) => item.variantId));
+  const variants = new Set(experiment.tests.map((item) => item.testId));
   const expectedRequirements = new Map(worksheet.requirements.map((item) => [item.requirementId, item]));
   const requirements = new Set(understanding.requirements.map((item) => item.requirementId));
   if (understanding.requirements.length !== worksheet.requirements.length || understanding.requirements.some((item) => {
@@ -440,7 +524,7 @@ function validateAnnotationReferences(experiment: ExperimentRecord, understandin
   const actualOutput = output.marks.map((item) => `${item.variantId}:${item.answerSectionId}`);
   if (new Set(actualOutput).size !== actualOutput.length || actualOutput.some((key) => !expectedOutput.has(key)) || (output.completedAt && actualOutput.length !== expectedOutput.size)) throw validation("输出标记与当前标注工作表不一致");
   for (const mark of output.marks) {
-    const answer = experiment.runs.find((run) => run.variantId === mark.variantId)?.answerTexts.join("\n") ?? "";
+    const answer = experiment.runs.find((run) => run.testId === mark.variantId)?.answerTexts.join("\n") ?? "";
     const quoted = answer.slice(mark.start, mark.end);
     const expected = expectedOutput.get(`${mark.variantId}:${mark.answerSectionId}`);
     if (!expected || mark.start !== expected.start || mark.end !== expected.end || mark.quotedTextHash !== expected.quotedTextHash || mark.start < 0 || mark.end <= mark.start || mark.end > answer.length || sha256(quoted) !== mark.quotedTextHash) throw validation("输出标记范围或 quotedTextHash 无效");
@@ -463,9 +547,51 @@ function validation(message: string): ApiProblemError { return new ApiProblemErr
 function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function publicMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
-function entriesBeforeTurn(entries: import("../repository/session-types.js").SessionEntry[], turnId: string) {
-  const start = entries.findIndex((entry) => entry.turnId === turnId);
-  return structuredClone(start < 0 ? entries : entries.slice(0, start));
+function legacyReadOnly(): ApiProblemError {
+  return new ApiProblemError(409, "LEGACY_EXPERIMENT_READ_ONLY", "旧版实验仅支持只读查看", false);
+}
+function requiredMetric(value: number | undefined, field: string): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    throw new ApiProblemError(409, "EXECUTION_METRICS_UNAVAILABLE", `执行指标不可用: ${field}`, false);
+  }
+  return value;
+}
+function snapshotFromPreview(
+  test: import("@kindergarten/contracts").ExperimentTestDraftV2,
+  preview: import("@kindergarten/contracts").ContextPreviewResponseV2,
+  frozenAt: string,
+): ExperimentTestSnapshotV2 {
+  const system = preview.contextSummary.items.find((item) => item.kind === "system_instruction")?.raw?.value ?? "";
+  return {
+    snapshotId: randomUUID(),
+    testId: test.testId,
+    label: test.label,
+    sourceAgent: structuredClone(test.sourceAgent),
+    policy: structuredClone(test.policy),
+    agentSnapshotHash: preview.agentSnapshotHash,
+    model: {
+      modelStudentId: preview.model.modelStudentId,
+      providerKind: preview.model.providerKind,
+      model: preview.model.model,
+      capabilityHash: preview.capabilityHash,
+      ...(preview.model.contextWindowTokens === undefined ? {} : { contextWindowTokens: preview.model.contextWindowTokens }),
+    },
+    reasoning: structuredClone(preview.resolvedReasoning),
+    dependencies: [
+      ...test.policy.skillInstallationIds.map((id) => ({ kind: "skill" as const, id, contentHash: sha256(stableJson({ id, capabilityHash: preview.capabilityHash })) })),
+      ...test.policy.mcps.filter((item) => item.enabled).map((item) => ({ kind: "mcp" as const, id: item.mcpInstallationId, contentHash: sha256(stableJson({ item, capabilityHash: preview.capabilityHash })) })),
+    ],
+    runtimePrompt: { version: "runtime_system_prompt_v1", hash: sha256(system) },
+    firstRequestPreview: {
+      contextHash: sha256(stableJson(preview.contextSummary)),
+      providerInputHash: preview.providerInputHash,
+      providerInputBytes: preview.providerInputBytes,
+      estimatedTokens: preview.contextSummary.totalEstimatedTokens,
+      actualHistoryTurns: 0,
+    },
+    effectiveConfigurationHash: preview.effectiveConfigurationHash,
+    frozenAt,
+  };
 }
 function runtimeFactsFromTurn(turn: import("../repository/session-types.js").TurnExecutionRecord): import("@kindergarten/contracts").ExperimentRunRuntimeFacts {
   const firstRound = turn.modelRounds?.[0];
@@ -474,6 +600,15 @@ function runtimeFactsFromTurn(turn: import("../repository/session-types.js").Tur
     capabilityGenerations: turn.capabilitySnapshots?.length ?? 0,
     capabilityToolNames: [...new Set(turn.capabilitySnapshots?.flatMap((item) => item.snapshot.tools.map((tool) => tool.modelName)) ?? [])],
     contextSources: firstRound?.contextSummary.items.map((item) => ({ kind: item.kind, title: item.title, estimatedTokens: item.estimatedTokens, ...(item.kind === "truncated_history" ? { truncated: true } : {}) })) ?? [],
+    ...(turn.modelRounds ? { modelRounds: turn.modelRounds.map((round) => ({
+      roundIndex: round.roundIndex,
+      capabilityGeneration: round.capabilityGeneration,
+      contextSummary: structuredClone(round.contextSummary),
+      providerInput: structuredClone(round.providerInput),
+      providerInputHash: createHash("sha256").update(round.providerInput.value).digest("hex"),
+      providerInputBytes: Buffer.byteLength(round.providerInput.value),
+      ...(round.resolvedReasoning ? { resolvedReasoning: structuredClone(round.resolvedReasoning) } : {}),
+    })) } : {}),
     ...(firstRound ? { providerInputHash: createHash("sha256").update(firstRound.providerInput.value).digest("hex"), providerInputBytes: Buffer.byteLength(firstRound.providerInput.value) } : {}),
     ...(turn.usage ? { usage: turn.usage } : {}),
     ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),

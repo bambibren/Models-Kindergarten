@@ -4,7 +4,6 @@ import {
   ChevronDown,
   FileCode2,
   FileText,
-  FlaskConical,
   LoaderCircle,
   Server,
   ShieldCheck,
@@ -31,7 +30,7 @@ export function DemoChatStream({
       if (item.type === "user") return <article className="mk-demo-user-turn" key={item.id}>
         <p>{item.text}</p><small>输入约 {item.inputTokens} tokens</small>
       </article>;
-      if (item.type === "context") return <ContextItem item={item} key={item.id} compact={compact} />;
+      if (item.type === "context") return <ContextItem item={item} key={item.id} />;
       if (item.type === "thought") return <details className="mk-demo-activity" key={item.id}>
         <summary><Brain size={14} /><strong>{item.title}</strong><small>推理约 {item.tokens} tokens</small><ChevronDown size={13} /></summary>
         <p>{item.text}</p>
@@ -62,19 +61,17 @@ export function DemoChatStream({
   </div>;
 }
 
-function ContextItem({ item, compact }: {
+function ContextItem({ item }: {
   item: Extract<DemoStreamItem, { type: "context" }>;
-  compact: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const query = new URLSearchParams({ mode: "turn", turnId: item.turnId });
   return <section className="mk-demo-context-item">
     <div className="mk-demo-context-heading">
       <div className="mk-demo-context-title-row">
         <button aria-expanded={expanded} className="mk-demo-context-toggle" type="button" onClick={() => setExpanded((value) => !value)}>
           <Braces size={14} /><strong>上下文提要</strong><small>{item.items.length} 项 · 约 {item.totalTokens} tokens</small><ChevronDown className={expanded ? "expanded" : ""} size={13} />
         </button>
-        {item.experimentEntry && !compact && <a href={`/demo/context-lab?${query.toString()}`}><FlaskConical size={13} />进行上下文编辑对比实验</a>}
+        {/* 上下文实验功能调研期间不暴露对话内入口。 */}
       </div>
       {expanded && <div className="mk-demo-context-panel">
         {item.items.map((contextItem) => <details key={contextItem.id}>

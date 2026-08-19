@@ -24,6 +24,7 @@ import { projectReasoningConfig } from "./reasoning/reasoning-config.js";
 import { isMissingAgentError, projectSessionAvailability, type SessionAgentAvailability } from "./session/session-identity.js";
 import { sessionResumeMeta } from "./chat/chat-resume.js";
 import { clampArtifactWidth, defaultArtifactWidth } from "./session/artifact-split-pane.js";
+import { selectContextWindowUsage } from "./chat/context-window-usage.js";
 
 const ACP_URL = import.meta.env.VITE_ACP_URL ?? "ws://127.0.0.1:7331/acp";
 const REMOTE_CWD = "/workspace";
@@ -33,6 +34,7 @@ export default function App() {
   const sessions = useAppStore((state) => state.sessions);
   const chat = useAppStore((state) => state.chat);
   const promptTurn = useAppStore((state) => state.promptTurn);
+  const contextWindowUsage = selectContextWindowUsage(chat.historyChatEntries, chat.streamingChatEntries);
   const clientRef = useRef<AcpWebClient | null>(null);
   const reconnectRef = useRef<(() => Promise<void>) | null>(null);
   const initialAction = useRef(readInitialAction());
@@ -117,6 +119,10 @@ export default function App() {
           }),
           onTokenUsage: (value) => store().dispatchChat({
             type: "token/usage",
+            value,
+          }),
+          onContextWindowUsage: (value) => store().dispatchChat({
+            type: "context-window/usage",
             value,
           }),
           onTurnState: (value) => {
@@ -566,6 +572,7 @@ export default function App() {
               onResolve={resolveInteraction}
             />}
             <Composer
+              contextWindowUsage={contextWindowUsage}
               disabled={!availability.promptEnabled}
               running={active}
               {...(reasoning ? { reasoning } : {})}

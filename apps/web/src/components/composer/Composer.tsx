@@ -5,8 +5,11 @@ import type { ReasoningConfigView } from "../../reasoning/reasoning-config.js";
 import { ReasoningProfileSelect } from "../reasoning/ReasoningProfileSelect.js";
 import { controlApi } from "../../api/control-api.js";
 import { addMention, mentionInputs, mentionQuery, removeMentionTrigger } from "./composer-mention.js";
+import type { ContextWindowUsageView } from "../../chat/context-window-usage.js";
+import { ContextWindowUsageIndicator } from "./ContextWindowUsageIndicator.js";
 
-export function Composer({ disabled, onCancel, onReasoningChange, onSend, reasoning, reasoningBusy = false, reasoningCapability, running }: {
+export function Composer({ contextWindowUsage, disabled, onCancel, onReasoningChange, onSend, reasoning, reasoningBusy = false, reasoningCapability, running }: {
+  contextWindowUsage: ContextWindowUsageView | null;
   disabled: boolean;
   running: boolean;
   reasoning?: ReasoningConfigView;
@@ -100,6 +103,9 @@ export function Composer({ disabled, onCancel, onReasoningChange, onSend, reason
         value={reasoning.currentProfile}
       />}
       <span>本地模型可能会出错，请核对重要信息</span>
-    </div>{running ? <button className="composer-action stop" type="button" aria-label="停止生成" onClick={onCancel}><Square size={13} fill="currentColor" /></button> : <button className="composer-action" type="submit" aria-label="发送" disabled={disabled || !text.trim()}><ArrowUp size={18} strokeWidth={2.4} /></button>}</div>
+    </div><div className="composer-actions">
+      {contextWindowUsage && <ContextWindowUsageIndicator value={contextWindowUsage} />}
+      {running ? <button className="composer-action stop" type="button" aria-label="停止生成" onClick={onCancel}><Square size={13} fill="currentColor" /></button> : <button className="composer-action" type="submit" aria-label="发送" disabled={disabled || !text.trim()}><ArrowUp size={18} strokeWidth={2.4} /></button>}
+    </div></div>
   </form>;
 }

@@ -6,6 +6,7 @@ import {
   makeSessionBindingMeta,
   parseAgentInput,
   parseExperimentDraftInput,
+  parseExperimentDraftV2,
   parseFileReferenceUri,
   parseMcpCandidateInput,
   PRODUCT_CONFIG,
@@ -98,6 +99,39 @@ describe("management contracts", () => {
     expect(draft.variants).toHaveLength(2);
     expect(() => parseExperimentDraftInput({ ...draft, variants: [draft.variants[0]] })).toThrow("2 到 3");
     expect(() => parseExperimentDraftInput({ ...draft, variants: [draft.variants[0], { ...draft.variants[0], variantId: "b", label: "B" }] })).toThrow("策略差异");
+  });
+
+  it("V2 每个 Test 独立选择模型和推理，且拒绝历史复用字段", () => {
+    const policy = {
+      systemPrompt: "保持简洁",
+      builtinTools: [],
+      skillInstallationIds: [],
+      mcps: [],
+      historyPolicy: { mode: "recent_turns" as const, maxTurns: 6 },
+      memoryPolicy: { mode: "off" as const },
+    };
+    const tests = ["A", "B"].map((label, index) => ({
+      testId: `test-${label.toLowerCase()}`,
+      label,
+      sourceAgent: { agentId: "agent-1", name: "助手", updatedAt: "2026-08-18T12:00:00.000Z" },
+      modelStudentId: `student-${index + 1}`,
+      reasoningProfile: index === 0 ? "auto" : "deep",
+      policy,
+    }));
+    const value = parseExperimentDraftV2({
+      schemaVersion: 2,
+      name: "模型与上下文对比",
+      promptText: "分析首屏性能",
+      sourceRef: { kind: "turn", id: "turn-1" },
+      toolUseWasExpected: false,
+      worksheetModelStudentId: "student-1",
+      tests,
+    });
+    expect(value.tests.map((item) => [item.modelStudentId, item.reasoningProfile])).toEqual([
+      ["student-1", "auto"], ["student-2", "deep"],
+    ]);
+    expect(() => parseExperimentDraftV2({ ...value, mode: "history_turn" })).toThrow("未知字段");
+    expect(() => parseExperimentDraftV2({ ...value, tests: [{ ...tests[0], mode: "reuse_snapshot" }, tests[1]] })).toThrow("未知字段");
   });
 
   it("mk-file URI 只接受 opaque ID，不接受路径、host 或 query", () => {

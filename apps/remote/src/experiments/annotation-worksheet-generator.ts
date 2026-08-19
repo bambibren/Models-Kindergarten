@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ExperimentAnnotationWorksheet, ExperimentRecord } from "@kindergarten/contracts";
+import type { ExperimentAnnotationWorksheet, ExperimentRecordV2 } from "@kindergarten/contracts";
 import type { ModelProvider } from "../model/model-provider.js";
+import { ModelStudentCatalog } from "../model/model-student-catalog.js";
 import { ApiProblemError } from "../server/api-problem.js";
 
 const PROMPT_VERSION = "annotation_worksheet_v1" as const;
@@ -27,15 +28,21 @@ interface TextUnit { index: number; start: number; end: number; text: string }
 
 /** 只让模型整理人工标注题目；这里没有 verdict、评分字段或自动评分调用。 */
 export class AnnotationWorksheetGenerator {
-  constructor(private readonly model: ModelProvider) {}
+  constructor(private readonly models: ModelProvider | ModelStudentCatalog) {}
 
-  async generate(experiment: ExperimentRecord, evidence: WorksheetRunEvidence[]): Promise<ExperimentAnnotationWorksheet> {
+  async generate(experiment: ExperimentRecordV2, evidence: WorksheetRunEvidence[]): Promise<ExperimentAnnotationWorksheet> {
+    const model = this.models instanceof ModelStudentCatalog
+      ? this.models.requireProvider(experiment.worksheetModelStudentId)
+      : this.models;
+    if (model.student.id !== experiment.worksheetModelStudentId) {
+      throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "评测辅助 ModelStudent 与实际 Provider 不一致", false);
+    }
     const units = Object.fromEntries(evidence.map((run) => [run.variantId, splitTextUnits(run.answer)]));
     if (evidence.some((run) => !run.answer.trim() || units[run.variantId]!.length === 0)) {
       throw new ApiProblemError(409, "WORKSHEET_NOT_READY", "所有 lane 都有完整回答后才能生成标注题目", true);
     }
     const input = buildInput(experiment, evidence, units);
-    const rawText = await this.callModel(input);
+    const rawText = await this.callModel(model, input);
     const raw = parseRawWorksheet(rawText, experiment);
     const now = new Date().toISOString();
     return {
@@ -61,9 +68,9 @@ export class AnnotationWorksheetGenerator {
         ),
       })),
       generator: {
-        modelStudentId: experiment.modelStudentId,
-        providerKind: this.model.student.provider.kind,
-        model: this.model.student.provider.model,
+        modelStudentId: model.student.id,
+        providerKind: model.student.provider.kind,
+        model: model.student.provider.model,
         promptVersion: PROMPT_VERSION,
         inputHash: sha256(input),
         outputHash: sha256(rawText),
@@ -72,12 +79,12 @@ export class AnnotationWorksheetGenerator {
     };
   }
 
-  private async callModel(input: string): Promise<string> {
+  private async callModel(model: ModelProvider, input: string): Promise<string> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 180_000);
     let text = "";
     try {
-      for await (const event of this.model.stream({
+      for await (const event of model.stream({
         systemPrompt: "你是人工评测题目整理器。你只提取事实并输出 JSON，不评价回答好坏，不给分。",
         messages: [{ role: "user", content: input }],
         tools: [],
@@ -99,7 +106,7 @@ export class AnnotationWorksheetGenerator {
   }
 }
 
-function buildInput(experiment: ExperimentRecord, evidence: WorksheetRunEvidence[], units: Record<string, TextUnit[]>): string {
+function buildInput(experiment: ExperimentRecordV2, evidence: WorksheetRunEvidence[], units: Record<string, TextUnit[]>): string {
   const payload = {
     task: experiment.promptText,
     lanes: evidence.map((run) => ({
@@ -122,7 +129,7 @@ function buildInput(experiment: ExperimentRecord, evidence: WorksheetRunEvidence
   ].join("\n");
 }
 
-function parseRawWorksheet(text: string, experiment: ExperimentRecord): RawWorksheet {
+function parseRawWorksheet(text: string, experiment: ExperimentRecordV2): RawWorksheet {
   try {
     const start = text.indexOf("{"); const end = text.lastIndexOf("}");
     if (start < 0 || end <= start) throw new Error("没有 JSON 对象");
@@ -133,7 +140,7 @@ function parseRawWorksheet(text: string, experiment: ExperimentRecord): RawWorks
       return { label: item.label, weight: item.weight };
     });
     if (requirements.length < 1 || requirements.length > MAX_REQUIREMENTS) throw new Error("requirements 数量无效");
-    const variantIds = experiment.variants.map((item) => item.variantId);
+    const variantIds = experiment.tests.map((item) => item.testId);
     const workflows = value.workflows.map((item) => {
       if (!record(item) || typeof item.variantId !== "string" || !Array.isArray(item.steps) || item.steps.length < 1 || item.steps.length > MAX_STEPS || item.steps.some((step) => typeof step !== "string" || !step.trim())) throw new Error("workflows 格式无效");
       return { variantId: item.variantId, steps: item.steps as string[] };

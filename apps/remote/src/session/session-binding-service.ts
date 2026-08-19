@@ -12,7 +12,11 @@ export interface SessionBindingServiceOptions {
   workspaceCwd: string;
   agentExists(agentId: string): boolean | Promise<boolean>;
   modelStudentReady(modelStudentId: string): boolean;
-  experimentBinding(experimentId: string, variantId: string): Promise<{ modelStudentId: string; agentId: string } | undefined>;
+  experimentBinding(experimentId: string, variantId: string): Promise<{
+    modelStudentId: string;
+    agentId: string;
+    experimentReasoning?: import("@kindergarten/contracts").ResolvedReasoningSnapshot;
+  } | undefined>;
 }
 
 /** 只信任已保存的 Agent/Model/Experiment，不从 Prompt 或 mcpServers 推导能力。 */
@@ -33,7 +37,7 @@ export class SessionBindingService {
     if (runRef) {
       const binding = await this.options.experimentBinding(runRef.experimentId, runRef.variantId);
       if (!binding) throw invalid("Experiment lane 不存在或不可运行");
-      await this.assertBinding(binding.modelStudentId, binding.agentId);
+      if (!this.options.modelStudentReady(binding.modelStudentId)) throw invalid(`ModelStudent 不可用: ${binding.modelStudentId}`);
       return {
         cwd: params.cwd,
         ownerId: "local-admin",

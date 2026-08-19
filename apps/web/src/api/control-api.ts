@@ -1,8 +1,9 @@
 import type {
   AgentInput,
   AgentRecord,
-  ExperimentDraftInput,
-  ExperimentRecord,
+  AnyExperimentRecord,
+  ExperimentDraftV2,
+  ExperimentRecordV2,
   FileReference,
   FilePreviewResponse,
   McpCandidateInput,
@@ -64,6 +65,7 @@ export interface TurnContextSnapshot {
   promptText: string;
   answerTexts: string[];
   sourcePolicy: import("@kindergarten/contracts").ExperimentContextPolicy;
+  resolvedReasoning?: import("@kindergarten/contracts").ResolvedReasoningSnapshot;
   agentSnapshotHash: string;
   capabilitySnapshots: unknown[];
   modelRounds: Array<{ roundIndex: number; contextSummary: import("@kindergarten/contracts").ContextSummary; providerInput: import("@kindergarten/contracts").ContextSummaryRaw }>;
@@ -100,9 +102,11 @@ export const controlApi = {
   installMcp: (testId: string, name?: string) => request<McpInstallationView>("/mcps", "POST", { testId, ...(name ? { name } : {}) }),
   mcpAction: (id: string, action: "enable" | "disable" | "reconnect") => request<McpInstallationView>(`/mcps/${encodeURIComponent(id)}/${action}`, "POST", {}),
   removeMcp: (id: string) => request<{ removedAgentBindings: string[] }>(`/mcps/${encodeURIComponent(id)}`, "DELETE"),
-  createExperiment: (input: ExperimentDraftInput) => request<ExperimentRecord>("/experiments", "POST", input),
-  contextPreview: (input: import("@kindergarten/contracts").ContextPreviewInput) => request<import("@kindergarten/contracts").ContextPreviewResponse>("/context-previews", "POST", input),
-  experiments: (saved = false) => get<ExperimentRecord[]>(`/experiments${saved ? "?saved=true" : ""}`),
+  createExperiment: (input: ExperimentDraftV2) => request<ExperimentRecordV2>("/experiments", "POST", input),
+  updateExperiment: (id: string, input: ExperimentDraftV2) => request<ExperimentRecordV2>(`/experiments/${encodeURIComponent(id)}`, "PUT", input),
+  prepareExperiment: (id: string, idempotencyKey: string) => request<ExperimentRecordV2>(`/experiments/${encodeURIComponent(id)}/prepare-run`, "POST", {}, { "idempotency-key": idempotencyKey }),
+  contextPreview: (input: import("@kindergarten/contracts").ContextPreviewInputV2) => request<import("@kindergarten/contracts").ContextPreviewResponseV2>("/context-previews", "POST", input),
+  experiments: (saved = false) => get<AnyExperimentRecord[]>(`/experiments${saved ? "?saved=true" : ""}`),
   removeExperiment: (id: string) => request<void>(`/experiments/${encodeURIComponent(id)}`, "DELETE"),
   fileReference: (id: string) => get<FileReference>(`/files/${encodeURIComponent(id)}`),
   filePreview: (id: string) => get<FilePreviewResponse>(`/files/${encodeURIComponent(id)}/preview`),
@@ -126,10 +130,11 @@ export class ControlApiError extends Error {
 
 async function get<T>(path: string): Promise<T> { return request<T>(path, "GET"); }
 
-async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
+async function request<T>(path: string, method: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
   const response = await fetch(`${CONTROL_URL}${path}`, {
     method,
-    ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+    headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...extraHeaders },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const value = await response.json().catch(() => null) as {
     data?: T;

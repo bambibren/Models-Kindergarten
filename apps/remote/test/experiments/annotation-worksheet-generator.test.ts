@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { ExperimentRecord } from "@kindergarten/contracts";
+import type { ExperimentRecordV2 } from "@kindergarten/contracts";
 import { AnnotationWorksheetGenerator } from "../../src/experiments/annotation-worksheet-generator.js";
 import { FixtureProvider } from "../../src/model/fixture-provider.js";
+import { ModelStudentCatalog } from "../../src/model/model-student-catalog.js";
 import type { ModelEvent, ModelInput } from "../../src/model/model-provider.js";
 
 class BoundaryDriftProvider extends FixtureProvider {
@@ -24,6 +25,16 @@ class BoundaryDriftProvider extends FixtureProvider {
   }
 }
 
+class AlternateWorksheetProvider extends BoundaryDriftProvider {
+  override readonly student = {
+    id: "alternate-worksheet-student",
+    name: "Alternate Worksheet Student",
+    sizeClass: "large" as const,
+    provider: { kind: "ollama" as const, model: "worksheet-fixture", baseUrl: "http://127.0.0.1" },
+    generationDefaults: { reasoningProfile: "balanced" as const },
+  };
+}
+
 describe("AnnotationWorksheetGenerator", () => {
   it("保留模型分段语义并把小模型漂移的编号规范化为完整连续原文", async () => {
     const generator = new AnnotationWorksheetGenerator(new BoundaryDriftProvider());
@@ -42,21 +53,38 @@ describe("AnnotationWorksheetGenerator", () => {
     }
     expect(worksheet.outputSections[0]?.sections.map((item) => item.label)).toEqual(["第一点", "第二点"]);
   });
+
+  it("从目录解析显式选择的非默认工作表 ModelStudent，并记录同一个真实 Provider", async () => {
+    const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
+    catalog.register(new AlternateWorksheetProvider(), { initialStatus: "ready" });
+    const generator = new AnnotationWorksheetGenerator(catalog);
+    const input = { ...experiment(), worksheetModelStudentId: "alternate-worksheet-student" };
+    const worksheet = await generator.generate(input, [
+      { variantId: "variant-a", label: "A", answer: "第一点。\n\n第二点。", toolEvents: [] },
+      { variantId: "variant-b", label: "B", answer: "甲。\n乙。", toolEvents: [] },
+    ]);
+
+    expect(worksheet.generator).toMatchObject({
+      modelStudentId: "alternate-worksheet-student",
+      providerKind: "ollama",
+      model: "worksheet-fixture",
+    });
+  });
 });
 
-function experiment(): ExperimentRecord {
+function experiment(): ExperimentRecordV2 {
   const now = new Date().toISOString();
   const policy = {
     systemPrompt: "test", builtinTools: [], skillInstallationIds: [], mcps: [],
     historyPolicy: { mode: "none" as const, maxTurns: 0 }, memoryPolicy: { mode: "off" as const },
   };
   return {
-    schemaVersion: 1, experimentId: "experiment", ownerId: "local-admin", name: "test",
-    mode: "fresh_prompt", status: "completed", modelStudentId: "fixture-student", sourceAgentId: "agent",
+    schemaVersion: 2, experimentId: "experiment", ownerId: "local-admin", name: "test",
+    status: "completed", worksheetModelStudentId: "fixture-student",
     promptText: "回答两点", toolUseWasExpected: false,
-    variants: [
-      { variantId: "variant-a", label: "A", mode: "rerun", policy },
-      { variantId: "variant-b", label: "B", mode: "rerun", policy },
+    tests: [
+      { testId: "variant-a", label: "A", sourceAgent: { agentId: "agent", name: "Agent", updatedAt: now }, modelStudentId: "fixture-student", reasoningProfile: "auto", policy },
+      { testId: "variant-b", label: "B", sourceAgent: { agentId: "agent", name: "Agent", updatedAt: now }, modelStudentId: "fixture-student", reasoningProfile: "auto", policy },
     ],
     runs: [], createdAt: now, updatedAt: now,
   };

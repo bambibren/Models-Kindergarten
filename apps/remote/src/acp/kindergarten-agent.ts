@@ -17,6 +17,7 @@ import {
   type TurnPendingPermissionInteraction,
   type TurnState,
   type ArtifactMention,
+  type ContextWindowUsageState,
 } from "@kindergarten/contracts";
 import { AcpOutput } from "./acp-output.js";
 import type {
@@ -34,6 +35,7 @@ import type { SessionRepository } from "../repository/session-repository.js";
 import type {
   SessionEntry,
   SessionContextSummaryEntry,
+  SessionContextWindowUsageEntry,
   SessionMessageEntry,
   SessionRecord,
   SessionTokenUsageEntry,
@@ -260,7 +262,7 @@ export class KindergartenAgent {
           throw new acp.RequestError(-32000, "这个会话已有一轮回答正在生成");
         }
         const current = await this.sessions.get(params.sessionId);
-        if (!await this.bindings.agentExists(current.agentId)) {
+        if (current.purpose === "chat" && !await this.bindings.agentExists(current.agentId)) {
           throw new acp.RequestError(
             -32002,
             "该会话绑定的 Agent 已删除，不能继续对话",
@@ -339,8 +341,9 @@ export class KindergartenAgent {
       throw error;
     }
 
+    let runtimeHistory: SessionEntry[] = session.sessionEntries;
     try {
-      const runtimeHistory = session.experimentRef && this.experiments
+      runtimeHistory = session.experimentRef && this.experiments
         ? await this.experiments.runtimeHistory(session.experimentRef.experimentId, session.ownerId)
         : session.sessionEntries;
       const result = await this.runtime.run(
@@ -365,6 +368,17 @@ export class KindergartenAgent {
           await projection.finalizeOpenRounds();
         } catch (error) {
           failure ??= error;
+        }
+        const contextWindow = await this.contextWindowState(
+          session,
+          turnId,
+          [...runtimeHistory, user, ...projection.entriesSnapshot()],
+        );
+        try {
+          await projection.contextWindowUsage(contextWindow);
+        } catch (error) {
+          // 该快照是派生展示事实；通知失败不能篡改已完成的模型或 Tool 结果。
+          console.error("上下文窗口快照投影失败", error);
         }
         await projection.phase("finalizing");
         const terminalStatus = controller.signal.aborted || reason === "cancelled" ? "cancelled" : failure ? "failed" : "completed";
@@ -421,6 +435,43 @@ export class KindergartenAgent {
   private cancel(sessionId: string): void {
     this.pendingPrompts.get(sessionId)?.abort();
     this.active.get(sessionId)?.abort();
+  }
+
+  private async contextWindowState(
+    session: SessionRecord,
+    turnId: string,
+    sessionEntries: SessionEntry[],
+  ): Promise<ContextWindowUsageState> {
+    try {
+      const preview = await this.runtime.previewContextWindow(
+        {
+          sessionEntries,
+          scope: turnScope(session, turnId),
+        },
+        AbortSignal.timeout(10_000),
+      );
+      return preview
+        ? {
+            schemaVersion: 1,
+            status: "available",
+            afterTurnId: turnId,
+            ...preview,
+          }
+        : {
+            schemaVersion: 1,
+            status: "unavailable",
+            afterTurnId: turnId,
+            reason: "unknown_window",
+          };
+    } catch (error) {
+      console.error("生成上下文窗口快照失败", error);
+      return {
+        schemaVersion: 1,
+        status: "unavailable",
+        afterTurnId: turnId,
+        reason: "preview_failed",
+      };
+    }
   }
 
   /**
@@ -564,6 +615,17 @@ class TurnProjection implements RunObserver {
     this.streamingSessionEntries.push(entry);
     await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
     await this.output.tokenUsage(usage);
+  }
+
+  async contextWindowUsage(state: ContextWindowUsageState): Promise<void> {
+    const entry: SessionContextWindowUsageEntry = {
+      type: "context_window_usage",
+      turnId: this.turnId,
+      state: structuredClone(state),
+      createdAt: new Date().toISOString(),
+    };
+    this.streamingSessionEntries.push(entry);
+    await this.output.contextWindowUsage(state);
   }
 
   executionFacts(): Partial<import("../repository/session-types.js").TurnExecutionRecord> {
@@ -894,6 +956,8 @@ async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void
     await output.contextSummary(entry.summary);
   } else if (entry.type === "token_usage") {
     await output.tokenUsage(entry.usage);
+  } else if (entry.type === "context_window_usage") {
+    await output.contextWindowUsage(entry.state);
   } else if (entry.type === "thought") {
     await output.thought(entry.messageId, entry.text, {
       schemaVersion: 1,

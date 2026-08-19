@@ -1,4 +1,4 @@
-import { FlaskConical, GraduationCap, UserRound } from "lucide-react";
+import { GraduationCap, UserRound } from "lucide-react";
 import { useState } from "react";
 
 export function DemoTopNav({ active, compactHome = false }: { active: "home" | "context" | "me" | "session"; compactHome?: boolean }) {
@@ -10,7 +10,7 @@ export function DemoTopNav({ active, compactHome = false }: { active: "home" | "
         <strong>ModelStudent</strong>
       </a>
       <div className="mk-demo-account-actions">
-        <a className={active === "me" ? "active" : ""} href="/demo/me?tab=experiments"><UserRound size={14} />Admin</a>
+        <a className={active === "me" ? "active" : ""} href="/demo/me?tab=agents"><UserRound size={14} />Admin</a>
       </div>
     </header>
     {notice && <div className="mk-demo-inline-notice" role="status">

@@ -1,13 +1,14 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { ContextPreviewResponseV2, ExperimentDraftV2 } from "@kindergarten/contracts";
 import { AgentRepository } from "../../src/agent/agent-repository.js";
 import { AgentService } from "../../src/agent/agent-service.js";
 import type { EvaluationRecordReader } from "../../src/experiments/evaluation-record-client.js";
 import { ExperimentRepository } from "../../src/experiments/experiment-repository.js";
 import { ExperimentService } from "../../src/experiments/experiment-service.js";
-import { AnnotationWorksheetGenerator } from "../../src/experiments/annotation-worksheet-generator.js";
+import type { ContextPreviewService } from "../../src/experiments/context-preview-service.js";
 import { FixtureProvider } from "../../src/model/fixture-provider.js";
 import { ModelStudentCatalog } from "../../src/model/model-student-catalog.js";
 import { SessionRepository } from "../../src/repository/session-repository.js";
@@ -15,247 +16,189 @@ import { SessionRepository } from "../../src/repository/session-repository.js";
 const dirs: string[] = [];
 afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("ExperimentService", () => {
-  it("创建 2-3 lane，使用隐藏 policy Agent，普通 Agent 列表不展示", async () => {
-    const { service, agents, sourceAgentId } = await setup();
-    const experiment = await service.create(draft(sourceAgentId));
-    expect(experiment.status).toBe("ready");
-    expect(experiment.runs).toHaveLength(2);
-    expect(await service.binding(experiment.experimentId, "variant-a")).toMatchObject({ modelStudentId: "fixture-student" });
-    expect((await agents.list({ limit: 100 })).items.map((item) => item.agentId)).toEqual([sourceAgentId]);
+describe("ExperimentService V2", () => {
+  it("创建 draft 不创建隐藏 Agent、Run 或 Session", async () => {
+    const { service, agents, source } = await setup();
+    const experiment = await service.create(draft(source));
+    expect(experiment).toMatchObject({ schemaVersion: 2, status: "draft", runs: [] });
+    expect((await agents.list({ limit: 100 })).items.map((item) => item.agentId)).toEqual([source.agentId]);
+    expect(await service.binding(experiment.experimentId, "test-a")).toBeUndefined();
   });
 
-  it("Runtime 指标参与执行分；三个人工维度完成后生成四维总分、排名和 winner", async () => {
-    const { service, sourceAgentId } = await setup();
-    const experiment = await service.create(draft(sourceAgentId));
-    for (const [index, run] of experiment.runs.entries()) {
-      await service.markRunStarted(experiment.experimentId, run.variantId, `session-${index}`, `turn-${index}`);
-      await service.markRunFinished(experiment.experimentId, run.variantId, `session-${index}`, `turn-${index}`, "completed", [index === 0 ? "理解需求并完成输出" : "仅完成输出"]);
-    }
-    expect((await service.get(experiment.experimentId)).status).toBe("completed");
-    const worksheet = await service.generateAnnotationWorksheet(experiment.experimentId);
-    const completedExperiment = await service.get(experiment.experimentId);
-    for (const [index, output] of worksheet.outputSections.entries()) {
-      expect(output.sections[0]?.start).toBe(0);
-      expect(output.sections.at(-1)?.end).toBe(completedExperiment.runs[index]?.answerTexts.join("\n\n").length);
-    }
-    const completedAt = new Date().toISOString();
-    const scorecard = await service.putAnnotations(experiment.experimentId, {
-      understanding: {
-        requirements: worksheet.requirements,
-        marks: [
-          { variantId: "variant-a", requirementId: worksheet.requirements[0]!.requirementId, verdict: "met" },
-          { variantId: "variant-b", requirementId: worksheet.requirements[0]!.requirementId, verdict: "missed" },
-        ],
-        completedAt,
-      },
-      planning: {
-        marks: [
-          { variantId: "variant-a", stepId: worksheet.workflows[0]!.steps[0]!.stepId, verdict: "effective" },
-          { variantId: "variant-b", stepId: worksheet.workflows[1]!.steps[0]!.stepId, verdict: "partial" },
-        ],
-        completedAt,
-      },
-      output: {
-        marks: [
-          outputMark("variant-a", worksheet.outputSections[0]!.sections[0]!, "effective"),
-          outputMark("variant-b", worksheet.outputSections[1]!.sections[0]!, "partial"),
-        ],
-        completedAt,
-      },
-    });
-    expect(scorecard.status).toBe("complete");
-    expect(scorecard.variants[0]?.dimensionScores).toMatchObject({ understanding: 100, planning: 100, output: 100, execution: 100 });
-    expect(scorecard.variants[0]?.totalScore).toBe(100);
-    expect(scorecard.winnerVariantIds).toEqual(["variant-a"]);
-  });
-
-  it("注释未完成时不生成总分、排名或 winner", async () => {
-    const { service, sourceAgentId } = await setup();
-    const experiment = await service.create(draft(sourceAgentId));
-    for (const [index, run] of experiment.runs.entries()) {
-      await service.markRunStarted(experiment.experimentId, run.variantId, `s${index}`, `t${index}`);
-      await service.markRunFinished(experiment.experimentId, run.variantId, `s${index}`, `t${index}`, "completed", ["回答"]);
-    }
-    const worksheet = await service.generateAnnotationWorksheet(experiment.experimentId);
-    const scorecard = await service.putAnnotations(experiment.experimentId, {
-      understanding: { requirements: worksheet.requirements, marks: [] },
-      planning: { marks: [] }, output: { marks: [] },
-    });
-    expect(scorecard.status).toBe("draft");
-    expect(scorecard).not.toHaveProperty("ranking");
-    expect(scorecard).not.toHaveProperty("winnerVariantIds");
-    expect(scorecard.variants.every((item) => item.totalScore === undefined)).toBe(true);
-  });
-
-  it("history A 复用原 Turn，且不创建实验 Session 或模型请求", async () => {
-    const { service, sourceAgentId, sessions } = await setup();
-    const source = await sessions.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "fixture-student", agentId: sourceAgentId });
-    await sessions.appendMany(source.id, [
-      { type: "message", role: "user", text: "原问题", turnId: "source-turn", messageId: "u", createdAt: new Date().toISOString() },
-      { type: "message", role: "assistant", text: "原回答", turnId: "source-turn", messageId: "a", createdAt: new Date().toISOString() },
+  it("prepare-run 原子冻结 Test 快照并按 Idempotency-Key 幂等", async () => {
+    const { service, source } = await setup();
+    const created = await service.create(draft(source));
+    const prepared = await service.prepareRun(created.experimentId, "prepare-1");
+    expect(prepared.status).toBe("prepared");
+    expect(prepared.snapshots).toHaveLength(2);
+    expect(prepared.runs.map((run) => [run.testId, run.status])).toEqual([
+      ["test-a", "pending"], ["test-b", "pending"],
     ]);
-    await sessions.startTurn(source.id, "source-turn");
-    await sessions.transitionTurn(source.id, "source-turn", "finalizing");
-    await sessions.finishTurn(source.id, "source-turn", "completed");
-    const history = await service.create({
-      ...draft(sourceAgentId), mode: "history_turn", promptText: "原问题", sourceTurnId: "source-turn",
-      variants: [
-        { variantId: "variant-a", label: "A", mode: "reuse_snapshot", policy: policy("提示 A") },
-        { variantId: "variant-b", label: "B", mode: "rerun", policy: policy("提示 B") },
-      ],
-    });
-    await service.completeReuseSnapshot(history.experimentId, "variant-a");
-    const completed = await service.get(history.experimentId);
-    expect(completed.runs[0]).toMatchObject({ status: "completed", acpSessionId: source.id, turnId: "source-turn", answerTexts: ["原回答"] });
-    expect(await sessions.all("experiment")).toHaveLength(0);
-  });
-
-  it("拒绝把其他 ModelStudent 的历史 Turn 用作实验上下文", async () => {
-    const { service, sourceAgentId, sessions } = await setup();
-    const source = await completedSourceTurn(sessions, sourceAgentId, "another-student", "cross-model-turn");
-
-    await expect(service.create({
-      ...draft(sourceAgentId),
-      mode: "history_turn",
-      promptText: "原问题",
-      sourceTurnId: source.turnId,
-      variants: [
-        { variantId: "variant-a", label: "A", mode: "reuse_snapshot", policy: policy("提示 A") },
-        { variantId: "variant-b", label: "B", mode: "rerun", policy: policy("提示 B") },
-      ],
-    })).rejects.toMatchObject({
-      status: 409,
-      code: "EXPERIMENT_NOT_RUNNABLE",
-      retryable: false,
-      fieldErrors: [{ path: "modelStudentId" }],
+    expect(await service.prepareRun(created.experimentId, "prepare-1")).toEqual(prepared);
+    await expect(service.prepareRun(created.experimentId, "prepare-2")).rejects.toMatchObject({ code: "EXPERIMENT_READ_ONLY" });
+    expect(await service.binding(created.experimentId, "test-b")).toMatchObject({
+      modelStudentId: "fixture-student",
+      agentId: source.agentId,
+      experimentReasoning: { requestedProfile: "balanced", resolvedProfile: "balanced" },
     });
   });
 
-  it("旧持久化实验在读取历史或复用快照时仍复核 ModelStudent 边界", async () => {
-    const { service, sourceAgentId, sessions, experiments } = await setup();
-    const source = await completedSourceTurn(sessions, sourceAgentId, "another-student", "legacy-cross-model-turn");
-    const experiment = await service.create(draft(sourceAgentId));
-    await experiments.update(experiment.experimentId, (current) => ({
-      ...current,
-      mode: "history_turn",
-      sourceTurnId: source.turnId,
-      variants: current.variants.map((variant, index) => index === 0
-        ? { ...variant, mode: "reuse_snapshot" as const }
-        : variant),
-      runs: current.runs.map((run, index) => index === 0
-        ? { ...run, mode: "reuse_snapshot" as const, reusedTurnId: source.turnId }
-        : run),
-    }));
-
-    await expect(service.runtimeHistory(experiment.experimentId)).rejects.toMatchObject({
-      status: 409,
-      code: "EXPERIMENT_NOT_RUNNABLE",
-    });
-    await expect(service.completeReuseSnapshot(experiment.experimentId, "variant-a")).rejects.toMatchObject({
-      status: 409,
-      code: "EXPERIMENT_NOT_RUNNABLE",
+  it("只有历史策略不同不构成有效差异", async () => {
+    const { service, source } = await setup({ ignoreHistory: true });
+    const input = draft(source);
+    input.tests[1]!.policy.historyPolicy = { mode: "recent_turns", maxTurns: 20 };
+    input.tests[1]!.policy.systemPrompt = input.tests[0]!.policy.systemPrompt;
+    const created = await service.create(input);
+    await expect(service.prepareRun(created.experimentId, "prepare-same")).rejects.toMatchObject({
+      code: "EXPERIMENT_NO_EFFECTIVE_DIFFERENCE",
     });
   });
 
-  it("删除 Context 时只删除该实验产生的隐藏 Session，保留用户原会话", async () => {
-    const { service, sourceAgentId, sessions } = await setup();
-    const experiment = await service.create(draft(sourceAgentId));
-    const userSession = await sessions.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "fixture-student", agentId: sourceAgentId });
-    const hidden = await sessions.create({
-      cwd: "/workspace", ownerId: "local-admin", purpose: "experiment", modelStudentId: "fixture-student",
-      agentId: experiment.runs[0]!.agentId, experimentRef: { experimentId: experiment.experimentId, variantId: "variant-a" },
+  it("所有 Test 都以 fresh run 完成，删除时只清理实验 Session", async () => {
+    const { service, source, sessions } = await setup();
+    const created = await service.create(draft(source));
+    const prepared = await service.prepareRun(created.experimentId, "prepare-run");
+    const userSession = await sessions.create({
+      cwd: "/workspace", ownerId: "local-admin", purpose: "chat",
+      modelStudentId: "fixture-student", agentId: source.agentId,
     });
-    const result = await service.delete(experiment.experimentId);
-    expect(result.removedExperimentSessionIds).toEqual([hidden.id]);
+    for (const run of prepared.runs) {
+      const session = await sessions.create({
+        cwd: "/workspace", ownerId: "local-admin", purpose: "experiment",
+        modelStudentId: "fixture-student", agentId: source.agentId,
+        experimentRef: { experimentId: created.experimentId, variantId: run.testId },
+      });
+      await service.markRunStarted(created.experimentId, run.testId, session.id, `turn-${run.testId}`);
+      await service.markRunFinished(created.experimentId, run.testId, session.id, `turn-${run.testId}`, "completed", [`回答 ${run.testId}`]);
+    }
+    expect((await service.get(created.experimentId)).status).toBe("completed");
+    const removed = await service.delete(created.experimentId);
+    expect(removed.removedExperimentSessionIds).toHaveLength(2);
     expect((await sessions.all()).map((item) => item.id)).toEqual([userSession.id]);
-    await expect(service.get(experiment.experimentId)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("所有 lane 被取消时保留 cancelled 终态，不伪装成失败", async () => {
+    const { service, source, sessions } = await setup();
+    const created = await service.create(draft(source));
+    const prepared = await service.prepareRun(created.experimentId, "prepare-cancelled");
+    for (const run of prepared.runs) {
+      const session = await sessions.create({
+        cwd: "/workspace", ownerId: "local-admin", purpose: "experiment",
+        modelStudentId: "fixture-student", agentId: source.agentId,
+        experimentRef: { experimentId: created.experimentId, variantId: run.testId },
+      });
+      await service.markRunStarted(created.experimentId, run.testId, session.id, `turn-${run.testId}`);
+      await service.markRunFinished(created.experimentId, run.testId, session.id, `turn-${run.testId}`, "cancelled", []);
+    }
+    expect((await service.get(created.experimentId)).status).toBe("cancelled");
+  });
+
+  it("读取 V1 store 但拒绝修改或运行 legacy 记录", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-experiment-legacy-"));
+    dirs.push(dir);
+    const source = legacyRecord();
+    await writeFile(join(dir, "experiments.json"), JSON.stringify({ schemaVersion: 1, records: [source] }));
+    const { service } = await setup({ dir });
+    expect((await service.get(source.experimentId)).schemaVersion).toBe(1);
+    await expect(service.prepareRun(source.experimentId, "legacy")).rejects.toMatchObject({ code: "LEGACY_EXPERIMENT_READ_ONLY" });
+    await expect(service.save(source.experimentId)).rejects.toMatchObject({ code: "LEGACY_EXPERIMENT_READ_ONLY" });
+    expect(await service.binding(source.experimentId, "variant-a")).toBeUndefined();
   });
 });
 
-async function setup() {
-  const dir = await mkdtemp(join(tmpdir(), "mk-experiment-"));
-  dirs.push(dir);
+async function setup(options: { dir?: string; ignoreHistory?: boolean } = {}) {
+  const dir = options.dir ?? await mkdtemp(join(tmpdir(), "mk-experiment-v2-"));
+  if (!options.dir) dirs.push(dir);
   const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
     builtinToolIds: () => ["read_file"], readySkillInstallationIds: () => [], mcpCapabilities: () => [],
   });
   const source = await agents.create(agentInput("source"));
   const sessions = new SessionRepository(dir);
-  const evaluation: EvaluationRecordReader = {
-    get: async (sessionId, turnId) => ({
-      result: {
-        normallyCompleted: true,
-        firstTokenLatencyMs: 20,
-        totalDurationMs: 100,
-        toolSuccessCount: 0,
-        toolFailureCount: 0,
-        errorCount: 0,
-        permissionViolationCount: 0,
-        hasRepeatedToolCall: false,
-        modelRoundCount: 1,
-        toolCallCount: 0,
-        totalContextTokens: sessionId.length,
-        totalOutputTokens: turnId.length,
-      },
-    }),
-  };
+  const evaluation: EvaluationRecordReader = { get: async () => ({ result: {
+    normallyCompleted: true, firstTokenLatencyMs: 20, totalDurationMs: 100,
+    toolSuccessCount: 0, toolFailureCount: 0, errorCount: 0,
+    permissionViolationCount: 0, hasRepeatedToolCall: false,
+    modelRoundCount: 1, toolCallCount: 0, totalContextTokens: 10, totalOutputTokens: 3,
+  } }) };
   const fixture = new FixtureProvider();
-  const experiments = new ExperimentRepository(join(dir, "experiments.json"), join(dir, "scorecards.json"));
+  const previews = { previewTest: async (_prompt: string, test: ExperimentDraftV2["tests"][number]) =>
+    preview(test, options.ignoreHistory === true) } as ContextPreviewService;
   const service = new ExperimentService(
-    experiments,
-    agents,
-    sessions,
-    new ModelStudentCatalog(fixture, "ready"),
-    evaluation,
-    undefined,
-    new AnnotationWorksheetGenerator(fixture),
+    new ExperimentRepository(join(dir, "experiments.json"), join(dir, "scorecards.json")),
+    agents, sessions, new ModelStudentCatalog(fixture, "ready"), evaluation,
+    undefined, undefined, previews,
   );
-  return { service, agents, sessions, experiments, sourceAgentId: source.agentId };
+  return { service, agents, sessions, source };
 }
 
-async function completedSourceTurn(
-  sessions: SessionRepository,
-  sourceAgentId: string,
-  modelStudentId: string,
-  turnId: string,
-) {
-  const session = await sessions.create({
-    cwd: "/workspace",
-    ownerId: "local-admin",
-    purpose: "chat",
-    modelStudentId,
-    agentId: sourceAgentId,
-  });
-  await sessions.appendMany(session.id, [
-    { type: "message", role: "user", text: "原问题", turnId, messageId: `${turnId}-user`, createdAt: new Date().toISOString() },
-    { type: "message", role: "assistant", text: "原回答", turnId, messageId: `${turnId}-assistant`, createdAt: new Date().toISOString() },
-  ]);
-  await sessions.startTurn(session.id, turnId);
-  await sessions.transitionTurn(session.id, turnId, "finalizing");
-  await sessions.finishTurn(session.id, turnId, "completed");
-  return { sessionId: session.id, turnId };
-}
-
-function draft(sourceAgentId: string) {
+function draft(source: { agentId: string; name: string; updatedAt: string }): ExperimentDraftV2 {
+  const sourceAgent = { agentId: source.agentId, name: source.name, updatedAt: source.updatedAt };
   return {
+    schemaVersion: 2,
     name: "上下文对照",
-    mode: "fresh_prompt",
-    modelStudentId: "fixture-student",
-    sourceAgentId,
     promptText: "完成任务",
     toolUseWasExpected: false,
-    variants: [
-      { variantId: "variant-a", label: "A", mode: "rerun", policy: policy("提示 A") },
-      { variantId: "variant-b", label: "B", mode: "rerun", policy: policy("提示 B") },
+    worksheetModelStudentId: "fixture-student",
+    tests: [
+      { testId: "test-a", label: "A", sourceAgent, modelStudentId: "fixture-student", reasoningProfile: "auto", policy: policy("提示 A") },
+      { testId: "test-b", label: "B", sourceAgent, modelStudentId: "fixture-student", reasoningProfile: "balanced", policy: policy("提示 B") },
     ],
   };
 }
-function policy(systemPrompt: string) { return { ...agentInput("policy"), systemPrompt }; }
-function agentInput(name: string) { return {
-  name, systemPrompt: "提示", builtinTools: [{ toolId: "read_file", enabled: true, permission: "allow" as const }],
-  skillInstallationIds: [], mcps: [], historyPolicy: { mode: "none" as const, maxTurns: 0 }, memoryPolicy: { mode: "off" as const },
-}; }
-function outputMark(variantId: string, section: { answerSectionId: string; start: number; end: number; quotedTextHash: string }, verdict: "effective" | "partial") { return {
-  variantId, answerSectionId: section.answerSectionId, start: section.start, end: section.end, verdict,
-  quotedTextHash: section.quotedTextHash,
-}; }
+
+function preview(test: ExperimentDraftV2["tests"][number], ignoreHistory: boolean): ContextPreviewResponseV2 {
+  const effective = JSON.stringify({
+    model: test.modelStudentId,
+    reasoning: test.reasoningProfile === "auto" ? "balanced" : test.reasoningProfile,
+    prompt: test.policy.systemPrompt,
+    ...(ignoreHistory ? {} : { tools: test.policy.builtinTools }),
+  });
+  return {
+    schemaVersion: 2, runnable: true, diagnostics: [],
+    agentSnapshotHash: `agent:${effective}`, capabilityHash: "capability-1",
+    effectiveConfigurationHash: effective,
+    contextSummary: { schemaVersion: 1, turnId: "preview", items: [], totalEstimatedTokens: 10 },
+    providerInput: { provider: "fixture", model: "fixture", format: "json", value: effective },
+    providerInputHash: `input:${effective}`, providerInputBytes: effective.length,
+    resolvedReasoning: {
+      schemaVersion: 1, requestedProfile: test.reasoningProfile,
+      resolvedProfile: test.reasoningProfile === "auto" ? "balanced" : test.reasoningProfile,
+      source: test.reasoningProfile === "auto" ? "model_default" : "session_override",
+      providerKind: "fixture", model: "fixture", native: {},
+    },
+    model: { modelStudentId: "fixture-student", displayName: "Fixture", providerKind: "fixture", model: "fixture" },
+    history: { configuredPolicy: test.policy.historyPolicy, actualHistoryTurns: 0 },
+  };
+}
+
+function policy(systemPrompt: string) {
+  return {
+    systemPrompt,
+    builtinTools: [],
+    skillInstallationIds: [],
+    mcps: [],
+    historyPolicy: { mode: "none" as const },
+    memoryPolicy: { mode: "off" as const },
+  };
+}
+
+function agentInput(name: string) {
+  return { name, systemPrompt: "提示", builtinTools: [], skillInstallationIds: [], mcps: [],
+    historyPolicy: { mode: "none" as const }, memoryPolicy: { mode: "off" as const } };
+}
+
+function legacyRecord() {
+  const now = new Date().toISOString();
+  return {
+    schemaVersion: 1 as const,
+    experimentId: "legacy-1", ownerId: "local-admin", name: "旧实验",
+    mode: "history_turn" as const, status: "completed" as const,
+    modelStudentId: "fixture-student", sourceAgentId: "legacy-agent",
+    promptText: "旧问题", sourceTurnId: "old-turn", toolUseWasExpected: false,
+    variants: [
+      { variantId: "variant-a", label: "A" as const, mode: "reuse_snapshot" as const, policy: policy("A") },
+      { variantId: "variant-b", label: "B" as const, mode: "rerun" as const, policy: policy("B") },
+    ],
+    runs: [], createdAt: now, updatedAt: now,
+  };
+}

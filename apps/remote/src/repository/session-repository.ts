@@ -10,7 +10,7 @@ import type {
   SessionRecord,
   TurnExecutionRecord,
 } from "./session-types.js";
-import { isConcreteReasoningProfile, readTurnState, type ConcreteReasoningProfile } from "@kindergarten/contracts";
+import { isConcreteReasoningProfile, readTurnState, type ConcreteReasoningProfile, type ResolvedReasoningSnapshot } from "@kindergarten/contracts";
 import { readProviderOpaqueContinuation } from "../model/provider-continuation.js";
 import type { TurnActivePhase, TurnPendingInteraction, TurnStatus } from "@kindergarten/contracts";
 import {
@@ -42,6 +42,7 @@ export interface CreateSessionInput {
   modelStudentId: string;
   agentId: string;
   experimentRef?: SessionExperimentRef;
+  experimentReasoning?: ResolvedReasoningSnapshot;
 }
 
 /** Repository V4 保存固定身份 Session 与 Turn 事实；旧文件只在显式默认值下迁移。 */
@@ -72,6 +73,7 @@ export class SessionRepository {
         modelStudentId: input.modelStudentId,
         agentId: input.agentId,
         ...(input.experimentRef ? { experimentRef: structuredClone(input.experimentRef) } : {}),
+        ...(input.experimentReasoning ? { experimentReasoning: structuredClone(input.experimentReasoning) } : {}),
         createdAt: now,
         updatedAt: now,
         sessionEntries: [],

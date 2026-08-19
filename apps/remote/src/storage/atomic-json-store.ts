@@ -9,6 +9,7 @@ interface StoreDocument<T> {
 export interface AtomicJsonStoreOptions<T> {
   file: string;
   schemaVersion: number;
+  legacySchemaVersions?: number[];
   validate: (value: unknown) => value is T;
 }
 
@@ -69,7 +70,8 @@ export class AtomicJsonStore<T> {
 
   private async readDocument(file: string): Promise<T[]> {
     const value = JSON.parse(await readFile(file, "utf8")) as unknown;
-    if (!isRecord(value) || value.schemaVersion !== this.options.schemaVersion) {
+    const acceptedVersions = [this.options.schemaVersion, ...(this.options.legacySchemaVersions ?? [])];
+    if (!isRecord(value) || typeof value.schemaVersion !== "number" || !acceptedVersions.includes(value.schemaVersion)) {
       throw new Error(`Store schemaVersion 无效，预期 ${this.options.schemaVersion}`);
     }
     if (!Array.isArray(value.records)) throw new Error("Store records 必须是数组");

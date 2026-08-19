@@ -14,6 +14,8 @@ export const CONTEXT_SUMMARY_NOTIFICATION =
   "model-kindergarten/session/context-summary" as const;
 export const TOKEN_USAGE_NOTIFICATION =
   "model-kindergarten/session/token-usage" as const;
+export const CONTEXT_WINDOW_USAGE_NOTIFICATION =
+  "model-kindergarten/session/context-window-usage" as const;
 
 export type ContextSummaryKind =
   | "system_instruction"
@@ -91,6 +93,28 @@ export interface TurnTokenUsage {
 export interface TokenUsageNotification {
   sessionId: string;
   usage: TurnTokenUsage;
+}
+
+/** Turn 结束后按下一次真实请求结构生成；不包含输入框中尚未发送的草稿。 */
+export type ContextWindowUsageState =
+  | {
+      schemaVersion: 1;
+      status: "available";
+      afterTurnId: string;
+      estimatedTokens: number;
+      windowTokens: number;
+      basis: "next_prompt_base";
+    }
+  | {
+      schemaVersion: 1;
+      status: "unavailable";
+      afterTurnId: string;
+      reason: "unknown_window" | "preview_failed";
+    };
+
+export interface ContextWindowUsageNotification {
+  sessionId: string;
+  state: ContextWindowUsageState;
 }
 
 /**
@@ -277,6 +301,57 @@ export function readTokenUsageNotification(
   };
 }
 
+export function readContextWindowUsageNotification(
+  value: unknown,
+): ContextWindowUsageNotification {
+  if (!isRecord(value) || typeof value.sessionId !== "string" || value.sessionId.length === 0) {
+    throw new Error("上下文窗口通知缺少 sessionId");
+  }
+  const state = value.state;
+  if (
+    !isRecord(state) ||
+    state.schemaVersion !== 1 ||
+    typeof state.afterTurnId !== "string" ||
+    state.afterTurnId.length === 0
+  ) {
+    throw new Error("上下文窗口通知格式无效");
+  }
+  if (state.status === "unavailable") {
+    if (state.reason !== "unknown_window" && state.reason !== "preview_failed") {
+      throw new Error("上下文窗口不可用原因无效");
+    }
+    return {
+      sessionId: value.sessionId,
+      state: {
+        schemaVersion: 1,
+        status: "unavailable",
+        afterTurnId: state.afterTurnId,
+        reason: state.reason,
+      },
+    };
+  }
+  if (
+    state.status !== "available" ||
+    !isSafeTokenCount(state.estimatedTokens) ||
+    !isSafeTokenCount(state.windowTokens) ||
+    state.windowTokens < 1 ||
+    state.basis !== "next_prompt_base"
+  ) {
+    throw new Error("上下文窗口可用快照格式无效");
+  }
+  return {
+    sessionId: value.sessionId,
+    state: {
+      schemaVersion: 1,
+      status: "available",
+      afterTurnId: state.afterTurnId,
+      estimatedTokens: state.estimatedTokens,
+      windowTokens: state.windowTokens,
+      basis: "next_prompt_base",
+    },
+  };
+}
+
 function readTokenUsageComponent(value: unknown): TokenUsageComponent {
   if (
     !isRecord(value) ||
@@ -308,6 +383,10 @@ function optionalTokenCount<K extends string>(
 
 function isTokenCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isSafeTokenCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function isTokenUsageCategory(value: unknown): value is TokenUsageCategory {

@@ -1,4 +1,4 @@
-import { ArrowUp, BookOpenText, Bot, Check, ChevronDown, Code2, FlaskConical, GraduationCap, Plus } from "lucide-react";
+import { ArrowUp, Bot, Check, ChevronDown, Code2, FlaskConical, GraduationCap, Plus, Presentation } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { ReasoningProfile } from "@kindergarten/contracts";
@@ -12,6 +12,9 @@ import "./model-home.css";
 
 const prompts = {
   site: websiteDevelopmentPrompt,
+  pptx: `运用 http://127.0.0.1:7342/skills/pptx skill
+
+帮我给旺仔QQ糖只做一篇全口味宣传的PPT，要从同年回忆小故事、口味联想、情绪价值和针对受众群体喜好的宣传活动。`,
 };
 
 export function ModelHomePage() {
@@ -76,11 +79,12 @@ export function ModelHomePage() {
           </details>
         </div>
         <h1>今天想让模型学习什么？</h1>
-        <p>从一个具体任务开始，或进入上下文实验比较不同策略。</p>
+        <p>从一个具体任务开始，生成 HTML 或 PPTX 产物并继续复用。</p>
         <div className="mk-model-capabilities" aria-label="学习方向">
-          <button aria-label="小说创作（功能调研中）" disabled type="button"><BookOpenText size={16} /><span><strong>小说创作</strong><small>功能调研中</small></span></button>
-          <button className={websiteRequest ? "active" : ""} type="button" onClick={() => setPrompt(prompts.site)}><Code2 size={16} /><span><strong>网站开发</strong><small>安装 3 个 Skills 后生成 HTML</small></span></button>
-          <a href="/demo/context-lab?mode=new"><FlaskConical size={16} /><span><strong>模型上下文实验</strong><small>比较 2–3 种输入策略</small></span></a>
+          <button className={websiteRequest ? "active" : ""} type="button" onClick={() => setPrompt(prompts.site)}><Code2 size={16} /><span><strong>网站开发</strong><small>显式安装网页设计 Skills 后生成 HTML</small></span></button>
+          <button type="button" onClick={() => setPrompt(prompts.pptx)}><Presentation size={16} /><span><strong>PPT 制作</strong><small>使用 PPTX Skill 生成可预览演示文稿</small></span></button>
+          {/* 上下文实验保留实现；功能调研期间只展示状态，不开放入口。 */}
+          <button aria-label="模型上下文实验（功能调研中）" disabled type="button"><FlaskConical size={16} /><span><strong>模型上下文实验</strong><small>功能调研中</small></span></button>
         </div>
         <form className="mk-model-home-composer" onSubmit={submit}>
           <textarea aria-label="给 ModelStudent 发送消息" className={websiteRequest ? "website-request" : ""} onChange={(event) => setPrompt(event.target.value)} placeholder="给 ModelStudent 发送消息…" rows={websiteRequest ? 7 : 2} value={prompt} />

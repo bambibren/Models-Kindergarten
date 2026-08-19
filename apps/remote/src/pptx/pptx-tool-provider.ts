@@ -23,7 +23,7 @@ export const pptxToolDefinitions: ModelToolDefinition[] = [{
   type: "function",
   function: {
     name: "build_pptx",
-    description: "执行当前 Session Workspace 中的 PptxGenJS 源码，并在指定相对路径生成经过基本 OOXML 完整性检查的可编辑 .pptx 文件。此能力只负责构建；文件仍留在当前 Workspace，成功发布后才能交付、下载或后续复用。",
+    description: "执行当前 Session Workspace 中的 PptxGenJS 源码，并在指定相对路径生成经过基本 OOXML 完整性检查的可编辑 .pptx 文件。运行环境已提供 PptxGenJS 4.0.1；不要初始化 Node 项目、不要创建 package.json、不要安装依赖，也不要为构建 PPTX 请求终端权限。直接编写 PptxGenJS 源码并调用此能力。此能力只负责构建；文件仍留在当前 Workspace，成功发布后才能交付、下载或后续复用。",
     parameters: {
       type: "object",
       properties: {

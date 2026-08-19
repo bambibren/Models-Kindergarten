@@ -31,7 +31,7 @@
 - `apps/remote/src/conversation/context-assembler.ts`: 明确排除窗口快照事实。
 - `apps/remote/src/acp/acp-output.ts`: 发送 namespaced ACP custom notification。
 - `apps/remote/src/acp/kindergarten-agent.ts`: checkpoint、通知、load 回放，resume 保持零回放。
-- `apps/remote/test/runtime.test.ts`: 完整会话 preview、Tool 多请求、裁剪和无模型调用测试。
+- `apps/remote/test/context-window-preview.test.ts`: 完整会话 preview、Tool 多请求、裁剪和无模型调用测试。
 - `apps/remote/test/acp-session.test.ts`: 通知、持久化、load/resume 和 Session 隔离测试。
 - `apps/web/src/acp/acp-client.ts`: 注册通知并交给 App handler。
 - `apps/web/src/chat/chat-types.ts`: Web 已归约的不可见窗口快照 entry。
@@ -115,7 +115,7 @@ export interface ContextWindowPreview {
 }
 ```
 
-`AgentRuntime.previewContextWindow()` 复用当前 Session 绑定的 ModelStudent、Agent、ToolRuntime 与 ContextAssembler，对已完成 Turn 的完整 `sessionEntries` 追加一个不计入结果的空草稿哨兵，执行与真实下一次 Prompt 相同的历史和 message budget，再调用 Provider `serializeInput()`。估算器只消费脱敏后的序列化请求，不调用 `model.stream()`、网络 token-count API 或另一套上下文拼装器。
+`AgentRuntime.previewContextWindow()` 复用当前 Session 绑定的 ModelStudent、Agent、ToolRuntime 与 ContextAssembler，对已完成 Turn 的完整 `sessionEntries` 追加一个空用户消息信封，执行与真实下一次 Prompt 相同的历史和 message budget，再分别调用 Provider 的 `serializeContext()` 序列化 system、tools 和 messages。这里刻意不使用包含 model、采样参数等非上下文请求字段的 `serializeInput()`，避免把不占上下文窗口的控制参数算进分子。估算器不调用 `model.stream()`、网络 token-count API 或另一套上下文拼装器。
 
 - [ ] **Step 4: 明确失败和未知容量语义**
 

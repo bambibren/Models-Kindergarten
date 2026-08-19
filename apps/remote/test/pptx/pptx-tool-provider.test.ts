@@ -13,6 +13,10 @@ describe("PptxToolProvider", () => {
     const provider = new PptxToolProvider(builder(), bindings("allow"));
     const definition = provider.definitions[0]?.function;
     expect(definition?.name).toBe("build_pptx");
+    expect(definition?.description).toContain("运行环境已提供 PptxGenJS 4.0.1");
+    expect(definition?.description).toContain("不要创建 package.json");
+    expect(definition?.description).toContain("不要安装依赖");
+    expect(definition?.description).toContain("不要为构建 PPTX 请求终端权限");
     expect(definition?.parameters.properties).toEqual({
       source_path: expect.any(Object),
       output_path: expect.any(Object),

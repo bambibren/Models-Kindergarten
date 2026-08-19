@@ -8,7 +8,10 @@ describe("SessionBindingService", () => {
     agentExists: async (id) => id === "agent-1",
     modelStudentReady: (id) => id === "student-1",
     experimentBinding: async (experimentId, variantId) => experimentId === "experiment-1" && variantId === "b"
-      ? { modelStudentId: "student-1", agentId: "agent-1" }
+      ? { modelStudentId: "student-1", agentId: "deleted-source-agent", experimentReasoning: {
+          schemaVersion: 1, requestedProfile: "auto", resolvedProfile: "balanced", source: "model_default",
+          providerKind: "fixture", model: "fixture", native: {},
+        } }
       : undefined,
   });
 
@@ -28,13 +31,14 @@ describe("SessionBindingService", () => {
     })).rejects.toThrow("Agent");
   });
 
-  it("experiment ref 只从服务端实验事实派生绑定", async () => {
+  it("experiment ref 只从冻结快照派生绑定，不要求来源 Agent 仍存在", async () => {
     await expect(service.resolve({
       cwd: "/workspace", mcpServers: [], _meta: makeExperimentRunRefMeta("experiment-1", "b"),
     })).resolves.toMatchObject({
       purpose: "experiment",
       modelStudentId: "student-1",
-      agentId: "agent-1",
+      agentId: "deleted-source-agent",
+      experimentReasoning: { requestedProfile: "auto", resolvedProfile: "balanced" },
       experimentRef: { experimentId: "experiment-1", variantId: "b" },
     });
   });

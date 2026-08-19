@@ -95,6 +95,7 @@ export class ContextAssembler {
         (entry.type === "thought" && !hiddenMessageIds.has(entryKey(entry.turnId, entry.messageId))) ||
         entry.type === "context_summary" ||
         entry.type === "token_usage" ||
+        entry.type === "context_window_usage" ||
         (entry.type === "message" && hiddenMessageIds.has(entryKey(entry.turnId, entry.messageId)))
       ) continue;
       if (entry.type === "message") {

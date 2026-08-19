@@ -13,6 +13,7 @@ import type {
   TurnTokenUsage,
   ConcreteReasoningProfile,
   ArtifactMention,
+  ContextWindowUsageState,
   ResolvedReasoningSnapshot,
   TurnState,
 } from "@kindergarten/contracts";
@@ -102,6 +103,13 @@ export interface SessionTokenUsageEntry {
   createdAt: string;
 }
 
+export interface SessionContextWindowUsageEntry {
+  type: "context_window_usage";
+  turnId: string;
+  state: ContextWindowUsageState;
+  createdAt: string;
+}
+
 export type SessionToolOutcomeStatus =
   | "success"
   | "error"
@@ -137,11 +145,12 @@ export interface SessionProviderContinuationEntry {
   createdAt: string;
 }
 
-/** context_summary/token_usage 只回放到聊天，不再次进入模型上下文。 */
+/** 观测事实只回放到聊天，不再次进入模型上下文。 */
 export type SessionEntry =
   | SessionMessageEntry
   | SessionContextSummaryEntry
   | SessionTokenUsageEntry
+  | SessionContextWindowUsageEntry
   | SessionThoughtEntry
   | SessionToolCallEntry
   | SessionProviderContinuationEntry;
@@ -158,6 +167,7 @@ export interface SessionRecord {
   modelStudentId: string;
   agentId: string;
   reasoningOverride?: ConcreteReasoningProfile;
+  experimentReasoning?: ResolvedReasoningSnapshot;
   experimentRef?: SessionExperimentRef;
   createdAt: string;
   updatedAt: string;

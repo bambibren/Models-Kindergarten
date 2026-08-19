@@ -271,21 +271,6 @@ for (const restored of restoredModels) {
 }
 const evaluationServiceUrl = process.env.EVALUATION_SERVICE_URL ?? "http://127.0.0.1:7441";
 const evaluation = new EvaluationTraceExporter(evaluationServiceUrl);
-const experimentService = new ExperimentService(
-  new ExperimentRepository(resolve(dataDir, "experiments.json"), resolve(dataDir, "experiment-scorecards.json")),
-  agentService,
-  sessions,
-  modelStudents,
-  new EvaluationRecordClient(evaluationServiceUrl),
-  evaluation,
-  new AnnotationWorksheetGenerator(model),
-);
-const bindings = new SessionBindingService({
-  workspaceCwd: "/workspace",
-  agentExists: async (id) => Boolean(await agentRepository.get(id)),
-  modelStudentReady: (id) => modelStudents.isReady(id),
-  experimentBinding: (experimentId, variantId) => experimentService.binding(experimentId, variantId),
-});
 const resolver = new RuntimeCapabilityResolver(
   agentService,
   modelStudents,
@@ -295,6 +280,24 @@ const resolver = new RuntimeCapabilityResolver(
   skillInstallations,
   artifacts,
 );
+const contextPreviews = new ContextPreviewService(resolver);
+const experimentService = new ExperimentService(
+  new ExperimentRepository(resolve(dataDir, "experiments.json"), resolve(dataDir, "experiment-scorecards.json")),
+  agentService,
+  sessions,
+  modelStudents,
+  new EvaluationRecordClient(evaluationServiceUrl),
+  evaluation,
+  new AnnotationWorksheetGenerator(modelStudents),
+  contextPreviews,
+);
+resolver.setExperimentSnapshotResolver((experimentId, testId) => experimentService.snapshot(experimentId, testId));
+const bindings = new SessionBindingService({
+  workspaceCwd: "/workspace",
+  agentExists: async (id) => Boolean(await agentRepository.get(id)),
+  modelStudentReady: (id) => modelStudents.isReady(id),
+  experimentBinding: (experimentId, variantId) => experimentService.binding(experimentId, variantId),
+});
 const runtime = new AgentRuntime(
   model,
   new ToolRuntime(catalog),
@@ -312,7 +315,7 @@ registerSessionRoutes(control.router, sessions, new SessionLaunchService(resolve
 registerSkillRoutes(control.router, skillInstallations);
 registerMcpRoutes(control.router, mcpManagement);
 registerModelAdmissionRoutes(control.router, modelAdmission);
-registerExperimentRoutes(control.router, experimentService, new ContextPreviewService(resolver, sessions));
+registerExperimentRoutes(control.router, experimentService, contextPreviews);
 const fileReferences = new FileReferenceService(
   new FileReferenceRepository(resolve(dataDir, "file-references.json")),
   resolve(dataDir, "workspaces"),

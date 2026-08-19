@@ -1,49 +1,61 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RuntimeCapabilityResolver } from "../../src/capability/runtime-capability-resolver.js";
 import { ContextPreviewService } from "../../src/experiments/context-preview-service.js";
-import { SessionRepository } from "../../src/repository/session-repository.js";
+import { FixtureProvider } from "../../src/model/fixture-provider.js";
 
-const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
-
-describe("ContextPreviewService", () => {
-  it("拒绝用其他 ModelStudent 的历史 Turn 生成 Provider 输入预览", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mk-context-preview-"));
-    dirs.push(dir);
-    const sessions = new SessionRepository(dir);
-    const source = await sessions.create({
-      cwd: "/workspace",
-      ownerId: "local-admin",
-      purpose: "chat",
-      modelStudentId: "source-student",
-      agentId: "source-agent",
-    });
-    await sessions.startTurn(source.id, "source-turn");
-    await sessions.transitionTurn(source.id, "source-turn", "finalizing");
-    await sessions.finishTurn(source.id, "source-turn", "completed");
-    const buildObserved = vi.fn();
+describe("ContextPreviewService V2", () => {
+  it("用目标模型、推理档位和真实 Runtime 固定指令生成首轮预览", async () => {
+    const fixture = new FixtureProvider();
+    const policy = {
+      systemPrompt: "Agent 可编辑基础指令",
+      builtinTools: [], skillInstallationIds: [], mcps: [],
+      historyPolicy: { mode: "recent_turns" as const, maxTurns: 6 },
+      memoryPolicy: { mode: "off" as const },
+    };
     const resolver = {
       preview: vi.fn(async () => ({
-        model: { student: { id: "target-student" } },
-        context: { buildObserved },
+        model: fixture,
+        agent: { systemPrompt: policy.systemPrompt },
+        context: { buildObserved: vi.fn(async () => ({
+          messages: [{ role: "user", content: "生成页面" }],
+          observations: [], segments: [], truncatedSourceIds: [],
+        })) },
+        tools: { registry: { definitions: [] } },
+        agentSnapshotHash: "agent-hash", capabilityHash: "capability-hash",
+      })),
+      modelSummary: vi.fn(() => ({
+        schemaVersion: 1, modelStudentId: fixture.student.id, displayName: fixture.student.name,
+        sizeClass: fixture.student.sizeClass, providerKind: fixture.student.provider.kind,
+        model: fixture.student.provider.model, status: "ready", deletable: false,
+        supports: { streaming: true, toolCalls: true, thought: true, usage: true,
+          reasoning: fixture.reasoningCapability! },
       })),
     } as unknown as RuntimeCapabilityResolver;
-    const service = new ContextPreviewService(resolver, sessions);
+    const service = new ContextPreviewService(resolver);
+    const test = {
+      testId: "test-a", label: "A" as const,
+      sourceAgent: { agentId: "agent-1", name: "Agent", updatedAt: "2026-08-18T12:00:00.000Z" },
+      modelStudentId: fixture.student.id, reasoningProfile: "auto" as const, policy,
+    };
+    const result = await service.preview({ schemaVersion: 2, promptText: "生成页面", test });
 
+    expect(resolver.preview).toHaveBeenCalledWith("local-admin", policy, "生成页面", fixture.student.id);
+    expect(result.schemaVersion).toBe(2);
+    expect(result.contextSummary.items[0]?.raw?.value).toContain("【每轮响应契约】");
+    expect(result.providerInput.value).toContain("【Skill 使用协议】");
+    expect(result.resolvedReasoning).toMatchObject({ requestedProfile: "auto", resolvedProfile: "balanced" });
+    expect(result.history).toEqual({ configuredPolicy: policy.historyPolicy, actualHistoryTurns: 0 });
+    expect(result.runnable).toBe(true);
+  });
+
+  it("拒绝 sourceTurnId/history 输入，Turn 只允许作为实验来源追溯", async () => {
+    const resolver = {} as RuntimeCapabilityResolver;
+    const service = new ContextPreviewService(resolver);
     await expect(service.preview({
-      modelStudentId: "target-student",
+      schemaVersion: 2,
       promptText: "继续",
-      policy: {},
       sourceTurnId: "source-turn",
-    })).rejects.toMatchObject({
-      status: 409,
-      code: "EXPERIMENT_NOT_RUNNABLE",
-      retryable: false,
-      fieldErrors: [{ path: "modelStudentId" }],
-    });
-    expect(buildObserved).not.toHaveBeenCalled();
+      test: {},
+    })).rejects.toMatchObject({ status: 400, code: "VALIDATION_FAILED", retryable: false });
   });
 });

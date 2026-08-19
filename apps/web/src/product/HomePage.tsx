@@ -1,4 +1,4 @@
-import { ArrowUp, BookOpenText, Bot, Check, ChevronDown, Code2, FileArchive, FileCode2, FileText, FlaskConical, GraduationCap, Search, UserPlus, X } from "lucide-react";
+import { ArrowUp, Bot, Check, ChevronDown, Code2, FileArchive, FileCode2, FileText, FlaskConical, GraduationCap, Presentation, Search, UserPlus, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { AgentRecord, ArtifactRecord, ModelStudentSummary, ReasoningProfile } from "@kindergarten/contracts";
 import { controlApi } from "../api/control-api.js";
@@ -14,6 +14,10 @@ export const websitePrompt = `请先把以下 Skills 安装到当前 Agent 并�
 https://github.com/anthropics/skills/tree/main/skills/frontend-design
 
 请制作一个气泡水网站，风格是幼稚可爱清新活泼，气泡水有四种口味：葡萄、橙子、海盐、青柠。首屏的大slogan是“快来一起做汽水课间操！”，背景需要有淡化不喧宾夺主的动效。然后后面几屏需要展示不同口味气泡水瓶的介绍，需要气泡水瓶内的水随鼠标反馈可以做液体运动。还需要展示网页互动小游戏，吸引学生群体。`;
+
+export const pptPrompt = `运用 http://127.0.0.1:7342/skills/pptx skill
+
+帮我给旺仔QQ糖只做一篇全口味宣传的PPT，要从同年回忆小故事、口味联想、情绪价值和针对受众群体喜好的宣传活动。`;
 
 export function HomePage() {
   const load = useCallback(async () => {
@@ -97,8 +101,8 @@ function HomeReady({ models, agents, sessions }: { models: ModelStudentSummary[]
       <div className="product-model-controls"><details className="product-picker" ref={modelPicker}><summary><span><GraduationCap size={20} /></span><div><small>当前模型学生</small><strong>{model?.displayName ?? "没有可用模型"}</strong><em>{model ? joinMetadata([model.model, model.providerKind, formatContextWindow(model.contextWindowTokens)]) : "Remote 未配置"}</em></div><b>{model?.status === "ready" ? "可用" : "不可用"}</b><ChevronDown size={15} /></summary>
           <div>{models.map((item) => <button disabled={item.status !== "ready"} key={item.modelStudentId} type="button" onClick={() => { setModelId(item.modelStudentId); modelPicker.current?.removeAttribute("open"); }}><span><GraduationCap size={14} /></span><div><strong>{item.displayName}</strong><small>{joinMetadata([formatContextWindow(item.contextWindowTokens), item.model, item.status === "ready" ? "可用" : item.statusMessage ?? "不可用"])}</small></div>{item.modelStudentId === modelId && <Check size={13} />}</button>)}</div>
         </details><a className="product-model-admission-link" href="/models/new"><UserPlus size={15} />新模型入园</a></div>
-      <h1>今天想让模型学习什么？</h1><p>选择一个真实 Agent 开始任务，或比较不同上下文策略。</p>
-      <HomeCapabilities onSelectWebsite={() => setPrompt(websitePrompt)} />
+      <h1>今天想让模型学习什么？</h1><p>选择一个真实 Agent，生成 HTML 或 PPTX，并把已发布产物继续复用。</p>
+      <HomeCapabilities onSelectPptx={() => setPrompt(pptPrompt)} onSelectWebsite={() => setPrompt(websitePrompt)} />
       <form className="product-home-composer" onSubmit={(event) => void submit(event)}>
         {mentions.length > 0 && <div className="composer-mention-tags" aria-label="已引用产物">{mentions.map((artifact) => <span className="composer-mention-tag" key={artifact.artifactId} title={`${artifact.displayName} · ${artifact.artifactId}`}>
           {artifact.kind === "html_bundle" ? <FileCode2 size={12} /> : artifact.primary.mimeType.startsWith("image/") ? <FileArchive size={12} /> : <FileText size={12} />}
@@ -127,11 +131,12 @@ function HomeReady({ models, agents, sessions }: { models: ModelStudentSummary[]
   </section></Page>;
 }
 
-export function HomeCapabilities({ onSelectWebsite }: { onSelectWebsite: () => void }) {
+export function HomeCapabilities({ onSelectPptx, onSelectWebsite }: { onSelectPptx: () => void; onSelectWebsite: () => void }) {
   return <div className="product-capability-cards">
-    <button type="button" onClick={onSelectWebsite}><Code2 size={17} /><span><strong>网站开发</strong><small>显式安装 网页设计Skills 后生成 HTML</small></span></button>
-    <button aria-label="小说创作（功能调研中）" disabled type="button"><BookOpenText size={17} /><span><strong>小说创作</strong><small>功能调研中</small></span></button>
-    <a href="/context-lab"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>比较 2–3 种真实策略</small></span></a>
+    <button type="button" onClick={onSelectWebsite}><Code2 size={17} /><span><strong>网站开发</strong><small>显式安装网页设计 Skills 后生成 HTML</small></span></button>
+    <button type="button" onClick={onSelectPptx}><Presentation size={17} /><span><strong>PPT 制作</strong><small>使用 PPTX Skill 生成可预览演示文稿</small></span></button>
+    {/* 上下文实验保留实现；功能调研期间只展示状态，不开放入口。 */}
+    <button aria-label="模型上下文实验（功能调研中）" disabled type="button"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>功能调研中</small></span></button>
   </div>;
 }
 

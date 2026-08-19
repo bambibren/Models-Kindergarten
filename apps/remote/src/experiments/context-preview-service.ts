@@ -1,60 +1,110 @@
-import type { ContextPreviewInput, ContextPreviewResponse } from "@kindergarten/contracts";
-import { buildContextSummary, serializeModelInput } from "../runtime/agent-runtime.js";
+import { createHash } from "node:crypto";
+import {
+  parseContextPreviewInputV2,
+  stableJson,
+  type ContextPreviewResponseV2,
+  type ExperimentTestDraftV2,
+} from "@kindergarten/contracts";
+import { buildContextSummary, buildRuntimeSystemPrompt, serializeModelInput } from "../runtime/agent-runtime.js";
 import type { RuntimeCapabilityResolver } from "../capability/runtime-capability-resolver.js";
-import type { SessionRepository } from "../repository/session-repository.js";
+import { resolveReasoning } from "../reasoning/reasoning-resolver.js";
 import { ApiProblemError } from "../server/api-problem.js";
 
+/** 创建页预览与 prepare-run 共用这一条真实 Runtime/serializer 路径。 */
 export class ContextPreviewService {
-  constructor(private readonly resolver: RuntimeCapabilityResolver, private readonly sessions: SessionRepository) {}
+  constructor(private readonly resolver: RuntimeCapabilityResolver, ..._legacy: unknown[]) {}
 
-  async preview(raw: unknown, ownerId = "local-admin"): Promise<ContextPreviewResponse> {
-    const input = parse(raw);
-    const resolved = await this.resolver.preview(ownerId, input.policy, input.promptText);
-    if (resolved.model.student.id !== input.modelStudentId) throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "ModelStudent 不可用", false);
-    const entries = input.sourceTurnId
-      ? await this.sourceEntries(input.sourceTurnId, ownerId, input.modelStudentId)
-      : [];
-    const built = await resolved.context.buildObserved(entries, input.promptText, new AbortController().signal);
+  async preview(raw: unknown, ownerId = "local-admin"): Promise<ContextPreviewResponseV2> {
+    let input;
+    try { input = parseContextPreviewInputV2(raw); }
+    catch (error) { throw invalid(publicMessage(error)); }
+    return this.previewTest(input.promptText, input.test, ownerId);
+  }
+
+  async previewTest(
+    promptText: string,
+    test: ExperimentTestDraftV2,
+    ownerId = "local-admin",
+  ): Promise<ContextPreviewResponseV2> {
+    const resolved = await this.resolver.preview(ownerId, test.policy, promptText, test.modelStudentId);
+    const summary = this.resolver.modelSummary(test.modelStudentId);
+    if (!summary || summary.status !== "ready") {
+      throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "ModelStudent 不可用", false);
+    }
+    const diagnostics: ContextPreviewResponseV2["diagnostics"] = [];
+    const reasoningCapability = summary.supports.reasoning;
+    if (test.reasoningProfile !== "auto" && !reasoningCapability.supportedProfiles.includes(test.reasoningProfile)) {
+      diagnostics.push({
+        code: "REASONING_PROFILE_UNSUPPORTED",
+        path: "reasoningProfile",
+        message: `当前 ModelStudent 不支持 ${test.reasoningProfile} 推理档位`,
+      });
+    }
+    const usesTools = test.policy.builtinTools.some((item) => item.enabled)
+      || test.policy.skillInstallationIds.length > 0
+      || test.policy.mcps.some((item) => item.enabled && item.tools.some((tool) => tool.enabled));
+    if (usesTools && !summary.supports.toolCalls) {
+      diagnostics.push({
+        code: "MODEL_TOOL_CALLS_UNSUPPORTED",
+        path: "policy",
+        message: "当前配置启用了 Tool，但目标 ModelStudent 未通过 Tool Call 体检",
+      });
+    }
+    const resolvedReasoning = resolveReasoning({
+      providerKind: resolved.model.student.provider.kind,
+      model: resolved.model.student.provider.model,
+      capability: reasoningCapability,
+      modelDefault: resolved.model.student.generationDefaults.reasoningProfile ?? reasoningCapability.defaultProfile,
+      ...(test.reasoningProfile === "auto" ? {} : { sessionOverride: test.reasoningProfile }),
+      native: (profile) => resolved.model.nativeReasoning?.(profile) ?? {},
+    });
+    const built = await resolved.context.buildObserved([], promptText, new AbortController().signal);
     const tools = structuredClone(resolved.tools.registry.definitions);
-    const contextSummary = buildContextSummary("context-preview", resolved.model, resolved.agent.systemPrompt, tools, built);
+    const systemPrompt = buildRuntimeSystemPrompt(resolved.agent.systemPrompt);
+    const contextSummary = buildContextSummary("context-preview", resolved.model, systemPrompt, tools, built);
+    const providerInput = serializeModelInput(resolved.model, { systemPrompt, messages: built.messages, tools, reasoning: resolvedReasoning });
+    const providerInputHash = sha256(providerInput.value);
+    const effectiveConfigurationHash = sha256(stableJson({
+      modelStudentId: test.modelStudentId,
+      providerKind: resolved.model.student.provider.kind,
+      model: resolved.model.student.provider.model,
+      resolvedReasoning,
+      capabilityHash: resolved.capabilityHash,
+      providerInputHash,
+    }));
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      runnable: diagnostics.length === 0,
+      diagnostics,
       agentSnapshotHash: resolved.agentSnapshotHash,
       capabilityHash: resolved.capabilityHash,
+      effectiveConfigurationHash,
       contextSummary,
-      providerInput: serializeModelInput(resolved.model, { systemPrompt: resolved.agent.systemPrompt, messages: built.messages, tools }),
+      providerInput,
+      providerInputHash,
+      providerInputBytes: Buffer.byteLength(providerInput.value),
+      resolvedReasoning,
+      model: {
+        modelStudentId: summary.modelStudentId,
+        displayName: summary.displayName,
+        providerKind: summary.providerKind,
+        model: summary.model,
+        ...(summary.contextWindowTokens === undefined ? {} : { contextWindowTokens: summary.contextWindowTokens }),
+      },
+      history: {
+        configuredPolicy: structuredClone(test.policy.historyPolicy),
+        actualHistoryTurns: 0,
+      },
     };
   }
-
-  private async sourceEntries(turnId: string, ownerId: string, targetModelStudentId: string) {
-    for (const session of await this.sessions.allForRuntime("chat")) {
-      if (session.ownerId !== ownerId) continue;
-      if (session.turns.some((item) => item.turnId === turnId && item.state.status === "completed")) {
-        if (session.modelStudentId !== targetModelStudentId) {
-          throw new ApiProblemError(
-            409,
-            "EXPERIMENT_NOT_RUNNABLE",
-            "历史 Turn 与上下文预览必须绑定同一个 ModelStudent",
-            false,
-            [{ path: "modelStudentId", message: "必须与 sourceTurnId 所属 Session 的 modelStudentId 一致" }],
-          );
-        }
-        const start = session.sessionEntries.findIndex((entry) => entry.turnId === turnId);
-        return structuredClone(start < 0 ? session.sessionEntries : session.sessionEntries.slice(0, start));
-      }
-    }
-    throw new ApiProblemError(404, "TURN_SNAPSHOT_UNAVAILABLE", "历史 Turn 不存在或未完成", false);
-  }
 }
 
-function parse(value: unknown): ContextPreviewInput {
-  if (!record(value) || typeof value.modelStudentId !== "string" || typeof value.promptText !== "string" || !record(value.policy)) throw invalid();
-  return {
-    modelStudentId: value.modelStudentId,
-    promptText: value.promptText,
-    policy: value.policy as unknown as ContextPreviewInput["policy"],
-    ...(typeof value.sourceTurnId === "string" && value.sourceTurnId ? { sourceTurnId: value.sourceTurnId } : {}),
-  };
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
-function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-function invalid() { return new ApiProblemError(400, "VALIDATION_FAILED", "Context Preview 输入无效", false); }
+function invalid(message: string) {
+  return new ApiProblemError(400, "VALIDATION_FAILED", message, false);
+}
+function publicMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

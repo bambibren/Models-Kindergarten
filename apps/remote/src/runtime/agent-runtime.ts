@@ -50,6 +50,10 @@ import {
   configuredSkillContextVersion,
   skillUseProtocol,
 } from "../skills/skill-context.js";
+import {
+  previewContextWindow,
+  type ContextWindowPreview,
+} from "../conversation/context-window-preview.js";
 
 const MODEL_OUTPUT_CONTRACT = [
   "【每轮响应契约】",
@@ -143,6 +147,11 @@ export interface RunResult {
   fileRelativePaths: string[];
 }
 
+export interface ContextWindowPreviewInput {
+  sessionEntries: SessionEntry[];
+  scope?: TurnScope;
+}
+
 /** AgentRuntime 聚合完整能力；AgentRunner 只执行一次 session/prompt。 */
 export class AgentRuntime {
   readonly runner: AgentRunner;
@@ -150,7 +159,7 @@ export class AgentRuntime {
   constructor(
     readonly model: ModelProvider,
     readonly tools: ToolRuntime,
-    context = new ContextAssembler(),
+    private readonly context = new ContextAssembler(),
     observations: RuntimeObservationSink = noopRuntimeObservationSink,
     private readonly resolver?: RuntimeCapabilityResolverPort,
     repeatedInvalidToolCallGuardFactory?: RepeatedInvalidToolCallGuardFactory,
@@ -176,6 +185,25 @@ export class AgentRuntime {
   run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<RunResult> {
     return this.runner.run(input, observer, signal);
   }
+
+  async previewContextWindow(
+    input: ContextWindowPreviewInput,
+    signal: AbortSignal,
+  ): Promise<ContextWindowPreview | undefined> {
+    const resolved = input.scope && this.resolver
+      ? await this.resolver.resolve(input.scope, "")
+      : undefined;
+    const model = resolved?.model ?? this.model;
+    const tools = resolved?.tools ?? this.tools;
+    return previewContextWindow({
+      model,
+      context: resolved?.context ?? this.context,
+      systemPrompt: buildRuntimeSystemPrompt(resolved?.agent.systemPrompt ?? ""),
+      tools: structuredClone(tools.registry.definitions),
+      sessionEntries: structuredClone(input.sessionEntries),
+      signal,
+    });
+  }
 }
 
 export class AgentRunner {
@@ -198,7 +226,7 @@ export class AgentRunner {
     const tools = resolved?.tools ?? this.tools;
     const context = resolved?.context ?? this.context;
     const agentSystemPrompt = resolved?.agent.systemPrompt ?? "";
-    const systemPrompt = appendRuntimeContracts(agentSystemPrompt);
+    const systemPrompt = buildRuntimeSystemPrompt(agentSystemPrompt);
     const reasoningCapability = model.reasoningCapability ?? {
       schemaVersion: 1 as const,
       control: "fixed" as const,
@@ -206,7 +234,7 @@ export class AgentRunner {
       supportedProfiles: ["balanced" as const],
       defaultProfile: "balanced" as const,
     };
-    const resolvedReasoning = resolveReasoning({
+    const resolvedReasoning = input.scope?.frozenReasoning ?? resolveReasoning({
       providerKind: model.student.provider.kind,
       model: model.student.provider.model,
       capability: reasoningCapability,
@@ -239,6 +267,17 @@ export class AgentRunner {
     const fileRelativePaths = new Set<string>();
     let toolDefinitions = structuredClone(currentTools.registry.definitions);
     let capabilitySnapshot = structuredClone(currentTools.registry.capabilitySnapshot());
+    if (resolved?.expectedFirstProviderInputHash) {
+      const actual = createHash("sha256").update(serializeModelInput(model, {
+        systemPrompt,
+        messages: built.messages,
+        tools: toolDefinitions,
+        reasoning: resolvedReasoning,
+      }).value).digest("hex");
+      if (actual !== resolved.expectedFirstProviderInputHash) {
+        throw new RunFailure("实验首轮输入与冻结预览不一致", "EXPERIMENT_INPUT_MISMATCH", false);
+      }
+    }
     const ledger = new ToolCallLedger();
     const roundUsages: ModelRoundUsage[] = [];
     let modelRequests = 0;
@@ -881,6 +920,7 @@ export function serializeModelInput(
       system: model.serializeContext({ kind: "system", content: input.systemPrompt }).value,
       tools: model.serializeContext({ kind: "tools", tools: input.tools }).value,
       messages: model.serializeContext({ kind: "messages", messages: input.messages }).value,
+      reasoning: input.reasoning === undefined ? null : input.reasoning,
     }, null, 2),
   };
 }
@@ -926,7 +966,7 @@ function resolveModelResponse(input: {
   };
 }
 
-function appendRuntimeContracts(systemPrompt: string): string {
+export function buildRuntimeSystemPrompt(systemPrompt: string): string {
   const prompt = systemPrompt.trimEnd();
   const contracts = [
     MODEL_OUTPUT_CONTRACT,

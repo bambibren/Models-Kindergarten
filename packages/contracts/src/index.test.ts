@@ -2,9 +2,57 @@ import { describe, expect, it } from "vitest";
 import {
   makePromptMeta,
   readContextSummaryNotification,
+  readContextWindowUsageNotification,
   readPromptMeta,
   readTokenUsageNotification,
 } from "./index.js";
+
+describe("Context window usage notification", () => {
+  it("保留下一次请求基础上下文估算和冻结窗口", () => {
+    expect(readContextWindowUsageNotification({
+      sessionId: "session-1",
+      state: {
+        schemaVersion: 1,
+        status: "available",
+        afterTurnId: "turn-2",
+        estimatedTokens: 38_400,
+        windowTokens: 128_000,
+        basis: "next_prompt_base",
+      },
+    })).toEqual({
+      sessionId: "session-1",
+      state: {
+        schemaVersion: 1,
+        status: "available",
+        afterTurnId: "turn-2",
+        estimatedTokens: 38_400,
+        windowTokens: 128_000,
+        basis: "next_prompt_base",
+      },
+    });
+  });
+
+  it("接受显式不可用状态，拒绝非法容量和口径", () => {
+    expect(readContextWindowUsageNotification({
+      sessionId: "session-1",
+      state: {
+        schemaVersion: 1,
+        status: "unavailable",
+        afterTurnId: "turn-2",
+        reason: "preview_failed",
+      },
+    }).state).toMatchObject({ status: "unavailable", reason: "preview_failed" });
+
+    for (const state of [
+      { schemaVersion: 1, status: "available", afterTurnId: "turn-2", estimatedTokens: -1, windowTokens: 128_000, basis: "next_prompt_base" },
+      { schemaVersion: 1, status: "available", afterTurnId: "turn-2", estimatedTokens: 10, windowTokens: 0, basis: "next_prompt_base" },
+      { schemaVersion: 1, status: "available", afterTurnId: "turn-2", estimatedTokens: 10, windowTokens: 128_000, basis: "last_request" },
+      { schemaVersion: 1, status: "unavailable", afterTurnId: "turn-2", reason: "stale" },
+    ]) {
+      expect(() => readContextWindowUsageNotification({ sessionId: "session-1", state })).toThrow("上下文窗口");
+    }
+  });
+});
 
 describe("Artifact prompt meta", () => {
   it("保留手动重试 operationId，并且 Mention 只接收稳定 Artifact ID", () => {

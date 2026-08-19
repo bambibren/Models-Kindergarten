@@ -14,6 +14,7 @@
     "@aiden0z/pptx-renderer": "1.2.4",
     "@kindergarten/contracts": "workspace:*",
     "@radix-ui/react-collapsible": "^1.1.20",
+    "@radix-ui/react-popover": "^1.1.23",
     "@streamdown/cjk": "^1.0.3",
     "lucide-react": "^1.28.0",
     "react": "19.2.8",

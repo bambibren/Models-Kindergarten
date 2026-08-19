@@ -2,6 +2,7 @@ import type { ContentBlock, SessionNotification, ToolCall, ToolCallUpdate } from
 import {
   readMessageMeta,
   type ContextSummaryNotification,
+  type ContextWindowUsageNotification,
   type TokenUsageComponent,
   type TokenUsageNotification,
 } from "@kindergarten/contracts";
@@ -16,6 +17,7 @@ export type ChatAction =
   | { type: "stream/commit"; operationId: string }
   | { type: "context/summary"; value: ContextSummaryNotification }
   | { type: "token/usage"; value: TokenUsageNotification }
+  | { type: "context-window/usage"; value: ContextWindowUsageNotification }
   | { type: "acp/update"; value: SessionNotification };
 
 export const emptyChat: ChatState = {
@@ -99,6 +101,19 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       usage,
     });
     return { ...state, streamingChatEntries: collection };
+  }
+  if (action.type === "context-window/usage") {
+    if (action.value.sessionId !== state.sessionId || !state.streaming) return state;
+    const value = action.value.state;
+    return {
+      ...state,
+      streamingChatEntries: upsert(state.streamingChatEntries, {
+        type: "context_window_usage",
+        id: `context-window:${value.afterTurnId}`,
+        turnId: value.afterTurnId,
+        state: value,
+      }),
+    };
   }
   if (action.value.sessionId !== state.sessionId || !state.streaming) return state;
   const update = action.value.update;
@@ -250,7 +265,8 @@ function finalizeEntry(entry: ChatEntry): ChatEntry {
   if (
     entry.type === "tool_call" ||
     entry.type === "context_summary" ||
-    entry.type === "token_usage"
+    entry.type === "token_usage" ||
+    entry.type === "context_window_usage"
   ) return entry;
   return { ...entry, status: "done" } as MessageEntry | ThoughtEntry;
 }

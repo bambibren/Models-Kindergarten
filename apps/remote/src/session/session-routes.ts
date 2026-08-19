@@ -45,6 +45,7 @@ export function registerSessionRoutes(router: ControlRouter, sessions: SessionRe
         historyPolicy: found.turn.agentSnapshot.historyPolicy,
         memoryPolicy: found.turn.agentSnapshot.memoryPolicy,
       },
+      ...(found.turn.resolvedReasoning ? { resolvedReasoning: found.turn.resolvedReasoning } : {}),
       agentSnapshotHash: found.turn.agentSnapshotHash,
       capabilitySnapshots: found.turn.capabilitySnapshots ?? [],
       modelRounds: found.turn.modelRounds,

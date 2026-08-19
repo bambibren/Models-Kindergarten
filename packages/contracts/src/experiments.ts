@@ -1,6 +1,8 @@
 import type { BuiltinToolBinding, HistoryPolicy, McpBinding } from "./agent-management.js";
 import { parseAgentInput } from "./agent-management.js";
 import { isRecord, requiredString, stableJson } from "./common.js";
+import type { ReasoningProfile, ResolvedReasoningSnapshot } from "./reasoning.js";
+import { parseReasoningProfile } from "./reasoning.js";
 
 export interface ExperimentContextPolicy {
   systemPrompt: string;
@@ -54,6 +56,15 @@ export interface ExperimentRunRuntimeFacts {
   capabilityGenerations: number;
   capabilityToolNames: string[];
   contextSources: Array<{ kind: string; title: string; estimatedTokens: number; truncated?: boolean }>;
+  modelRounds?: Array<{
+    roundIndex: number;
+    capabilityGeneration: number;
+    contextSummary: import("./index.js").ContextSummary;
+    providerInput?: import("./index.js").ContextSummaryRaw;
+    providerInputHash?: string;
+    providerInputBytes?: number;
+    resolvedReasoning?: ResolvedReasoningSnapshot;
+  }>;
   providerInputHash?: string;
   providerInputBytes?: number;
   usage?: import("./index.js").TurnTokenUsage;
@@ -75,7 +86,8 @@ export interface ContextPreviewResponse {
   providerInput: import("./index.js").ContextSummaryRaw;
 }
 
-export interface ExperimentRecord {
+/** 旧实验只读合同；V2 写入路径不得创建或修改这种记录。 */
+export interface LegacyExperimentRecordV1 {
   schemaVersion: 1;
   experimentId: string;
   ownerId: string;
@@ -93,6 +105,152 @@ export interface ExperimentRecord {
   savedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** @deprecated 新代码应显式使用 LegacyExperimentRecordV1 或 AnyExperimentRecord。 */
+export type ExperimentRecord = LegacyExperimentRecordV1;
+
+export interface ExperimentSourceAgentRefV2 {
+  agentId: string;
+  name: string;
+  updatedAt: string;
+}
+
+export interface ExperimentTestDraftV2 {
+  testId: string;
+  label: "A" | "B" | "C";
+  sourceAgent: ExperimentSourceAgentRefV2;
+  modelStudentId: string;
+  reasoningProfile: ReasoningProfile;
+  policy: ExperimentContextPolicy;
+}
+
+export interface ExperimentDraftV2 {
+  schemaVersion: 2;
+  name: string;
+  promptText: string;
+  sourceRef?: { kind: "turn"; id: string };
+  toolUseWasExpected: boolean;
+  worksheetModelStudentId: string;
+  tests: ExperimentTestDraftV2[];
+}
+
+export interface ExperimentTestSnapshotV2 {
+  snapshotId: string;
+  testId: string;
+  label: "A" | "B" | "C";
+  sourceAgent: ExperimentSourceAgentRefV2;
+  policy: ExperimentContextPolicy;
+  agentSnapshotHash: string;
+  model: {
+    modelStudentId: string;
+    providerKind: string;
+    model: string;
+    capabilityHash: string;
+    contextWindowTokens?: number;
+  };
+  reasoning: ResolvedReasoningSnapshot;
+  dependencies: Array<{
+    kind: "skill" | "mcp";
+    id: string;
+    generation?: number;
+    contentHash: string;
+  }>;
+  runtimePrompt: { version: "runtime_system_prompt_v1"; hash: string };
+  firstRequestPreview: {
+    contextHash: string;
+    providerInputHash: string;
+    providerInputBytes: number;
+    estimatedTokens: number;
+    actualHistoryTurns: 0;
+  };
+  effectiveConfigurationHash: string;
+  frozenAt: string;
+}
+
+export interface ExperimentRunV2 {
+  runId: string;
+  testId: string;
+  snapshotId: string;
+  status: ExperimentRunStatus;
+  acpSessionId?: string;
+  turnId?: string;
+  answerTexts: string[];
+  executionMetrics?: ExecutionMetricsSnapshot;
+  runtimeFacts?: ExperimentRunRuntimeFacts;
+  error?: import("./common.js").PublicErrorRef;
+  startedAt?: string;
+  completedAt?: string;
+  hadHumanIntervention?: boolean;
+  interventions?: ExperimentInterventionFact[];
+}
+
+export interface ExperimentInterventionFact {
+  interactionId: string;
+  kind: "permission" | "elicitation";
+  summary: string;
+  decision: string;
+  operatorId: string;
+  resolvedAt: string;
+}
+
+export interface ExperimentRecordV2 {
+  schemaVersion: 2;
+  experimentId: string;
+  ownerId: string;
+  name: string;
+  status: "draft" | "prepared" | "running" | "completed" | "partially_failed" | "failed" | "cancelled" | "interrupted";
+  promptText: string;
+  sourceRef?: { kind: "turn"; id: string };
+  toolUseWasExpected: boolean;
+  worksheetModelStudentId: string;
+  tests: ExperimentTestDraftV2[];
+  snapshots?: ExperimentTestSnapshotV2[];
+  runs: ExperimentRunV2[];
+  prepareKey?: string;
+  annotationWorksheet?: ExperimentAnnotationWorksheet;
+  savedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AnyExperimentRecord = LegacyExperimentRecordV1 | ExperimentRecordV2;
+
+export interface ContextPreviewInputV2 {
+  schemaVersion: 2;
+  promptText: string;
+  test: ExperimentTestDraftV2;
+}
+
+export interface ContextPreviewDiagnostic {
+  code: string;
+  message: string;
+  path?: string;
+}
+
+export interface ContextPreviewResponseV2 {
+  schemaVersion: 2;
+  runnable: boolean;
+  diagnostics: ContextPreviewDiagnostic[];
+  agentSnapshotHash: string;
+  capabilityHash: string;
+  effectiveConfigurationHash: string;
+  contextSummary: import("./index.js").ContextSummary;
+  providerInput: import("./index.js").ContextSummaryRaw;
+  providerInputHash: string;
+  providerInputBytes: number;
+  resolvedReasoning: ResolvedReasoningSnapshot;
+  model: {
+    modelStudentId: string;
+    displayName: string;
+    providerKind: string;
+    model: string;
+    contextWindowTokens?: number;
+  };
+  history: {
+    configuredPolicy: HistoryPolicy;
+    actualHistoryTurns: 0;
+  };
 }
 
 export type AnnotationVerdict = "effective" | "partial" | "none";
@@ -258,6 +416,76 @@ export function parseExperimentDraftInput(value: unknown): ExperimentDraftInput 
   };
 }
 
+export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
+  if (!isRecord(value)) throw new Error("Experiment V2 draft 必须是对象");
+  assertOnlyKeys(value, ["schemaVersion", "name", "promptText", "sourceRef", "toolUseWasExpected", "worksheetModelStudentId", "tests"], "Experiment V2 draft");
+  if (value.schemaVersion !== 2) throw new Error("Experiment V2 schemaVersion 必须为 2");
+  if (!Array.isArray(value.tests) || value.tests.length < 2 || value.tests.length > 3) {
+    throw new Error("Experiment V2 必须有 2 到 3 个 Test");
+  }
+  const tests = value.tests.map(parseExperimentTestDraftV2);
+  if (new Set(tests.map((item) => item.testId)).size !== tests.length) throw new Error("testId 必须唯一");
+  if (new Set(tests.map((item) => item.label)).size !== tests.length) throw new Error("Test label 必须唯一");
+  const expectedLabels = tests.length === 2 ? ["A", "B"] : ["A", "B", "C"];
+  if (tests.some((item, index) => item.label !== expectedLabels[index])) throw new Error("Test 必须按 A、B、C 排列");
+  let sourceRef: ExperimentDraftV2["sourceRef"];
+  if (value.sourceRef !== undefined) {
+    if (!isRecord(value.sourceRef)) throw new Error("sourceRef 格式无效");
+    assertOnlyKeys(value.sourceRef, ["kind", "id"], "sourceRef");
+    if (value.sourceRef.kind !== "turn") throw new Error("sourceRef.kind 必须是 turn");
+    sourceRef = { kind: "turn", id: requiredString(value.sourceRef, "id", { max: 160 }) };
+  }
+  return {
+    schemaVersion: 2,
+    name: requiredString(value, "name", { max: 120 }),
+    promptText: requiredString(value, "promptText", { max: 100_000 }),
+    ...(sourceRef ? { sourceRef } : {}),
+    toolUseWasExpected: value.toolUseWasExpected === true,
+    worksheetModelStudentId: requiredString(value, "worksheetModelStudentId", { max: 160 }),
+    tests,
+  };
+}
+
+export function parseContextPreviewInputV2(value: unknown): ContextPreviewInputV2 {
+  if (!isRecord(value)) throw new Error("Context Preview V2 输入必须是对象");
+  assertOnlyKeys(value, ["schemaVersion", "promptText", "test"], "Context Preview V2");
+  if (value.schemaVersion !== 2) throw new Error("Context Preview V2 schemaVersion 必须为 2");
+  return {
+    schemaVersion: 2,
+    promptText: requiredString(value, "promptText", { max: 100_000 }),
+    test: parseExperimentTestDraftV2(value.test),
+  };
+}
+
+function parseExperimentTestDraftV2(value: unknown): ExperimentTestDraftV2 {
+  if (!isRecord(value)) throw new Error("Experiment Test 必须是对象");
+  assertOnlyKeys(value, ["testId", "label", "sourceAgent", "modelStudentId", "reasoningProfile", "policy"], "Experiment Test");
+  if (value.label !== "A" && value.label !== "B" && value.label !== "C") throw new Error("Test label 必须为 A/B/C");
+  if (!isRecord(value.sourceAgent)) throw new Error("sourceAgent 格式无效");
+  assertOnlyKeys(value.sourceAgent, ["agentId", "name", "updatedAt"], "sourceAgent");
+  if (!isRecord(value.policy)) throw new Error("Test policy 必须是对象");
+  const parsed = parseAgentInput({ name: "experiment-policy", ...value.policy });
+  return {
+    testId: requiredString(value, "testId", { max: 120 }),
+    label: value.label,
+    sourceAgent: {
+      agentId: requiredString(value.sourceAgent, "agentId", { max: 160 }),
+      name: requiredString(value.sourceAgent, "name", { max: 120 }),
+      updatedAt: requiredString(value.sourceAgent, "updatedAt", { max: 80 }),
+    },
+    modelStudentId: requiredString(value, "modelStudentId", { max: 160 }),
+    reasoningProfile: parseReasoningProfile(value.reasoningProfile),
+    policy: {
+      systemPrompt: parsed.systemPrompt,
+      builtinTools: parsed.builtinTools,
+      skillInstallationIds: parsed.skillInstallationIds,
+      mcps: parsed.mcps,
+      historyPolicy: parsed.historyPolicy,
+      memoryPolicy: parsed.memoryPolicy,
+    },
+  };
+}
+
 export function calculateExecutionScores(metrics: ExecutionMetricsSnapshot[]): ExecutionScoreResult[] {
   const ttftValues = metrics.flatMap((item) => item.firstTokenLatencyMs === undefined ? [] : [item.firstTokenLatencyMs]);
   const durations = metrics.map((item) => item.totalDurationMs);
@@ -377,4 +605,9 @@ function scoreOutputCoverage(text: string, marks: OutputAnnotationFacts["marks"]
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function assertOnlyKeys(value: Record<string, unknown>, allowed: string[], label: string): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length > 0) throw new Error(`${label} 包含未知字段: ${unknown.join(", ")}`);
 }

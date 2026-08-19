@@ -1,21 +1,26 @@
-import type { ExperimentRecord, ExperimentScorecard } from "@kindergarten/contracts";
+import type { AnyExperimentRecord, ExperimentScorecard } from "@kindergarten/contracts";
 import { AtomicJsonStore } from "../storage/atomic-json-store.js";
 
 export class ExperimentRepository {
-  private readonly experiments: AtomicJsonStore<ExperimentRecord>;
+  private readonly experiments: AtomicJsonStore<AnyExperimentRecord>;
   private readonly scorecards: AtomicJsonStore<ExperimentScorecard>;
 
   constructor(experimentsFile: string, scorecardsFile: string) {
-    this.experiments = new AtomicJsonStore({ file: experimentsFile, schemaVersion: 1, validate: isExperiment });
+    this.experiments = new AtomicJsonStore({
+      file: experimentsFile,
+      schemaVersion: 2,
+      legacySchemaVersions: [1],
+      validate: isExperiment,
+    });
     this.scorecards = new AtomicJsonStore({ file: scorecardsFile, schemaVersion: 1, validate: isScorecard });
   }
 
-  list(): Promise<ExperimentRecord[]> { return this.experiments.read(); }
-  async get(id: string): Promise<ExperimentRecord | undefined> { return (await this.experiments.read()).find((item) => item.experimentId === id); }
-  async put(value: ExperimentRecord): Promise<void> {
+  list(): Promise<AnyExperimentRecord[]> { return this.experiments.read(); }
+  async get(id: string): Promise<AnyExperimentRecord | undefined> { return (await this.experiments.read()).find((item) => item.experimentId === id); }
+  async put(value: AnyExperimentRecord): Promise<void> {
     await this.experiments.update((records) => [...records.filter((item) => item.experimentId !== value.experimentId), value]);
   }
-  async update(id: string, change: (value: ExperimentRecord) => ExperimentRecord): Promise<ExperimentRecord> {
+  async update(id: string, change: (value: AnyExperimentRecord) => AnyExperimentRecord): Promise<AnyExperimentRecord> {
     const result = await this.experiments.update((records) => {
       const index = records.findIndex((item) => item.experimentId === id);
       if (index < 0) throw new Error(`Experiment 不存在: ${id}`);
@@ -42,10 +47,12 @@ export class ExperimentRepository {
   }
 }
 
-function isExperiment(value: unknown): value is ExperimentRecord {
+function isExperiment(value: unknown): value is AnyExperimentRecord {
   if (!record(value)) return false;
-  return value.schemaVersion === 1 && typeof value.experimentId === "string" && typeof value.ownerId === "string" &&
-    typeof value.status === "string" && Array.isArray(value.variants) && Array.isArray(value.runs) &&
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) return false;
+  const configs = value.schemaVersion === 1 ? value.variants : value.tests;
+  return typeof value.experimentId === "string" && typeof value.ownerId === "string" &&
+    typeof value.status === "string" && Array.isArray(configs) && Array.isArray(value.runs) &&
     typeof value.createdAt === "string" && typeof value.updatedAt === "string";
 }
 function isScorecard(value: unknown): value is ExperimentScorecard {

@@ -1,7 +1,8 @@
 import type {
-  ExperimentRecord,
+  AnyExperimentRecord,
   ExperimentAnnotationWorksheet,
   ExperimentScorecard,
+  ModelStudentSummary,
   OutputAnnotationFacts,
   PlanningAnnotationFacts,
   UnderstandingAnnotationFacts,
@@ -10,11 +11,14 @@ import type {
 const CONTROL_URL = import.meta.env.VITE_CONTROL_API_URL ?? "http://127.0.0.1:7331/api/control/v1";
 
 export const experimentApi = {
-  get: (id: string) => request<ExperimentRecord>(`/experiments/${encodeURIComponent(id)}`),
-  save: (id: string) => request<ExperimentRecord>(`/experiments/${encodeURIComponent(id)}/save`, "POST", {}),
-  reuse: (id: string, variantId: string) => request<ExperimentRecord>(`/experiments/${encodeURIComponent(id)}/variants/${encodeURIComponent(variantId)}/reuse-snapshot`, "POST", {}),
-  failRun: (id: string, variantId: string) => request<ExperimentRecord>(`/experiments/${encodeURIComponent(id)}/variants/${encodeURIComponent(variantId)}/client-failure`, "POST", {}),
-  worksheet: (id: string, force = false) => request<ExperimentAnnotationWorksheet>(`/experiments/${encodeURIComponent(id)}/annotation-worksheet`, "POST", { force }),
+  get: (id: string) => request<AnyExperimentRecord>(`/experiments/${encodeURIComponent(id)}`),
+  models: () => request<{ items: ModelStudentSummary[] }>("/model-students"),
+  save: (id: string) => request<AnyExperimentRecord>(`/experiments/${encodeURIComponent(id)}/save`, "POST", {}),
+  failRun: (id: string, variantId: string) => request<AnyExperimentRecord>(`/experiments/${encodeURIComponent(id)}/variants/${encodeURIComponent(variantId)}/client-failure`, "POST", {}),
+  cancel: (id: string) => request<{ experiment: AnyExperimentRecord; activeSessionIds: string[] }>(`/experiments/${encodeURIComponent(id)}/cancel`, "POST", {}),
+  intervention: (id: string, testId: string, fact: { interactionId: string; kind: "permission" | "elicitation"; summary: string; decision: string }) =>
+    request<AnyExperimentRecord>(`/experiments/${encodeURIComponent(id)}/tests/${encodeURIComponent(testId)}/interventions`, "POST", fact),
+  worksheet: (id: string, force = false, worksheetModelStudentId?: string) => request<ExperimentAnnotationWorksheet>(`/experiments/${encodeURIComponent(id)}/annotation-worksheet`, "POST", { force, worksheetModelStudentId }),
   scorecard: (id: string) => request<ExperimentScorecard>(`/experiments/${encodeURIComponent(id)}/scorecard`),
   annotations: (id: string, value: { understanding: UnderstandingAnnotationFacts; planning: PlanningAnnotationFacts; output: OutputAnnotationFacts }) =>
     request<ExperimentScorecard>(`/experiments/${encodeURIComponent(id)}/annotations`, "PUT", value),
