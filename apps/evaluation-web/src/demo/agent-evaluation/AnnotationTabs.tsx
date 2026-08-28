@@ -9,6 +9,7 @@ const tabs = [
   { id: "summary", label: "综合能力分布", icon: BarChart3 },
 ] as const;
 
+/** 渲染「AnnotationTabs」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function AnnotationTabs({
   active,
   completed,
@@ -19,7 +20,8 @@ export function AnnotationTabs({
   onChange: (tab: AnnotationTabId) => void;
 }) {
   return <nav className="annotation-tabs" aria-label="人工标注模块" role="tablist">
-    {tabs.map((tab) => {
+    {tabs.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(tab) => {
       const Icon = tab.icon;
       const manual = tab.id === "understanding" || tab.id === "planning" || tab.id === "output";
       const done = manual ? completed[tab.id] === true : tab.id === "execution";
@@ -27,7 +29,8 @@ export function AnnotationTabs({
         aria-selected={active === tab.id}
         className={active === tab.id ? "active" : ""}
         key={tab.id}
-        onClick={() => onChange(tab.id)}
+        onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => onChange(tab.id)}
         role="tab"
         type="button"
       >

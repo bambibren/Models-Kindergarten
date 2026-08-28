@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
+/** 构造「ResponsesMockRequest」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export interface ResponsesMockRequest {
   method: string;
   url: string;
@@ -8,8 +9,9 @@ export interface ResponsesMockRequest {
   body: Record<string, unknown>;
 }
 
+/** 构造「ResponsesMockServer」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export interface ResponsesMockServer {
-  /** Includes `/v1`, so a provider must preserve the configured API prefix. */
+  /** 地址包含 `/v1`，用于验证 Provider 不会丢失已配置的 API 前缀。 */
   baseUrl: string;
   requests: ResponsesMockRequest[];
   eventTypes: string[];
@@ -69,6 +71,7 @@ const finalMessageItem = {
   status: "completed",
 } as const;
 
+/** 构造「responseEnvelope」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function responseEnvelope(
   id: string,
   status: "in_progress" | "completed" | "failed",
@@ -90,6 +93,7 @@ function responseEnvelope(
   };
 }
 
+/** 构造「firstRoundEvents」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function firstRoundEvents(): SseEvent[] {
   const responseId = "resp_mock_tools";
   return [
@@ -236,6 +240,7 @@ function firstRoundEvents(): SseEvent[] {
   ];
 }
 
+/** 构造「finalRoundEvents」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function finalRoundEvents(): SseEvent[] {
   const responseId = "resp_mock_final";
   return [
@@ -346,6 +351,7 @@ function finalRoundEvents(): SseEvent[] {
   ];
 }
 
+/** 构造「failedEvents」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function failedEvents(): SseEvent[] {
   const responseId = "resp_mock_failed";
   return [
@@ -368,6 +374,7 @@ function failedEvents(): SseEvent[] {
   ];
 }
 
+/** 构造「normalizeHeaders」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function normalizeHeaders(request: IncomingMessage): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(request.headers)) {
@@ -378,6 +385,7 @@ function normalizeHeaders(request: IncomingMessage): Record<string, string> {
   return headers;
 }
 
+/** 构造「readJsonBody」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -396,6 +404,7 @@ async function readJsonBody(request: IncomingMessage): Promise<Record<string, un
   return parsed as Record<string, unknown>;
 }
 
+/** 构造「isFailureScenario」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function isFailureScenario(body: Record<string, unknown>): boolean {
   const metadata = body.metadata;
   return typeof metadata === "object"
@@ -404,6 +413,7 @@ function isFailureScenario(body: Record<string, unknown>): boolean {
     && (metadata as Record<string, unknown>).mk_mock_scenario === "failed";
 }
 
+/** 构造「containsFunctionCallOutput」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function containsFunctionCallOutput(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.some(containsFunctionCallOutput);
@@ -419,18 +429,24 @@ function containsFunctionCallOutput(value: unknown): boolean {
   return Object.values(record).some(containsFunctionCallOutput);
 }
 
+/** 构造「validContinuation」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function validContinuation(value: unknown): boolean {
   if (!Array.isArray(value)) return false;
-  const reasoningIndex = value.findIndex((item) => isRecord(item)
+  const reasoningIndex = value.findIndex(/** 构造「reasoningIndex」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => isRecord(item)
     && item.type === "reasoning"
     && item.encrypted_content === firstReasoningItem.encrypted_content);
-  const callAIndex = value.findIndex((item) => isRecord(item)
+  const callAIndex = value.findIndex(/** 构造「callAIndex」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => isRecord(item)
     && item.type === "function_call" && item.call_id === readCallA.call_id);
-  const callBIndex = value.findIndex((item) => isRecord(item)
+  const callBIndex = value.findIndex(/** 构造「callBIndex」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => isRecord(item)
     && item.type === "function_call" && item.call_id === readCallB.call_id);
-  const outputAIndex = value.findIndex((item) => isRecord(item)
+  const outputAIndex = value.findIndex(/** 构造「outputAIndex」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => isRecord(item)
     && item.type === "function_call_output" && item.call_id === readCallA.call_id);
-  const outputBIndex = value.findIndex((item) => isRecord(item)
+  const outputBIndex = value.findIndex(/** 构造「outputBIndex」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => isRecord(item)
     && item.type === "function_call_output" && item.call_id === readCallB.call_id);
   return reasoningIndex >= 0
     && reasoningIndex < callAIndex
@@ -439,17 +455,20 @@ function validContinuation(value: unknown): boolean {
     && outputAIndex < outputBIndex;
 }
 
+/** 构造「isRecord」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** 构造「waitForNextWrite」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function waitForNextWrite(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
+  return new Promise(/** 构造「waitForNextWrite」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(resolve) => setImmediate(resolve));
 }
 
+/** 构造「writeFragmented」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function writeFragmented(res: ServerResponse, value: string): Promise<void> {
-  // Split every frame itself, rather than only splitting between frames. This
-  // forces clients to handle an SSE record spanning multiple HTTP/TCP writes.
+  // 每个 frame 自身也拆分，而非只在 frame 之间切分，以验证 Client 能处理跨多个 HTTP/TCP write 的 SSE 记录。
   const splitAt = Math.max(1, Math.floor(value.length / 2));
   res.write(value.slice(0, splitAt), "utf8");
   await waitForNextWrite();
@@ -457,6 +476,7 @@ async function writeFragmented(res: ServerResponse, value: string): Promise<void
   await waitForNextWrite();
 }
 
+/** 构造「writeEventStream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function writeEventStream(
   res: ServerResponse,
   events: readonly SseEvent[],
@@ -486,12 +506,15 @@ async function writeEventStream(
   res.end();
 }
 
+/** 构造「startResponsesMockServer」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export async function startResponsesMockServer(): Promise<ResponsesMockServer> {
   const requests: ResponsesMockRequest[] = [];
   const eventTypes: string[] = [];
 
-  const server = createServer((request, response) => {
-    void (async () => {
+  const server = createServer(/** 构造「server」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(request, response) => {
+    void (/** 构造「catch」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => {
       let body: Record<string, unknown>;
       try {
         body = await readJsonBody(request);
@@ -522,9 +545,8 @@ export async function startResponsesMockServer(): Promise<ResponsesMockServer> {
         return;
       }
 
-      // Routing is derived only from the current request. No response ID or
-      // server-side conversation state is retained: callers must send store:false
-      // and include function_call_output items in the second request.
+      // 路由只由当前请求推导，不保存 response ID 或服务端会话状态；调用方必须使用 store:false，
+      // 并在第二次请求中显式携带 function_call_output items。
       const events = isFailureScenario(body)
         ? failedEvents()
         : containsFunctionCallOutput(body.input)
@@ -533,7 +555,8 @@ export async function startResponsesMockServer(): Promise<ResponsesMockServer> {
             : failedEvents()
           : firstRoundEvents();
       await writeEventStream(response, events, eventTypes);
-    })().catch((error: unknown) => {
+    })().catch(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error: unknown) => {
       if (!response.headersSent) {
         response.writeHead(500, { "content-type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({
@@ -548,12 +571,15 @@ export async function startResponsesMockServer(): Promise<ResponsesMockServer> {
     });
   });
 
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error): void => {
+  await new Promise<void>(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(resolve, reject) => {
+    const onError = /** 构造「onError」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(error: Error): void => {
       server.off("listening", onListening);
       reject(error);
     };
-    const onListening = (): void => {
+    const onListening = /** 构造「onListening」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(): void => {
       server.off("error", onError);
       resolve();
     };
@@ -567,9 +593,12 @@ export async function startResponsesMockServer(): Promise<ResponsesMockServer> {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     requests,
     eventTypes,
-    close: async () => {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
+    close: /** 构造「close」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => {
+      await new Promise<void>(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(resolve, reject) => {
+        server.close(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error) => {
           if (error) {
             reject(error);
           } else {

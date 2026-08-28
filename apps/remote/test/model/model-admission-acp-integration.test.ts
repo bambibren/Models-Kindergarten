@@ -32,13 +32,17 @@ import { ToolRuntime } from "../../src/tools/tool-runtime.js";
 
 const dirs: string[] = [];
 
-afterEach(async () => {
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => {
   vi.unstubAllGlobals();
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true })));
 });
 
-describe("model admission -> ACP reasoning integration", () => {
-  it("安装出的动态 Responses 模型按自身 max 默认发出 xhigh，并把落档写入 Turn", async () => {
+describe("model admission -> ACP reasoning integration", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("安装出的动态 Responses 模型按自身 max 默认发出 xhigh，并把落档写入 Turn", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-admission-acp-"));
     dirs.push(dir);
     const secrets = new MemorySecrets();
@@ -48,10 +52,13 @@ describe("model admission -> ACP reasoning integration", () => {
       join(dir, "model-tests.json"),
       join(dir, "model-catalog.json"),
     );
-    const policy = new RemoteModelUrlPolicy(async () => [{ address: "8.8.8.8", family: 4 }]);
+    const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8", family: 4 }]);
     const responses = new ResponsesAdmissionAdapter(
-      { probe: async () => maxSnapshot() },
-      (student, connection) => new ResponsesApiProvider({
+      { probe: /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => maxSnapshot() },
+      /** 构造「responses」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(student, connection) => new ResponsesApiProvider({
         id: student.modelStudentId,
         name: student.displayName,
         sizeClass: student.sizeClass,
@@ -62,11 +69,13 @@ describe("model admission -> ACP reasoning integration", () => {
         },
         generationDefaults: { reasoningProfile: student.generationDefaults.reasoningProfile },
       }, {
-        readBearerToken: () => secrets.read(connection.credentialRef),
+        readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => secrets.read(connection.credentialRef),
         reasoning: {
           capability: student.snapshot.reasoning.capability,
           efforts: Object.fromEntries(Object.entries(student.snapshot.reasoning.nativeByProfile)
-            .flatMap(([profile, native]) => typeof native?.effort === "string" ? [[profile, native.effort]] : [])),
+            .flatMap(/** 构造「efforts」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+([profile, native]) => typeof native?.effort === "string" ? [[profile, native.effort]] : [])),
         },
       }),
     );
@@ -76,8 +85,10 @@ describe("model admission -> ACP reasoning integration", () => {
         protocol: "openai_chat_completions",
         adapterRevision: "unused-chat-v1",
         probeVersion: 1,
-        probe: async () => { throw new Error("unused"); },
-        createProvider: () => { throw new Error("unused"); },
+        probe: /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => { throw new Error("unused"); },
+        createProvider: /** 构造「createProvider」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => { throw new Error("unused"); },
       },
     ]);
     const admission = new ModelAdmissionService(
@@ -102,7 +113,8 @@ describe("model admission -> ACP reasoning integration", () => {
     });
 
     const requestBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", vi.fn(async (_url: URL, init?: RequestInit) => {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async (_url: URL, init?: RequestInit) => {
       requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       const terminal = {
         type: "response.completed",
@@ -135,7 +147,8 @@ describe("model admission -> ACP reasoning integration", () => {
       new ContextAssembler(),
       noopRuntimeObservationSink,
       {
-        resolve: async (scope) => ({
+        resolve: /** 构造「resolve」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (scope) => ({
           scope,
           agent,
           agentSnapshotHash: "a".repeat(64),
@@ -152,9 +165,12 @@ describe("model admission -> ACP reasoning integration", () => {
       runtime,
       new SessionBindingService({
         workspaceCwd: "/workspace",
-        agentExists: (id) => id === agent.agentId,
-        modelStudentReady: (id) => models.isReady(id),
-        experimentBinding: async () => undefined,
+        agentExists: /** 构造「agentExists」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(id) => id === agent.agentId,
+        modelStudentReady: /** 构造「modelStudentReady」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(id) => models.isReady(id),
+        experimentBinding: /** 构造「experimentBinding」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => undefined,
       }),
       undefined,
       models,
@@ -202,15 +218,19 @@ describe("model admission -> ACP reasoning integration", () => {
 
 class MemorySecrets implements WritableSecretStore {
   private readonly values = new Map<string, string>();
-  async read(ref: SecretRef): Promise<string> {
+  /** 构造「read」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async read(ref: SecretRef): Promise<string> {
     const value = this.values.get(ref.key);
     if (!value) throw new Error("missing secret");
     return value;
   }
-  async write(ref: SecretRef, value: string): Promise<void> { this.values.set(ref.key, value); }
-  async delete(ref: SecretRef): Promise<void> { this.values.delete(ref.key); }
+  /** 构造「write」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async write(ref: SecretRef, value: string): Promise<void> { this.values.set(ref.key, value); }
+  /** 构造「delete」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async delete(ref: SecretRef): Promise<void> { this.values.delete(ref.key); }
 }
 
+/** 构造「agentRecord」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function agentRecord(): AgentRecord {
   return {
     schemaVersion: 1,
@@ -229,6 +249,7 @@ function agentRecord(): AgentRecord {
   };
 }
 
+/** 构造「maxSnapshot」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function maxSnapshot(): ProviderCapabilitySnapshot {
   return {
     schemaVersion: 1,

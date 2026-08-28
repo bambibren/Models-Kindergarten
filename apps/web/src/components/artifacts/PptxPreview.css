@@ -133,7 +133,8 @@
   font-size: 12px;
 }
 
-.pptx-preview__error button {
+.pptx-preview__error button,
+.pptx-preview__error a {
   display: inline-flex;
   align-items: center;
   gap: 6px;

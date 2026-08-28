@@ -21,14 +21,18 @@ import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.j
 import type { ModelContextSerialization } from "../model/model-provider.js";
 import type { ProviderOpaqueContinuation } from "../model/provider-continuation.js";
 
+/** 描述「SessionRole」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type SessionRole = "user" | "assistant";
+/** 描述「SessionPurpose」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type SessionPurpose = "chat" | "experiment";
 
+/** 描述「SessionExperimentRef」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionExperimentRef {
   experimentId: string;
   variantId: string;
 }
 
+/** 描述「TurnExecutionRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface TurnExecutionRecord {
   schemaVersion: 1;
   turnId: string;
@@ -59,7 +63,14 @@ export interface TurnExecutionRecord {
     roundIndex: number;
     capabilityGeneration: number;
     contextSummary: ContextSummary;
-    providerInput: ModelContextSerialization;
+    /** 只在写入 Repository 前短暂存在；V5 落盘后必须被 evidence 引用替换。 */
+    providerInput?: ModelContextSerialization;
+    providerInputRef?: string;
+    providerInputHash?: string;
+    providerInputBytes?: number;
+    providerInputProvider?: ModelContextSerialization["provider"];
+    providerInputModel?: string;
+    providerInputFormat?: ModelContextSerialization["format"];
     startedAt: string;
     completedAt?: string;
     resolvedReasoning?: ResolvedReasoningSnapshot;
@@ -71,6 +82,7 @@ export interface TurnExecutionRecord {
   resolvedReasoning?: ResolvedReasoningSnapshot;
 }
 
+/** 描述「SessionMessageEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionMessageEntry {
   type: "message";
   role: SessionRole;
@@ -81,6 +93,7 @@ export interface SessionMessageEntry {
   artifactMentions?: ArtifactMention[];
 }
 
+/** 描述「SessionThoughtEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionThoughtEntry {
   type: "thought";
   text: string;
@@ -89,6 +102,7 @@ export interface SessionThoughtEntry {
   createdAt: string;
 }
 
+/** 描述「SessionContextSummaryEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionContextSummaryEntry {
   type: "context_summary";
   turnId: string;
@@ -96,6 +110,7 @@ export interface SessionContextSummaryEntry {
   createdAt: string;
 }
 
+/** 描述「SessionTokenUsageEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionTokenUsageEntry {
   type: "token_usage";
   turnId: string;
@@ -103,6 +118,7 @@ export interface SessionTokenUsageEntry {
   createdAt: string;
 }
 
+/** 描述「SessionContextWindowUsageEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionContextWindowUsageEntry {
   type: "context_window_usage";
   turnId: string;
@@ -110,12 +126,14 @@ export interface SessionContextWindowUsageEntry {
   createdAt: string;
 }
 
+/** 描述「SessionToolOutcomeStatus」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type SessionToolOutcomeStatus =
   | "success"
   | "error"
   | "denied"
   | "duplicate_blocked";
 
+/** 描述「SessionToolCallEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionToolCallEntry {
   type: "tool_call";
   turnId: string;
@@ -155,8 +173,9 @@ export type SessionEntry =
   | SessionToolCallEntry
   | SessionProviderContinuationEntry;
 
+/** 描述「SessionRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionRecord {
-  schemaVersion: 4;
+  schemaVersion: 5;
   id: string;
   revision: number;
   ownerId: string;

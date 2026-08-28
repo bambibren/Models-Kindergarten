@@ -39,7 +39,8 @@ export async function stageSkillResourceBundle(
   const hash = createHash("sha256");
   let totalBytes = 0;
   const seen = new Set<string>();
-  for (const file of bundle.files.toSorted((left, right) => left.path.localeCompare(right.path))) {
+  for (const file of bundle.files.toSorted(/** 执行「stageSkillResourceBundle」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(left, right) => left.path.localeCompare(right.path))) {
     const path = safeRelativePath(file.path);
     if (seen.has(path)) throw new Error(`SKILL_RESOURCE_INVALID: 重复文件 ${path}`);
     seen.add(path);
@@ -59,9 +60,11 @@ export async function stageSkillResourceBundle(
   return { path: target, contentHash };
 }
 
+/** 执行「downloadBundle」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async function downloadBundle(url: string, fetchImpl: typeof fetch): Promise<Buffer> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const timeout = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => controller.abort(), requestTimeoutMs);
   try {
     const response = await fetchImpl(url, { redirect: "error", signal: controller.signal });
     if (!response.ok) throw new Error(`SKILL_RESOURCE_DOWNLOAD_FAILED: HTTP ${response.status}`);
@@ -78,6 +81,7 @@ async function downloadBundle(url: string, fetchImpl: typeof fetch): Promise<Buf
   }
 }
 
+/** 校验并规范化「parseBundle」输入，非法数据直接返回明确错误。 */
 function parseBundle(value: unknown): SkillBundle {
   if (!record(value) || value.schemaVersion !== 1 || value.kind !== "mk-skill-bundle" ||
     typeof value.name !== "string" || !/^[a-z0-9-]+$/.test(value.name) ||
@@ -85,7 +89,8 @@ function parseBundle(value: unknown): SkillBundle {
     !Array.isArray(value.files) || value.files.length < 1 || value.files.length > PRODUCT_CONFIG.skill.maxFiles) {
     throw new Error("SKILL_RESOURCE_INVALID: bundle 结构无效");
   }
-  const files = value.files.map((item): SkillBundleFile => {
+  const files = value.files.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item): SkillBundleFile => {
     if (!record(item) || typeof item.path !== "string" || item.encoding !== "base64" ||
       !Number.isInteger(item.byteLength) || (item.byteLength as number) < 0 ||
       typeof item.sha256 !== "string" || !sha256(item.sha256) || typeof item.content !== "string") {
@@ -102,6 +107,7 @@ function parseBundle(value: unknown): SkillBundle {
   return { schemaVersion: 1, kind: "mk-skill-bundle", name: value.name, contentHash: value.contentHash, files };
 }
 
+/** 读取「readBounded」所需数据，并遵守作用域、分页与容量边界。 */
 async function readBounded(response: Response, limit: number): Promise<Buffer> {
   const declared = Number(response.headers.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > limit) throw new Error("SKILL_RESOURCE_INVALID: 响应体过大");
@@ -122,6 +128,7 @@ async function readBounded(response: Response, limit: number): Promise<Buffer> {
   return Buffer.concat(chunks, total);
 }
 
+/** 根据受控标识构造「safeRelativePath」路径；调用方仍须执行归属与目录边界校验。 */
 function safeRelativePath(value: string): string {
   if (!value || value.includes("\\") || value.startsWith("/") || value.includes("\0")) {
     throw new Error(`SKILL_RESOURCE_INVALID: 文件路径无效 ${value}`);
@@ -133,6 +140,7 @@ function safeRelativePath(value: string): string {
   return normalized;
 }
 
+/** 校验并规范化「decodeBase64」输入，非法数据直接返回明确错误。 */
 function decodeBase64(value: string, path: string): Buffer {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw new Error(`SKILL_RESOURCE_INVALID: ${path} 不是规范 Base64`);
@@ -140,7 +148,9 @@ function decodeBase64(value: string, path: string): Buffer {
   return Buffer.from(value, "base64");
 }
 
+/** 执行「sha256」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function sha256(value: string): boolean { return /^[a-f0-9]{64}$/.test(value); }
+/** 更新「record」对应状态，并保持写入顺序、原子性与容量约束。 */
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

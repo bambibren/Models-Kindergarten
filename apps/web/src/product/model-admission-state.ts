@@ -7,10 +7,14 @@ import type {
   ModelStudentTestRecord,
 } from "@kindergarten/contracts";
 
+/** 描述「ModelAdmissionPhase」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelAdmissionPhase = "loading" | "editing" | "testing" | "verified" | "installing" | "failed";
+/** 描述「ModelAdmissionField」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelAdmissionField = "displayName" | "baseUrl" | "model" | "apiKey" | "contextWindowTokens";
+/** 描述「ModelAdmissionFieldErrors」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelAdmissionFieldErrors = Partial<Record<ModelAdmissionField, string>>;
 
+/** 描述「ModelAdmissionDraft」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelAdmissionDraft {
   presetId: ModelProviderPresetId | "";
   displayName: string;
@@ -20,6 +24,7 @@ export interface ModelAdmissionDraft {
   contextWindowTokens: string;
 }
 
+/** 描述「ModelAdmissionViewState」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelAdmissionViewState {
   phase: ModelAdmissionPhase;
   draft: ModelAdmissionDraft;
@@ -29,6 +34,7 @@ export interface ModelAdmissionViewState {
   error?: string;
 }
 
+/** 根据已校验输入构建「createModelAdmissionState」结果，不额外持有调用方的大对象。 */
 export function createModelAdmissionState(): ModelAdmissionViewState {
   return {
     phase: "loading",
@@ -37,11 +43,13 @@ export function createModelAdmissionState(): ModelAdmissionViewState {
   };
 }
 
+/** 执行「initializeModelAdmissionPresets」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function initializeModelAdmissionPresets(
   state: ModelAdmissionViewState,
   presets: ModelProviderPresetView[],
 ): ModelAdmissionViewState {
-  const current = presets.find((item) => item.presetId === state.draft.presetId);
+  const current = presets.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.presetId === state.draft.presetId);
   const selected = current ?? presets[0];
   if (!selected) {
     return { ...state, phase: "failed", error: "当前没有可用的模型接入方式。" };
@@ -106,6 +114,7 @@ export function updateModelAdmissionContextWindowTokens(
   return { ...state, draft: { ...state.draft, contextWindowTokens }, fieldErrors };
 }
 
+/** 执行「beginModelAdmissionTest」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function beginModelAdmissionTest(state: ModelAdmissionViewState): ModelAdmissionViewState {
   return {
     phase: "testing",
@@ -114,6 +123,7 @@ export function beginModelAdmissionTest(state: ModelAdmissionViewState): ModelAd
   };
 }
 
+/** 处理「acceptSuccessfulModelStudentTest」事件，校验归属后再推进状态且避免重复提交。 */
 export function acceptSuccessfulModelStudentTest(
   state: ModelAdmissionViewState,
   test: ModelStudentTestRecord,
@@ -130,6 +140,7 @@ export function acceptSuccessfulModelStudentTest(
   };
 }
 
+/** 更新「updateModelAdmissionDefaultReasoningProfile」对应状态，并保持写入顺序、原子性与容量约束。 */
 export function updateModelAdmissionDefaultReasoningProfile(
   state: ModelAdmissionViewState,
   profile: ConcreteReasoningProfile,
@@ -138,6 +149,7 @@ export function updateModelAdmissionDefaultReasoningProfile(
   return supported?.includes(profile) ? { ...state, defaultReasoningProfile: profile } : state;
 }
 
+/** 根据已校验输入构建「buildModelStudentInstallInput」结果，不额外持有调用方的大对象。 */
 export function buildModelStudentInstallInput(state: ModelAdmissionViewState): ModelStudentInstallInput {
   const snapshot = state.test?.snapshot;
   const profile = state.defaultReasoningProfile;
@@ -153,6 +165,7 @@ export function buildModelStudentInstallInput(state: ModelAdmissionViewState): M
   };
 }
 
+/** 校验并规范化「validateOptionalContextWindowTokens」输入，非法数据直接返回明确错误。 */
 export function validateOptionalContextWindowTokens(value: string): string | undefined {
   const trimmed = value.trim();
   if (trimmed.length === 0) return undefined;
@@ -160,6 +173,7 @@ export function validateOptionalContextWindowTokens(value: string): string | und
   return Number.isSafeInteger(parsed) && parsed > 0 ? undefined : "请输入正整数，或留空。";
 }
 
+/** 校验并规范化「validateModelAdmissionDraft」输入，非法数据直接返回明确错误。 */
 export function validateModelAdmissionDraft(
   draft: ModelAdmissionDraft,
   preset: ModelProviderPresetView | undefined,
@@ -187,6 +201,7 @@ export function validateModelAdmissionDraft(
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
+/** 根据已校验输入构建「buildModelStudentCandidate」结果，不额外持有调用方的大对象。 */
 export function buildModelStudentCandidate(
   draft: ModelAdmissionDraft,
   preset: ModelProviderPresetView,
@@ -205,6 +220,7 @@ export function buildModelStudentCandidate(
   throw new Error("当前模型接入方式尚未开放");
 }
 
+/** 执行「visibleModelAdmissionErrors」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function visibleModelAdmissionErrors(
   draft: ModelAdmissionDraft,
   validationErrors: ModelAdmissionFieldErrors,
@@ -218,6 +234,7 @@ export function visibleModelAdmissionErrors(
   return visible;
 }
 
+/** 校验并规范化「parseOptionalContextWindowTokens」输入，非法数据直接返回明确错误。 */
 function parseOptionalContextWindowTokens(value: string): number | undefined {
   const error = validateOptionalContextWindowTokens(value);
   if (error) throw new Error("上下文窗口必须是正整数，或留空。");
@@ -225,13 +242,16 @@ function parseOptionalContextWindowTokens(value: string): number | undefined {
   return trimmed.length === 0 ? undefined : Number(trimmed);
 }
 
+/** 执行「selectedModelProviderPreset」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function selectedModelProviderPreset(
   presets: ModelProviderPresetView[],
   presetId: ModelAdmissionDraft["presetId"],
 ): ModelProviderPresetView | undefined {
-  return presets.find((item) => item.presetId === presetId);
+  return presets.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.presetId === presetId);
 }
 
+/** 执行「modelStudentHomeUrl」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function modelStudentHomeUrl(modelStudentId: string): string {
   return `/?modelStudentId=${encodeURIComponent(modelStudentId)}`;
 }

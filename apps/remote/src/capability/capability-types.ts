@@ -1,7 +1,9 @@
 import type { PermissionMode } from "../tools/tool-registry.js";
 
+/** 描述「CapabilityOrigin」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type CapabilityOrigin = "builtin" | "mcp" | "skill_runtime";
 
+/** 描述「ToolCapabilitySnapshot」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolCapabilitySnapshot {
   id: string;
   modelName: string;
@@ -11,6 +13,7 @@ export interface ToolCapabilitySnapshot {
   remoteName?: string;
 }
 
+/** 描述「McpServerCapabilitySnapshot」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface McpServerCapabilitySnapshot {
   serverId: string;
   protocolEra: "modern" | "legacy";
@@ -18,6 +21,7 @@ export interface McpServerCapabilitySnapshot {
   toolSchemaHashes: Record<string, string>;
 }
 
+/** 描述「SkillCapabilitySnapshot」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SkillCapabilitySnapshot {
   name: string;
   contentHash: string;
@@ -34,6 +38,7 @@ export interface RuntimeCapabilitySnapshot {
   skills: SkillCapabilitySnapshot[];
 }
 
+/** 描述「AgentCapabilitySet」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface AgentCapabilitySet {
   mcpTools: Array<{
     id: string;

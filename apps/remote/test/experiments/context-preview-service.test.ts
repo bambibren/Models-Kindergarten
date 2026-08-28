@@ -3,8 +3,10 @@ import type { RuntimeCapabilityResolver } from "../../src/capability/runtime-cap
 import { ContextPreviewService } from "../../src/experiments/context-preview-service.js";
 import { FixtureProvider } from "../../src/model/fixture-provider.js";
 
-describe("ContextPreviewService V2", () => {
-  it("用目标模型、推理档位和真实 Runtime 固定指令生成首轮预览", async () => {
+describe("ContextPreviewService V2", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("用目标模型、推理档位和真实 Runtime 固定指令生成首轮预览", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const fixture = new FixtureProvider();
     const policy = {
       systemPrompt: "Agent 可编辑基础指令",
@@ -13,17 +15,20 @@ describe("ContextPreviewService V2", () => {
       memoryPolicy: { mode: "off" as const },
     };
     const resolver = {
-      preview: vi.fn(async () => ({
+      preview: vi.fn(/** 构造「preview」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => ({
         model: fixture,
         agent: { systemPrompt: policy.systemPrompt },
-        context: { buildObserved: vi.fn(async () => ({
+        context: { buildObserved: vi.fn(/** 构造「buildObserved」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => ({
           messages: [{ role: "user", content: "生成页面" }],
-          observations: [], segments: [], truncatedSourceIds: [],
+          messageTraces: [], segments: [], truncatedSourceIds: [],
         })) },
         tools: { registry: { definitions: [] } },
         agentSnapshotHash: "agent-hash", capabilityHash: "capability-hash",
       })),
-      modelSummary: vi.fn(() => ({
+      modelSummary: vi.fn(/** 构造「modelSummary」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => ({
         schemaVersion: 1, modelStudentId: fixture.student.id, displayName: fixture.student.name,
         sizeClass: fixture.student.sizeClass, providerKind: fixture.student.provider.kind,
         model: fixture.student.provider.model, status: "ready", deletable: false,
@@ -48,7 +53,8 @@ describe("ContextPreviewService V2", () => {
     expect(result.runnable).toBe(true);
   });
 
-  it("拒绝 sourceTurnId/history 输入，Turn 只允许作为实验来源追溯", async () => {
+  it("拒绝 sourceTurnId/history 输入，Turn 只允许作为实验来源追溯", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const resolver = {} as RuntimeCapabilityResolver;
     const service = new ContextPreviewService(resolver);
     await expect(service.preview({

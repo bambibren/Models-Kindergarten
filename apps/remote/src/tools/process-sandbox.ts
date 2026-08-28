@@ -6,6 +6,7 @@ import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import type { FileSandbox } from "./sandbox.js";
 import { ToolExecutionError } from "./tool-error.js";
 
+/** 描述「CommandResult」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface CommandResult {
   command: string;
   cwd: string;
@@ -20,9 +21,11 @@ export interface CommandResult {
 
 /** 本地演示优先使用 macOS sandbox-exec；其他平台拒绝运行而不是静默降级。 */
 export class ProcessSandbox {
-  constructor(private readonly files: FileSandbox) {}
+  /** 初始化「ProcessSandbox」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(private readonly files: FileSandbox) {}
 
-  async run(
+  /** 执行「run」主流程，传播取消与失败并在结束时清理临时资源。 */
+async run(
     command: string,
     cwdInput: string | undefined,
     requestedTimeout: number | undefined,
@@ -64,7 +67,8 @@ export class ProcessSandbox {
 
     let execution: Omit<CommandResult, "changedFiles" | "deletedFiles">;
     try {
-      execution = await new Promise<Omit<CommandResult, "changedFiles" | "deletedFiles">>((resolveResult, reject) => {
+      execution = await new Promise<Omit<CommandResult, "changedFiles" | "deletedFiles">>(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
+(resolveResult, reject) => {
         const child = spawn("/usr/bin/sandbox-exec", args, {
           cwd,
           detached: true,
@@ -75,7 +79,8 @@ export class ProcessSandbox {
         let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
         let truncated = false;
         let timedOut = false;
-        const append = (
+        const append = /** 更新「append」对应状态，并保持写入顺序、原子性与容量约束。 */
+(
           current: Buffer<ArrayBufferLike>,
           chunk: Buffer<ArrayBufferLike>,
         ): Buffer<ArrayBufferLike> => {
@@ -87,19 +92,25 @@ export class ProcessSandbox {
           if (chunk.length > remaining) truncated = true;
           return Buffer.concat([current, chunk.subarray(0, remaining)]);
         };
-        child.stdout.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk); });
-        child.stderr.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk); });
+        child.stdout.on("data", /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(chunk: Buffer) => { stdout = append(stdout, chunk); });
+        child.stderr.on("data", /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(chunk: Buffer) => { stderr = append(stderr, chunk); });
 
-        const stop = (): void => {
+        const stop = /** 执行「stop」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(): void => {
           if (child.pid) {
             try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill("SIGTERM"); }
           }
         };
-        const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs);
-        const abort = (): void => stop();
+        const timer = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => { timedOut = true; stop(); }, timeoutMs);
+        const abort = /** 执行「abort」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(): void => stop();
         signal.addEventListener("abort", abort, { once: true });
         child.once("error", finishError);
-        child.once("close", (exitCode, childSignal) => {
+        child.once("close", /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(exitCode, childSignal) => {
           cleanup();
           if (signal.aborted) return reject(new DOMException("已取消", "AbortError"));
           if (timedOut) {
@@ -120,12 +131,14 @@ export class ProcessSandbox {
             truncated,
           });
         });
-        function cleanup(): void {
+        /** 完成当前异步桥接，并保证每条分支只结算一次。 */
+function cleanup(): void {
           clearTimeout(timer);
           signal.removeEventListener("abort", abort);
           child.removeListener("error", finishError);
         }
-        function finishError(error: Error): void {
+        /** 完成当前异步桥接，并保证每条分支只结算一次。 */
+function finishError(error: Error): void {
           cleanup();
           reject(error);
         }
@@ -151,15 +164,20 @@ export class ProcessSandbox {
   }
 }
 
+/** 执行「fileChanges」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function fileChanges(before: Map<string, string>, after: Map<string, string>): Pick<CommandResult, "changedFiles" | "deletedFiles"> {
   return {
     changedFiles: [...after]
-      .filter(([path, digest]) => before.get(path) !== digest)
-      .map(([path]) => path),
-    deletedFiles: [...before.keys()].filter((path) => !after.has(path)),
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+([path, digest]) => before.get(path) !== digest)
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+([path]) => path),
+    deletedFiles: [...before.keys()].filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(path) => !after.has(path)),
   };
 }
 
+/** 执行「sandboxProfile」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function sandboxProfile(root: string): string {
   const escaped = root.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
   return `(version 1)
@@ -172,13 +190,16 @@ function sandboxProfile(root: string): string {
 (deny network*)`;
 }
 
+/** 执行「allowedEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function allowedEnv(): NodeJS.ProcessEnv {
   const names = ["PATH", "LANG", "LC_ALL", "TMPDIR"];
-  return Object.fromEntries(names.flatMap((name) =>
+  return Object.fromEntries(names.flatMap(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(name) =>
     process.env[name] === undefined ? [] : [[name, process.env[name]]],
   ));
 }
 
+/** 校验并规范化「assertInside」输入，非法数据直接返回明确错误。 */
 function assertInside(root: string, target: string): void {
   const rel = relative(root, resolve(target));
   if (rel === "" || (!rel.startsWith(`..${sep}`) && rel !== "..")) return;

@@ -14,15 +14,20 @@ import {
   validateAdmissionDraft,
 } from "./model-admission-state.js";
 
+/** 构造「memoryStorage」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function memoryStorage() {
   const values = new Map<string, string>();
   return {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => { values.set(key, value); },
-    dump: () => JSON.stringify(Object.fromEntries(values)),
+    getItem: /** 构造「getItem」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(key: string) => values.get(key) ?? null,
+    setItem: /** 构造「setItem」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(key: string, value: string) => { values.set(key, value); },
+    dump: /** 构造「dump」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => JSON.stringify(Object.fromEntries(values)),
   };
 }
 
+/** 构造「successfulStudent」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function successfulStudent(id = "student-test"): { student: DemoModelStudent; apiKey: string } {
   const apiKey = "sk-demo-super-secret-1234";
   const draft = updateAdmissionDraft(createAdmissionDraft("siliconflow"), { apiKey, name: "硅基流动新生" });
@@ -31,8 +36,10 @@ function successfulStudent(id = "student-test"): { student: DemoModelStudent; ap
   return { student: buildDemoModelStudent(draft, result.models[0], id), apiKey };
 }
 
-describe("model admission state", () => {
-  it("creates protocol-specific drafts and clears all connection fields when switching provider", () => {
+describe("model admission state", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("creates protocol-specific drafts and clears all connection fields when switching provider", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const ollama = createAdmissionDraft();
     expect(ollama).toMatchObject({ providerId: "ollama", baseUrl: "http://127.0.0.1:11434", apiKey: "" });
 
@@ -49,7 +56,8 @@ describe("model admission state", () => {
     expect(switchAdmissionProvider(siliconflow, "siliconflow")).toBe(siliconflow);
   });
 
-  it("validates only the fields needed to test each provider connection", () => {
+  it("validates only the fields needed to test each provider connection", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(validateAdmissionDraft(createAdmissionDraft("ollama")).valid).toBe(true);
     expect(validateAdmissionDraft(createAdmissionDraft("siliconflow"))).toMatchObject({
       valid: false,
@@ -67,9 +75,11 @@ describe("model admission state", () => {
     });
   });
 
-  it("discovers only Ollama, SiliconFlow, and custom Responses demo models with capabilities", () => {
+  it("discovers only Ollama, SiliconFlow, and custom Responses demo models with capabilities", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const ollama = simulateAdmissionTest(createAdmissionDraft("ollama"));
-    expect(ollama.ok && ollama.models.map((model) => model.id)).toEqual(["qwen3:8b", "deepseek-r1:8b"]);
+    expect(ollama.ok && ollama.models.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(model) => model.id)).toEqual(["qwen3:8b", "deepseek-r1:8b"]);
 
     const siliconflow = simulateAdmissionTest(updateAdmissionDraft(createAdmissionDraft("siliconflow"), { apiKey: "sk-demo-12345678" }));
     expect(siliconflow.ok && siliconflow.models[0]).toMatchObject({
@@ -92,7 +102,8 @@ describe("model admission state", () => {
     expect(responses).toMatchObject({ ok: true, models: [{ id: "gpt-5.5" }] });
   });
 
-  it("returns deterministic provider-specific failures for the Demo invalid convention", () => {
+  it("returns deterministic provider-specific failures for the Demo invalid convention", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const ollama = updateAdmissionDraft(createAdmissionDraft("ollama"), { baseUrl: "http://invalid.local:11434" });
     expect(simulateAdmissionTest(ollama)).toEqual({ ok: false, error: "没有检测到 Ollama，请确认本地服务已经启动。" });
 
@@ -108,7 +119,8 @@ describe("model admission state", () => {
     expect(simulateAdmissionTest(responses)).toEqual({ ok: false, error: "Responses 接口不可用，或当前地址与协议不兼容。" });
   });
 
-  it("builds a pending ModelStudent without carrying the raw API Key", () => {
+  it("builds a pending ModelStudent without carrying the raw API Key", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const { student, apiKey } = successfulStudent();
     expect(student).toMatchObject({
       id: "student-test",
@@ -124,7 +136,8 @@ describe("model admission state", () => {
     expect(JSON.stringify(student)).not.toContain(apiKey);
   });
 
-  it("persists a sanitized upsert, selects it, and never stores the raw API Key", () => {
+  it("persists a sanitized upsert, selects it, and never stores the raw API Key", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const storage = memoryStorage();
     const { student, apiKey } = successfulStudent();
     saveModelStudent(storage, student);
@@ -137,7 +150,8 @@ describe("model admission state", () => {
     expect(storage.dump()).not.toContain(apiKey);
   });
 
-  it("ignores malformed or unsafe stored records", () => {
+  it("ignores malformed or unsafe stored records", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const storage = memoryStorage();
     storage.setItem(demoModelStudentStorageKey, "not-json");
     expect(loadSavedModelStudents(storage)).toEqual([]);
@@ -146,7 +160,8 @@ describe("model admission state", () => {
     expect(loadSavedModelStudents(storage)).toEqual([]);
   });
 
-  it("keeps legacy students and normalizes missing reasoning control to a fixed profile", () => {
+  it("keeps legacy students and normalizes missing reasoning control to a fixed profile", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const storage = memoryStorage();
     const { student } = successfulStudent("legacy-student");
     const legacyCapabilities: Partial<DemoModelStudent["capabilities"]> = { ...student.capabilities };
@@ -162,11 +177,13 @@ describe("model admission state", () => {
     });
   });
 
-  it("merges saved students ahead of built-ins and replaces matching IDs", () => {
+  it("merges saved students ahead of built-ins and replaces matching IDs", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const saved = successfulStudent("same-id").student;
     const builtIn = { ...saved, name: "内置名称" };
     const other = { ...saved, id: "other-id", name: "另一个内置模型" };
-    expect(mergeModelStudents([saved], [builtIn, other]).map((student) => student.name)).toEqual([
+    expect(mergeModelStudents([saved], [builtIn, other]).map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(student) => student.name)).toEqual([
       "硅基流动新生",
       "另一个内置模型",
     ]);

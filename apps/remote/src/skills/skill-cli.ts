@@ -20,6 +20,7 @@ console.log(JSON.stringify({
   source: record.source,
 }, null, 2));
 
+/** 执行「installRequest」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function installRequest(args: Map<string, string | true>, sourcePolicy: SkillSourceUrlPolicy): SkillInstallRequest {
   if (args.get("approve") !== true) throw new Error("必须提供 --approve 明确确认安装");
   const source = required(args, "source");
@@ -52,6 +53,7 @@ function installRequest(args: Map<string, string | true>, sourcePolicy: SkillSou
   throw new Error("--source 必须是 local、git 或 resource");
 }
 
+/** 校验并规范化「parseArgs」输入，非法数据直接返回明确错误。 */
 function parseArgs(values: string[]): Map<string, string | true> {
   const result = new Map<string, string | true>();
   for (let index = 0; index < values.length; index += 1) {
@@ -70,12 +72,14 @@ function parseArgs(values: string[]): Map<string, string | true> {
   return result;
 }
 
+/** 校验并取得「required」所需对象；缺失或归属不符时立即抛出明确错误。 */
 function required(args: Map<string, string | true>, name: string): string {
   const value = stringValue(args.get(name));
   if (!value) throw new Error(`缺少 --${name}`);
   return value;
 }
 
+/** 执行「stringValue」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function stringValue(value: string | true | undefined): string | undefined {
   return typeof value === "string" ? value : undefined;
 }

@@ -2,6 +2,7 @@ import type { EntryCollection } from "../../chat/chat-types.js";
 import { selectSessionTokenUsage } from "../../chat/token-usage.js";
 import { formatTokenCount } from "../tokens/token-format.js";
 
+/** 渲染「TokenUsageTotal」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function TokenUsageTotal({ history, streaming }: {
   history: EntryCollection;
   streaming: EntryCollection;

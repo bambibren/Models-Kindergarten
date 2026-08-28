@@ -6,8 +6,10 @@ import {
   readResponsesCapabilityProbe,
 } from "./model-admission.js";
 
-describe("自定义 Responses 模型入园合同", () => {
-  it("规范化 HTTPS Base URL 并保留瞬时 API Key", () => {
+describe("自定义 Responses 模型入园合同", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("规范化 HTTPS Base URL 并保留瞬时 API Key", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(parseResponsesModelCandidateInput({
       displayName: " 大聪明 ",
       baseUrl: "https://models.example.test/v1/",
@@ -21,11 +23,13 @@ describe("自定义 Responses 模型入园合同", () => {
     });
   });
 
-  it("固定 Provider 预设不接受浏览器覆盖 Base URL", () => {
+  it("固定 Provider 预设不接受浏览器覆盖 Base URL", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(parseModelStudentCandidateInput({
       presetId: "openai", displayName: "官方模型", model: "gpt-5", apiKey: "k",
     })).toEqual({ presetId: "openai", displayName: "官方模型", model: "gpt-5", apiKey: "k" });
-    expect(() => parseModelStudentCandidateInput({
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseModelStudentCandidateInput({
       presetId: "siliconflow",
       displayName: "国内模型",
       model: "vendor/model",
@@ -39,18 +43,24 @@ describe("自定义 Responses 模型入园合同", () => {
     "https://user:pass@models.example.test/v1",
     "https://models.example.test/v1?token=bad",
     "not-a-url",
-  ])("拒绝不安全 Base URL: %s", (baseUrl) => {
-    expect(() => parseResponsesModelCandidateInput({ displayName: "模型", baseUrl, model: "m", apiKey: "k" })).toThrow();
+  ])("拒绝不安全 Base URL: %s", /** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(baseUrl) => {
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseResponsesModelCandidateInput({ displayName: "模型", baseUrl, model: "m", apiKey: "k" })).toThrow();
   });
 
-  it("拒绝未知字段，防止把兼容配置偷偷扩展成另一种协议", () => {
-    expect(() => parseResponsesModelCandidateInput({
+  it("拒绝未知字段，防止把兼容配置偷偷扩展成另一种协议", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseResponsesModelCandidateInput({
       displayName: "模型", baseUrl: "https://example.test", model: "m", apiKey: "k", wireApi: "chat",
     })).toThrow("未知字段");
-    expect(() => parseModelStudentInstallInput({ testId: "test", apiKey: "bad" })).toThrow("未知字段");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseModelStudentInstallInput({ testId: "test", apiKey: "bad" })).toThrow("未知字段");
   });
 
-  it("入园时只接受可落盘的具体默认推理档位", () => {
+  it("入园时只接受可落盘的具体默认推理档位", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(parseModelStudentInstallInput({
       testId: "test",
       displayName: "大聪明",
@@ -63,19 +73,23 @@ describe("自定义 Responses 模型入园合同", () => {
       contextWindowTokens: 262_144,
     });
     expect(parseModelStudentInstallInput({ testId: "test" })).toEqual({ testId: "test" });
-    expect(() => parseModelStudentInstallInput({ testId: "test", defaultReasoningProfile: "auto" }))
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseModelStudentInstallInput({ testId: "test", defaultReasoningProfile: "auto" }))
       .toThrow("fast、balanced、deep 或 max");
   });
 
   it.each([0, -1, 1.5, "262144", Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
     "拒绝非正整数上下文上限: %s",
-    (contextWindowTokens) => {
-      expect(() => parseModelStudentInstallInput({ testId: "test", contextWindowTokens }))
+    /** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(contextWindowTokens) => {
+      expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseModelStudentInstallInput({ testId: "test", contextWindowTokens }))
         .toThrow("contextWindowTokens 必须是正整数");
     },
   );
 
-  it("读取并深校验端点体检产生的 reasoning 映射", () => {
+  it("读取并深校验端点体检产生的 reasoning 映射", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const value = readResponsesCapabilityProbe({
       schemaVersion: 1,
       protocol: "openai_responses",
@@ -115,7 +129,8 @@ describe("自定义 Responses 模型入园合同", () => {
     expect(value.reasoning.nativeByProfile.max).toEqual({ effort: "xhigh" });
   });
 
-  it("公开体检快照不需要也不能容纳原始 Key", () => {
+  it("公开体检快照不需要也不能容纳原始 Key", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const secret = "SECRET_SENTINEL_MODEL_ADMISSION";
     const candidate = parseResponsesModelCandidateInput({
       displayName: "模型", baseUrl: "https://example.test", model: "m", apiKey: secret,

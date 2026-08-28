@@ -49,21 +49,26 @@ export const artifactToolDefinitions: ModelToolDefinition[] = [
   }, ["artifact_id", "steps"]),
 ];
 
+/** 描述「ArtifactToolProvider」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class ArtifactToolProvider implements ToolRegistryPort {
   readonly providerId = "artifact";
   readonly definitions: ModelToolDefinition[];
 
-  constructor(
+  /** 初始化「ArtifactToolProvider」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly service: ArtifactService,
     private readonly scope: TurnScope,
     private readonly bindings: Map<string, { enabled: boolean; permission: "allow" | "ask" | "deny" }>,
   ) {
-    this.definitions = artifactToolDefinitions.filter((item) => this.bindings.get(item.function.name)?.enabled === true);
+    this.definitions = artifactToolDefinitions.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => this.bindings.get(item.function.name)?.enabled === true);
   }
 
-  prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
+  /** 执行「prepare」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     const name = toolName(call.name);
-    if (!this.definitions.some((item) => item.function.name === name)) throw new Error(`当前 Agent 未启用 Artifact Tool: ${name}`);
+    if (!this.definitions.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.function.name === name)) throw new Error(`当前 Agent 未启用 Artifact Tool: ${name}`);
     const id = call.id ?? fallbackId;
     const permission = this.permission(name);
     if (name === "read_artifact") {
@@ -104,7 +109,8 @@ export class ArtifactToolProvider implements ToolRegistryPort {
     }, permission, []);
   }
 
-  async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
+  /** 执行「execute」主流程，传播取消与失败并在结束时清理临时资源。 */
+async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
     if (context.signal.aborted) throw new DOMException("已取消", "AbortError");
     if (call.name === "read_artifact") {
       const artifactId = String(call.arguments.artifact_id);
@@ -191,7 +197,8 @@ export class ArtifactToolProvider implements ToolRegistryPort {
     return this.publicationResult(call, artifact, publication);
   }
 
-  private publicationResult(
+  /** 执行「publicationResult」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private publicationResult(
     call: PreparedToolCall,
     artifact: Awaited<ReturnType<ArtifactService["get"]>>,
     publication: "created" | "replaced" | "versioned" | "rolled_back",
@@ -222,9 +229,11 @@ export class ArtifactToolProvider implements ToolRegistryPort {
     "Only this successfully published Artifact is deliverable and previewable. Return its artifact URI and server-assigned version to the user as the generated file result.");
   }
 
-  capabilitySnapshot(): RuntimeCapabilitySnapshot {
+  /** 生成「capabilitySnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
+capabilitySnapshot(): RuntimeCapabilitySnapshot {
     return {
-      tools: this.definitions.map((definition) => ({
+      tools: this.definitions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(definition) => ({
         id: `artifact:tool:${definition.function.name}`,
         modelName: definition.function.name,
         origin: "builtin",
@@ -235,16 +244,19 @@ export class ArtifactToolProvider implements ToolRegistryPort {
     };
   }
 
-  private permission(name: ArtifactToolName): PermissionMode {
+  /** 执行「permission」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private permission(name: ArtifactToolName): PermissionMode {
     return this.bindings.get(name)?.permission ?? "deny";
   }
 
-  private operationId(call: PreparedToolCall): string {
+  /** 由规范字段生成稳定的「operationId」标识，供索引精确定位且不保留原始大对象。 */
+private operationId(call: PreparedToolCall): string {
     const promptOperation = this.scope.operationId ?? this.scope.turnId;
     return createHash("sha256").update(`${promptOperation}\0${call.name}\0${canonicalJson(call.arguments)}`).digest("hex");
   }
 }
 
+/** 执行「prepared」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function prepared(
   id: string,
   name: ArtifactToolName,
@@ -257,6 +269,7 @@ function prepared(
   return { id, name, title, kind, arguments: args, permission, locations, dedupeKey: `${name}:${canonicalJson(args)}`, retry: "none" };
 }
 
+/** 执行「result」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function result(
   call: PreparedToolCall,
   rawOutput: unknown,
@@ -274,33 +287,39 @@ function result(
   };
 }
 
+/** 执行「definition」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function definition(name: ArtifactToolName, description: string, properties: Record<string, unknown>, required?: string[]): ModelToolDefinition {
   return { type: "function", function: { name, description, parameters: { type: "object", properties, ...(required ? { required } : {}), additionalProperties: false } } };
 }
 
+/** 根据已校验输入构建「toolName」结果，不额外持有调用方的大对象。 */
 function toolName(value: string): ArtifactToolName {
   if (ARTIFACT_TOOL_IDS.includes(value as ArtifactToolName)) return value as ArtifactToolName;
   throw new Error(`未知 Artifact Tool: ${value}`);
 }
 
+/** 执行「stringArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function stringArg(input: Record<string, unknown>, name: string): string {
   const value = input[name];
   if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${name} 必须是非空字符串`);
   return value;
 }
 
+/** 执行「optionalStringArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function optionalStringArg(input: Record<string, unknown>, name: string): string | undefined {
   const value = input[name];
   if (value === undefined) return undefined;
   return stringArg(input, name);
 }
 
+/** 执行「artifactTypeArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function artifactTypeArg(input: Record<string, unknown>): "file" | "html_bundle" {
   const value = input.artifact_type;
   if (value === "file" || value === "html_bundle") return value;
   throw new Error("artifact_type 必须是 file 或 html_bundle");
 }
 
+/** 执行「integerArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function integerArg(input: Record<string, unknown>, name: string, minimum: number, maximum: number): number {
   const value = input[name];
   if (!Number.isSafeInteger(value) || Number(value) < minimum || Number(value) > maximum) {
@@ -309,11 +328,13 @@ function integerArg(input: Record<string, unknown>, name: string, minimum: numbe
   return Number(value);
 }
 
+/** 校验并取得「requiredArtifactId」所需对象；缺失或归属不符时立即抛出明确错误。 */
 function requiredArtifactId(value: string | undefined): string {
   if (!value) throw new Error("artifact_id 必须是非空字符串");
   return value;
 }
 
+/** 执行「rollbackAvailable」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function rollbackAvailable(revisionCount: number): number {
   return Math.max(0, Math.min(
     PRODUCT_CONFIG.artifact.maxRetainedRevisions - 1,

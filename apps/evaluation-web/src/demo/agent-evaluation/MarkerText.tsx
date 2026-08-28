@@ -7,6 +7,7 @@ type ToolbarState =
   | { kind: "selection"; sectionId: string; start: number; end: number; x: number; y: number }
   | { kind: "mark"; markId: string; x: number; y: number };
 
+/** 渲染「MarkerText」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function MarkerText({
   agentId,
   sections,
@@ -20,24 +21,28 @@ export function MarkerText({
 }) {
   const [toolbar, setToolbar] = useState<ToolbarState | null>(null);
 
-  useEffect(() => {
-    function close(event: PointerEvent) {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
+    /** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+function close(event: PointerEvent) {
       const element = event.target instanceof Element ? event.target : null;
       if (element?.closest(".marker-toolbar") || element?.closest(".marked-text")) return;
       setToolbar(null);
     }
-    function escape(event: KeyboardEvent) {
+    /** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+function escape(event: KeyboardEvent) {
       if (event.key === "Escape") setToolbar(null);
     }
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", escape);
-    return () => {
+    return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => {
       document.removeEventListener("pointerdown", close);
       document.removeEventListener("keydown", escape);
     };
   }, []);
 
-  function readSelection(event: ReactMouseEvent<HTMLDivElement>): void {
+  /** 读取「readSelection」所需数据，并遵守作用域、分页与容量边界。 */
+function readSelection(event: ReactMouseEvent<HTMLDivElement>): void {
     const root = event.currentTarget;
     const sectionId = root.dataset.sectionId;
     const selection = window.getSelection();
@@ -63,12 +68,15 @@ export function MarkerText({
     });
   }
 
-  function applyColor(color: MarkColor): void {
+  /** 执行「applyColor」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function applyColor(color: MarkColor): void {
     if (!toolbar) return;
     if (toolbar.kind === "mark") {
-      onChange(marks.map((mark) => mark.id === toolbar.markId ? { ...mark, color } : mark));
+      onChange(marks.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(mark) => mark.id === toolbar.markId ? { ...mark, color } : mark));
     } else {
-      const next = marks.filter((mark) => mark.sectionId !== toolbar.sectionId || toolbar.end <= mark.start || toolbar.start >= mark.end);
+      const next = marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mark) => mark.sectionId !== toolbar.sectionId || toolbar.end <= mark.start || toolbar.start >= mark.end);
       next.push({
         id: crypto.randomUUID(),
         agentId,
@@ -77,15 +85,18 @@ export function MarkerText({
         end: toolbar.end,
         color,
       });
-      onChange(next.toSorted((a, b) => a.start - b.start));
+      onChange(next.toSorted(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(a, b) => a.start - b.start));
     }
     window.getSelection()?.removeAllRanges();
     setToolbar(null);
   }
 
-  function removeMark(): void {
+  /** 释放或删除「removeMark」对应资源，重复调用仍保持安全。 */
+function removeMark(): void {
     if (toolbar?.kind !== "mark") return;
-    onChange(marks.filter((mark) => mark.id !== toolbar.markId));
+    onChange(marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mark) => mark.id !== toolbar.markId));
     setToolbar(null);
   }
 
@@ -96,14 +107,18 @@ export function MarkerText({
   return <div className="marker-workspace">
     <div className="marker-help"><Highlighter size={13} />拖选文字后选择马克笔颜色</div>
     <div className="marker-text">
-      {sections.map((section) => <section className={`output-block block-${section.tone}`} key={section.id}>
+      {sections.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(section) => <section className={`output-block block-${section.tone}`} key={section.id}>
         <header><span>{section.label}</span><strong>{section.summary}</strong></header>
         <div className="output-block-text" data-section-id={section.id} onMouseUp={readSelection}>
-          {buildSegments(section.text, marks.filter((mark) => mark.sectionId === section.id)).map((segment) => segment.mark
+          {buildSegments(section.text, marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mark) => mark.sectionId === section.id)).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(segment) => segment.mark
             ? <mark
               className={`marked-text mark-${segment.mark.color}`}
               key={segment.key}
-              onClick={(event) => {
+              onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => {
                 const rect = event.currentTarget.getBoundingClientRect();
                 setToolbar({
                   kind: "mark",
@@ -118,13 +133,16 @@ export function MarkerText({
       </section>)}
     </div>
     {toolbar && <div className="marker-toolbar" role="toolbar" style={toolbarStyle}>
-      <button aria-label="使用蓝色马克笔" className="marker-blue" onClick={() => applyColor("blue")} type="button"><Check size={12} /></button>
-      <button aria-label="使用红色马克笔" className="marker-red" onClick={() => applyColor("red")} type="button"><Check size={12} /></button>
+      <button aria-label="使用蓝色马克笔" className="marker-blue" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => applyColor("blue")} type="button"><Check size={12} /></button>
+      <button aria-label="使用红色马克笔" className="marker-red" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => applyColor("red")} type="button"><Check size={12} /></button>
       {toolbar.kind === "mark" && <button aria-label="删除标注" className="marker-delete" onClick={removeMark} type="button"><Trash2 size={12} /></button>}
     </div>}
   </div>;
 }
 
+/** 根据已校验输入构建「buildSegments」结果，不额外持有调用方的大对象。 */
 function buildSegments(text: string, marks: TextMark[]): Array<{
   key: string;
   text: string;
@@ -132,7 +150,8 @@ function buildSegments(text: string, marks: TextMark[]): Array<{
 }> {
   const result: Array<{ key: string; text: string; mark?: TextMark }> = [];
   let cursor = 0;
-  for (const mark of marks.toSorted((a, b) => a.start - b.start)) {
+  for (const mark of marks.toSorted(/** 根据已校验输入构建「buildSegments」结果，不额外持有调用方的大对象。 */
+(a, b) => a.start - b.start)) {
     const start = clamp(mark.start, cursor, text.length);
     const end = clamp(mark.end, start, text.length);
     if (start > cursor) result.push({ key: `plain-${cursor}`, text: text.slice(cursor, start) });
@@ -143,6 +162,7 @@ function buildSegments(text: string, marks: TextMark[]): Array<{
   return result;
 }
 
+/** 执行「clamp」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }

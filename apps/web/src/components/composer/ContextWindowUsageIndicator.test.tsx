@@ -2,8 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ContextWindowUsageIndicator } from "./ContextWindowUsageIndicator.js";
 
-describe("ContextWindowUsageIndicator", () => {
-  it("把真实占用和预警等级投影成输入框旁的可访问圆环", () => {
+describe("ContextWindowUsageIndicator", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("把真实占用和预警等级投影成输入框旁的可访问圆环", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const html = renderToStaticMarkup(<ContextWindowUsageIndicator value={{
       afterTurnId: "turn-1",
       estimatedTokens: 80_000,

@@ -32,15 +32,20 @@ const REPOSITORY_URL = "https://github.com/greensock/gsap-skills";
 const RESOURCE_ORIGIN = "http://127.0.0.1:7342";
 const RESOURCE_URL = `${RESOURCE_ORIGIN}/skills/website-design-fast`;
 
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("Skill Installation", () => {
-  it("从当前用户消息提取仓库根地址或明确 Skill 目录地址", () => {
+describe("Skill Installation", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("从当前用户消息提取仓库根地址或明确 Skill 目录地址", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(explicitGitHubSkillUrls(`请设计网页 ${URL_A}`)).toEqual([URL_A]);
     expect(explicitGitHubSkillUrls(`请安装 ${REPOSITORY_URL}`)).toEqual([REPOSITORY_URL]);
     expect(explicitGitHubSkillUrls(`请安装 ${REPOSITORY_URL}.git/`)).toEqual([REPOSITORY_URL]);
     expect(explicitGitHubSkillUrls("请设计网页，帮我找个合适 Skill")).toEqual([]);
-    expect(() => parseGitHubSkillUrl("https://example.com/a/tree/main/skill")).toThrow("SKILL_SOURCE_NOT_ALLOWED");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseGitHubSkillUrl("https://example.com/a/tree/main/skill")).toThrow("SKILL_SOURCE_NOT_ALLOWED");
     expect(parseGitHubSkillUrl(REPOSITORY_URL)).toMatchObject({ kind: "repository", repository: REPOSITORY_URL });
     expect(parseGitHubSkillUrl(`${REPOSITORY_URL}.git`)).toMatchObject({
       kind: "repository",
@@ -51,14 +56,16 @@ describe("Skill Installation", () => {
     expect(parseGitHubSkillUrl(URL_A)).toMatchObject({ kind: "tree", source: { requestedRef: "main", subdirectory: "frontend-design" } });
   });
 
-  it("模糊提示不暴露 ensure tool，显式 URL 才暴露", async () => {
+  it("模糊提示不暴露 ensure tool，显式 URL 才暴露", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope } = await setup();
     expect(new EnsureAgentSkillsToolProvider(service, scope, "帮我设计网页").definitions).toHaveLength(0);
     expect(new EnsureAgentSkillsToolProvider(service, scope, `请安装 ${URL_A}`).definitions[0]?.function.name)
       .toBe("ensure_agent_skills");
   });
 
-  it("只从配置允许的静态资源源站提取并安装 Skill", async () => {
+  it("只从配置允许的静态资源源站提取并安装 Skill", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope, installer, agents } = await setup([], [RESOURCE_ORIGIN]);
     const provider = new EnsureAgentSkillsToolProvider(service, scope, `请安装 ${RESOURCE_URL}`);
     const parameters = provider.definitions[0]?.function.parameters as {
@@ -86,7 +93,8 @@ describe("Skill Installation", () => {
     expect((await agents.get(scope.agentId)).skills).toHaveLength(1);
   });
 
-  it("动态 Tool Schema 保留用户给出的原始 URL，模型继续传 source_urls 和 mode", async () => {
+  it("动态 Tool Schema 保留用户给出的原始 URL，模型继续传 source_urls 和 mode", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope } = await setup();
     const repositoryWithGit = `${REPOSITORY_URL}.git`;
     const provider = new EnsureAgentSkillsToolProvider(
@@ -107,7 +115,8 @@ describe("Skill Installation", () => {
     expect(parameters.required).toEqual(["source_urls", "mode"]);
   });
 
-  it("参数错误保留原始错误，并追加当前用户消息生成的正确参数提示", async () => {
+  it("参数错误保留原始错误，并追加当前用户消息生成的正确参数提示", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope } = await setup();
     const repositoryWithGit = `${REPOSITORY_URL}.git`;
     const allowed = [URL_A, repositoryWithGit];
@@ -152,7 +161,8 @@ describe("Skill Installation", () => {
     expect(JSON.stringify(raw)).not.toContain("suggested_arguments");
   });
 
-  it("下载失败保留原始领域错误，但不追加参数修改提示", async () => {
+  it("下载失败保留原始领域错误，但不追加参数修改提示", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope, discovery } = await setup();
     vi.mocked(discovery.discoverGitHub).mockRejectedValue(new Error("curl 28: Failed to connect"));
     const provider = new EnsureAgentSkillsToolProvider(service, scope, `请安装 ${URL_A}`);
@@ -188,7 +198,8 @@ describe("Skill Installation", () => {
     expect(model.argument_correction).toBeUndefined();
   });
 
-  it("只返回第一次命中 SKILL.md 深度的全部目录", async () => {
+  it("只返回第一次命中 SKILL.md 深度的全部目录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const root = await mkdtemp(join(tmpdir(), "mk-skill-depth-"));
     dirs.push(root);
     await Promise.all([
@@ -208,14 +219,16 @@ describe("Skill Installation", () => {
     ]);
   });
 
-  it("从 macOS 当前系统代理配置解析 Git HTTPS 代理，不写死端口", () => {
+  it("从 macOS 当前系统代理配置解析 Git HTTPS 代理，不写死端口", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(parseMacOSHttpsProxy("HTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : 7892\n"))
       .toBe("http://127.0.0.1:7892");
     expect(parseMacOSHttpsProxy("HTTPSEnable : 0\nHTTPSProxy : 127.0.0.1\nHTTPSPort : 9999\n"))
       .toBeUndefined();
   });
 
-  it("所有 Git 阶段共用非交互、代理和低速中止配置", () => {
+  it("所有 Git 阶段共用非交互、代理和低速中止配置", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(buildGitEnvironment({ PATH: "/usr/bin" }, "http://127.0.0.1:7892")).toMatchObject({
       PATH: "/usr/bin",
       HTTPS_PROXY: "http://127.0.0.1:7892",
@@ -226,7 +239,8 @@ describe("Skill Installation", () => {
     });
   });
 
-  it("Git 阶段超时会终止命令而不是永久 pending", async () => {
+  it("Git 阶段超时会终止命令而不是永久 pending", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const startedAt = Date.now();
     await expect(runGitCommand(
       ["-c", "alias.wait=!sleep 5", "wait"],
@@ -239,7 +253,8 @@ describe("Skill Installation", () => {
     expect(Date.now() - startedAt).toBeLessThan(2_000);
   });
 
-  it("Git 超时时按系统终止完整进程树", () => {
+  it("Git 超时时按系统终止完整进程树", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(processTreeTermination("win32", 321)).toEqual({
       kind: "taskkill",
       command: "taskkill",
@@ -251,7 +266,8 @@ describe("Skill Installation", () => {
     });
   });
 
-  it("从 Git tree 元数据找第一次命中 SKILL.md 的深度，不先 checkout 全仓库", () => {
+  it("从 Git tree 元数据找第一次命中 SKILL.md 的深度，不先 checkout 全仓库", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(discoverSkillDirectoriesFromGitTree([
       "README.md",
       "skills/core/SKILL.md",
@@ -266,15 +282,18 @@ describe("Skill Installation", () => {
     ], "skills/core")).toEqual(["skills/core"]);
   });
 
-  it("拒绝安装当前消息中未逐字出现的 URL", async () => {
+  it("拒绝安装当前消息中未逐字出现的 URL", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope } = await setup();
     await expect(service.ensureForTurn({ sourceUrls: [URL_A], mode: "ensure" }, scope, "请设计网页"))
       .rejects.toMatchObject({ code: "SKILL_SOURCE_NOT_USER_PROVIDED" });
   });
 
-  it("超过 Skill URL 上限时返回真实的资源限制，不报告格式错误", async () => {
+  it("超过 Skill URL 上限时返回真实的资源限制，不报告格式错误", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope } = await setup();
-    const urls = Array.from({ length: PRODUCT_CONFIG.skill.maxSourceUrlsPerJob + 1 }, (_, index) =>
+    const urls = Array.from({ length: PRODUCT_CONFIG.skill.maxSourceUrlsPerJob + 1 }, /** 构造「urls」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(_, index) =>
       `https://github.com/acme/skills/tree/main/skill-${index}`);
     const provider = new EnsureAgentSkillsToolProvider(service, scope, `请安装 ${urls.join(" ")}`);
     const prepared = provider.prepare({
@@ -297,7 +316,8 @@ describe("Skill Installation", () => {
     });
   });
 
-  it("下载 GitHub 失败时不向页面泄露本机命令和临时路径", async () => {
+  it("下载 GitHub 失败时不向页面泄露本机命令和临时路径", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope, installer } = await setup();
     vi.mocked(installer.install).mockRejectedValue(new Error("Command failed: git clone https://github.com/acme/skills.git /Users/demo/.install-secret/repo\ncurl 28: Failed to connect"));
     await expect(service.ensureForTurn({ sourceUrls: [URL_A], mode: "ensure" }, scope, `安装 ${URL_A}`))
@@ -308,7 +328,8 @@ describe("Skill Installation", () => {
       });
   });
 
-  it("仓库地址安装第一次发现 SKILL.md 深度的全部 Skills，不继续深入", async () => {
+  it("仓库地址安装第一次发现 SKILL.md 深度的全部 Skills，不继续深入", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope, discovery, installer, agents } = await setup(["install-core", "install-timeline"]);
     vi.mocked(discovery.discoverGitHub).mockResolvedValueOnce([
       parseGitHubSkillUrl(`${REPOSITORY_URL}/tree/main/skills/gsap-core`).source,
@@ -326,7 +347,8 @@ describe("Skill Installation", () => {
     expect((await agents.get(scope.agentId)).skills).toHaveLength(2);
   });
 
-  it("ensure 复用同一来源且不调用安装器，然后原子绑定 Agent", async () => {
+  it("ensure 复用同一来源且不调用安装器，然后原子绑定 Agent", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope, repository, installer, agents } = await setup(["install-a"]);
     const now = new Date().toISOString();
     await repository.putInstallation({
@@ -348,7 +370,8 @@ describe("Skill Installation", () => {
     expect((await agents.get(scope.agentId)).skills).toEqual([{ skillInstallationId: "install-a", enabled: true }]);
   });
 
-  it("ensure 工具成功后只返回安装事实，不生成另一份 Skill 调用清单", async () => {
+  it("ensure 工具成功后只返回安装事实，不生成另一份 Skill 调用清单", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, scope, repository } = await setup(["install-a"]);
     const now = new Date().toISOString();
     await repository.putInstallation({
@@ -390,7 +413,8 @@ describe("Skill Installation", () => {
     expect(model.instruction).not.toContain("activate_skill");
   });
 
-  it("可删除已经失去目录的旧 GitHub 安装记录", async () => {
+  it("可删除已经失去目录的旧 GitHub 安装记录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, repository, installer } = await setup();
     const now = new Date().toISOString();
     await repository.putInstallation({
@@ -411,7 +435,8 @@ describe("Skill Installation", () => {
     await expect(service.get("legacy-install")).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("启动时清理目录已不存在的旧 GitHub 安装记录", async () => {
+  it("启动时清理目录已不存在的旧 GitHub 安装记录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, repository } = await setup();
     const now = new Date().toISOString();
     await repository.putInstallation({
@@ -431,7 +456,8 @@ describe("Skill Installation", () => {
     expect(await repository.getInstallation("stale-install")).toBeUndefined();
   });
 
-  it("启动时把上一个 Remote 遗留的 Skill 任务收敛为 interrupted", async () => {
+  it("启动时把上一个 Remote 遗留的 Skill 任务收敛为 interrupted", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, repository } = await setup();
     const now = new Date().toISOString();
     await repository.putJob({
@@ -446,17 +472,62 @@ describe("Skill Installation", () => {
       items: [{ state: "failed", error: { code: "SKILL_JOB_INTERRUPTED", retryable: true } }],
     });
   });
+
+  it("每个 owner 只保留最近 100 个终态任务且不裁剪活动任务", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-skill-job-retention-"));
+    dirs.push(dir);
+    const repository = new SkillInstallationRepository(join(dir, "installations.json"), join(dir, "jobs.json"));
+    for (let index = 0; index < 101; index += 1) {
+      const timestamp = new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString();
+      await repository.putJob({
+        schemaVersion: 1,
+        jobId: `terminal-${index}`,
+        ownerId: "local-admin",
+        origin: { kind: "manual" },
+        state: "succeeded",
+        items: [],
+        bindToAgentOnComplete: false,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        completedAt: timestamp,
+      });
+    }
+    await repository.putJob({
+      schemaVersion: 1,
+      jobId: "active",
+      ownerId: "local-admin",
+      origin: { kind: "manual" },
+      state: "running",
+      items: [],
+      bindToAgentOnComplete: false,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    });
+
+    const jobs = await repository.listJobs();
+    expect(jobs.filter(/** 构造「toHaveLength」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(job) => job.state !== "running" && job.state !== "queued")).toHaveLength(100);
+    expect(jobs.some(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(job) => job.jobId === "terminal-0")).toBe(false);
+    expect(jobs.some(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(job) => job.jobId === "active")).toBe(true);
+  });
 });
 
+/** 构造「setup」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function setup(readyIds: string[] = [], resourceOrigins: string[] = []) {
   const dir = await mkdtemp(join(tmpdir(), "mk-skill-install-"));
   dirs.push(dir);
   const repository = new SkillInstallationRepository(join(dir, "installations.json"), join(dir, "jobs.json"));
   let service: SkillInstallationService | undefined;
   const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
-    builtinToolIds: () => [],
-    readySkillInstallationIds: () => [...new Set([...readyIds, ...(service?.readyInstallationIdsSync() ?? [])])],
-    mcpCapabilities: () => [],
+    builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [],
+    readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [...new Set([...readyIds, ...(service?.readyInstallationIdsSync() ?? [])])],
+    mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [],
   });
   const agent = await agents.create({
     name: "测试 Agent",
@@ -467,7 +538,8 @@ async function setup(readyIds: string[] = [], resourceOrigins: string[] = []) {
   const registry = new SkillRegistry([], new SkillLockStore(join(dir, "lock.json")));
   await registry.initialize();
   const discovery: SkillDiscoveryPort = {
-    discoverGitHub: vi.fn(async (source) => [source]),
+    discoverGitHub: vi.fn(/** 构造「discoverGitHub」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (source) => [source]),
   };
   const installer: SkillInstallerPort = {
     install: vi.fn(),
@@ -493,6 +565,7 @@ async function setup(readyIds: string[] = [], resourceOrigins: string[] = []) {
   return { service, scope, repository, discovery, installer, agents };
 }
 
+/** 构造「installed」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function installed(name: string, subdir: string) {
   return {
     name, description: `${name} test`, rootPath: `/tmp/${name}`, contentHash: `${name}-hash`,
@@ -501,6 +574,7 @@ function installed(name: string, subdir: string) {
   };
 }
 
+/** 构造「installedResource」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function installedResource(name: string) {
   return {
     name, description: `${name} test`, rootPath: `/tmp/${name}`, contentHash: "resource-hash",
@@ -510,11 +584,16 @@ function installedResource(name: string) {
   };
 }
 
+/** 构造「observer」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function observer(): ToolObserver {
   return {
-    toolStart: vi.fn(async () => undefined),
-    toolFinish: vi.fn(async () => undefined),
-    requestPermission: vi.fn(async () => true),
-    askUser: vi.fn(async () => ""),
+    toolStart: vi.fn(/** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => undefined),
+    toolFinish: vi.fn(/** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => undefined),
+    requestPermission: vi.fn(/** 构造「requestPermission」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => true),
+    askUser: vi.fn(/** 构造「askUser」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => ""),
   };
 }

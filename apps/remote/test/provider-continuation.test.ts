@@ -19,8 +19,10 @@ const student: ModelStudent = {
   generationDefaults: {},
 };
 
-describe("ProviderOpaqueContinuation v2", () => {
-  it("保存协议无关 JSON payload、精确字节数和去重关联元数据", () => {
+describe("ProviderOpaqueContinuation v2", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保存协议无关 JSON payload、精确字节数和去重关联元数据", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const continuation = createProviderOpaqueContinuation({
       modelStudentId: student.id,
       providerKind: student.provider.kind,
@@ -41,7 +43,8 @@ describe("ProviderOpaqueContinuation v2", () => {
     );
   });
 
-  it("关联信息可在投影边界补齐，但 payload 与字节数保持不变", () => {
+  it("关联信息可在投影边界补齐，但 payload 与字节数保持不变", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const original = createProviderOpaqueContinuation({
       modelStudentId: student.id,
       providerKind: student.provider.kind,
@@ -63,7 +66,8 @@ describe("ProviderOpaqueContinuation v2", () => {
     });
   });
 
-  it("消费绑定同时校验 ModelStudent、provider kind、protocol 与 model", () => {
+  it("消费绑定同时校验 ModelStudent、provider kind、protocol 与 model", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const continuation = createProviderOpaqueContinuation({
       modelStudentId: student.id,
       providerKind: student.provider.kind,
@@ -72,25 +76,30 @@ describe("ProviderOpaqueContinuation v2", () => {
       format: "openai-responses-output-v1",
       payload: { items: [] },
     });
-    expect(() => assertContinuationTargetsStudent(
+    expect(/** 构造「not」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => assertContinuationTargetsStudent(
       continuation,
       student,
       "openai_responses",
     )).not.toThrow();
-    expect(() => assertContinuationTargetsStudent(
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => assertContinuationTargetsStudent(
       continuation,
       { ...student, id: "student-b", provider: { ...student.provider, baseUrl: "https://endpoint-b.example/v1" } },
       "openai_responses",
     )).toThrow("不匹配");
-    expect(() => assertContinuationTargetsStudent(
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => assertContinuationTargetsStudent(
       continuation,
       student,
       "openai_chat_completions",
     )).toThrow("不匹配");
   });
 
-  it("普通运行时读取拒绝无身份绑定的旧 v1，且拒绝伪造 payload 字节数", () => {
-    expect(() => readProviderOpaqueContinuation({
+  it("普通运行时读取拒绝无身份绑定的旧 v1，且拒绝伪造 payload 字节数", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => readProviderOpaqueContinuation({
       schemaVersion: 1,
       providerKind: "openai-compatible",
       model: "same-model",
@@ -106,7 +115,8 @@ describe("ProviderOpaqueContinuation v2", () => {
       format: "openai-responses-output-v1",
       payload: { items: [] },
     });
-    expect(() => readProviderOpaqueContinuation({
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => readProviderOpaqueContinuation({
       ...valid,
       payloadByteLength: valid.payloadByteLength + 1,
     })).toThrow("payloadByteLength");

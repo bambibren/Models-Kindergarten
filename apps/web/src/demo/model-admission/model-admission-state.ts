@@ -17,8 +17,10 @@ type StoredDemoModelStudent = Omit<DemoModelStudent, "capabilities"> & {
   capabilities: StoredDemoModelCapabilities;
 };
 
+/** 描述「ModelAdmissionProviderId」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelAdmissionProviderId = "ollama" | "siliconflow" | "custom_responses";
 
+/** 描述「ModelAdmissionDraft」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelAdmissionDraft {
   providerId: ModelAdmissionProviderId;
   connectionName: string;
@@ -28,13 +30,16 @@ export interface ModelAdmissionDraft {
   modelId: string;
 }
 
+/** 描述「ModelAdmissionField」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelAdmissionField = "connectionName" | "baseUrl" | "apiKey" | "modelId";
 
+/** 描述「ModelAdmissionValidation」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelAdmissionValidation {
   valid: boolean;
   errors: Partial<Record<ModelAdmissionField, string>>;
 }
 
+/** 描述「DiscoveredDemoModel」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface DiscoveredDemoModel {
   id: string;
   name: string;
@@ -42,10 +47,12 @@ export interface DiscoveredDemoModel {
   capabilities: DemoModelCapabilities;
 }
 
+/** 描述「ModelAdmissionTestResult」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelAdmissionTestResult =
   | { ok: true; models: DiscoveredDemoModel[] }
   | { ok: false; error: string };
 
+/** 描述「ModelAdmissionStorage」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelAdmissionStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -136,6 +143,7 @@ const siliconFlowModels: DiscoveredDemoModel[] = [
   },
 ];
 
+/** 根据已校验输入构建「createAdmissionDraft」结果，不额外持有调用方的大对象。 */
 export function createAdmissionDraft(providerId: ModelAdmissionProviderId = "ollama"): ModelAdmissionDraft {
   return {
     providerId,
@@ -156,6 +164,7 @@ export function switchAdmissionProvider(
   return createAdmissionDraft(providerId);
 }
 
+/** 更新「updateAdmissionDraft」对应状态，并保持写入顺序、原子性与容量约束。 */
 export function updateAdmissionDraft(
   draft: ModelAdmissionDraft,
   patch: Partial<Omit<ModelAdmissionDraft, "providerId">>,
@@ -218,6 +227,7 @@ export function simulateAdmissionTest(draft: ModelAdmissionDraft): ModelAdmissio
   };
 }
 
+/** 根据已校验输入构建「buildDemoModelStudent」结果，不额外持有调用方的大对象。 */
 export function buildDemoModelStudent(
   draft: ModelAdmissionDraft,
   model: DiscoveredDemoModel,
@@ -241,6 +251,7 @@ export function buildDemoModelStudent(
   };
 }
 
+/** 读取「loadSavedModelStudents」所需数据，并遵守作用域、分页与容量边界。 */
 export function loadSavedModelStudents(storage: Pick<ModelAdmissionStorage, "getItem">): DemoModelStudent[] {
   const raw = storage.getItem(demoModelStudentStorageKey);
   if (!raw) return [];
@@ -255,23 +266,30 @@ export function loadSavedModelStudents(storage: Pick<ModelAdmissionStorage, "get
 /** 只序列化 ModelStudent 白名单字段；API Key 只存在于页面内存中的 Draft。 */
 export function saveModelStudent(storage: ModelAdmissionStorage, student: DemoModelStudent): DemoModelStudent[] {
   const safeStudent = sanitizeStudent(student);
-  const next = [safeStudent, ...loadSavedModelStudents(storage).filter((candidate) => candidate.id !== safeStudent.id)];
+  const next = [safeStudent, ...loadSavedModelStudents(storage).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.id !== safeStudent.id)];
   storage.setItem(demoModelStudentStorageKey, JSON.stringify(next));
   storage.setItem(demoSelectedModelStudentStorageKey, safeStudent.id);
   return next;
 }
 
+/** 汇总「mergeModelStudents」对应指标，保持缺失字段语义且不重复计算同一来源。 */
 export function mergeModelStudents(saved: DemoModelStudent[], builtIns: DemoModelStudent[]): DemoModelStudent[] {
-  const savedIds = new Set(saved.map((student) => student.id));
-  return [...saved, ...builtIns.filter((student) => !savedIds.has(student.id))];
+  const savedIds = new Set(saved.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(student) => student.id));
+  return [...saved, ...builtIns.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(student) => !savedIds.has(student.id))];
 }
 
+/** 执行「providerOption」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function providerOption(providerId: ModelAdmissionProviderId) {
-  const option = modelAdmissionProviderOptions.find((candidate) => candidate.id === providerId);
+  const option = modelAdmissionProviderOptions.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.id === providerId);
   if (!option) throw new Error(`不支持的 Provider：${providerId}`);
   return option;
 }
 
+/** 校验并规范化「parseUrl」输入，非法数据直接返回明确错误。 */
 function parseUrl(value: string): URL | null {
   try {
     return new URL(value.trim());
@@ -280,18 +298,23 @@ function parseUrl(value: string): URL | null {
   }
 }
 
+/** 校验并规范化「normalizeBaseUrl」输入，非法数据直接返回明确错误。 */
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
 
+/** 执行「maskCredential」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function maskCredential(apiKey: string): string {
   return `•••• ${apiKey.trim().slice(-4).toUpperCase()}`;
 }
 
+/** 执行「cloneModels」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function cloneModels(models: DiscoveredDemoModel[]): DiscoveredDemoModel[] {
-  return models.map((model) => ({ ...model, capabilities: cloneCapabilities(model.capabilities) }));
+  return models.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(model) => ({ ...model, capabilities: cloneCapabilities(model.capabilities) }));
 }
 
+/** 执行「sanitizeStudent」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function sanitizeStudent(student: StoredDemoModelStudent): DemoModelStudent {
   return {
     id: student.id,
@@ -307,6 +330,7 @@ function sanitizeStudent(student: StoredDemoModelStudent): DemoModelStudent {
   };
 }
 
+/** 判断「isDemoModelStudent」对应条件，只返回判定结果且不修改输入状态。 */
 function isDemoModelStudent(value: unknown): value is StoredDemoModelStudent {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<StoredDemoModelStudent>;
@@ -322,10 +346,12 @@ function isDemoModelStudent(value: unknown): value is StoredDemoModelStudent {
     && (candidate.state === "在读" || candidate.state === "旁听" || candidate.state === "待评测" || candidate.state === "不可用");
 }
 
+/** 判断「isProtocol」对应条件，只返回判定结果且不修改输入状态。 */
 function isProtocol(value: unknown): value is DemoProviderProtocol {
   return value === "ollama_native" || value === "openai_chat_completions" || value === "openai_responses";
 }
 
+/** 判断「isCapabilities」对应条件，只返回判定结果且不修改输入状态。 */
 function isCapabilities(value: unknown): value is StoredDemoModelCapabilities {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<StoredDemoModelCapabilities>;
@@ -336,10 +362,12 @@ function isCapabilities(value: unknown): value is StoredDemoModelCapabilities {
     && (candidate.reasoningControl === undefined || isReasoningCapability(candidate.reasoningControl));
 }
 
+/** 判断「isCapabilityState」对应条件，只返回判定结果且不修改输入状态。 */
 function isCapabilityState(value: unknown): value is DemoModelCapabilities["streaming"] {
   return value === "supported" || value === "unsupported" || value === "unverified";
 }
 
+/** 校验并规范化「normalizeCapabilities」输入，非法数据直接返回明确错误。 */
 function normalizeCapabilities(capabilities: StoredDemoModelCapabilities): DemoModelCapabilities {
   return {
     streaming: capabilities.streaming,
@@ -352,6 +380,7 @@ function normalizeCapabilities(capabilities: StoredDemoModelCapabilities): DemoM
   };
 }
 
+/** 执行「cloneCapabilities」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function cloneCapabilities(capabilities: DemoModelCapabilities): DemoModelCapabilities {
   return {
     ...capabilities,
@@ -359,6 +388,7 @@ function cloneCapabilities(capabilities: DemoModelCapabilities): DemoModelCapabi
   };
 }
 
+/** 执行「legacyReasoningCapability」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function legacyReasoningCapability(): ModelReasoningCapability {
   return {
     schemaVersion: 1,
@@ -369,6 +399,7 @@ function legacyReasoningCapability(): ModelReasoningCapability {
   };
 }
 
+/** 判断「isReasoningCapability」对应条件，只返回判定结果且不修改输入状态。 */
 function isReasoningCapability(value: unknown): boolean {
   try {
     readModelReasoningCapability(value);
@@ -378,6 +409,7 @@ function isReasoningCapability(value: unknown): boolean {
   }
 }
 
+/** 执行「slug」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "model";
 }

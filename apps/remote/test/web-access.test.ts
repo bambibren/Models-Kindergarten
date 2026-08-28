@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebAccess } from "../src/tools/web-access.js";
 
-afterEach(() => {
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+() => {
   vi.unstubAllGlobals();
 });
 
-describe("Exa Web Search", () => {
-  it("通过 Remote MCP JSON-RPC 搜索并解析 SSE 中文结果", async () => {
-    const fetchMock = vi.fn(async (_input: URL | RequestInfo, _init?: RequestInit) => new Response(exaSse([
+describe("Exa Web Search", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("通过 Remote MCP JSON-RPC 搜索并解析 SSE 中文结果", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const fetchMock = vi.fn(/** 构造「fetchMock」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (_input: URL | RequestInfo, _init?: RequestInit) => new Response(exaSse([
       [
         "旺仔QQ糖（软质糖果）",
         "https://baike.baidu.com/item/qq",
@@ -64,7 +68,8 @@ describe("Exa Web Search", () => {
     });
   });
 
-  it("兼容 Exa 的普通 JSON 响应并按 URL 去重", async () => {
+  it("兼容 Exa 的普通 JSON 响应并按 URL 去重", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const payload = {
       jsonrpc: "2.0",
       id: 1,
@@ -78,7 +83,8 @@ describe("Exa Web Search", () => {
         }],
       },
     };
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(payload), {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(JSON.stringify(payload), {
       status: 200,
       headers: { "content-type": "application/json" },
     })));
@@ -94,8 +100,10 @@ describe("Exa Web Search", () => {
     }]);
   });
 
-  it("把 JSON-RPC 上游错误暴露为可重试工具错误", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+  it("把 JSON-RPC 上游错误暴露为可重试工具错误", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(
       `event: message\ndata: ${JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
@@ -116,8 +124,10 @@ describe("Exa Web Search", () => {
     });
   });
 
-  it("拒绝把无法识别的成功响应伪装成搜索成功", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("not-json", { status: 200 })));
+  it("拒绝把无法识别的成功响应伪装成搜索成功", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response("not-json", { status: 200 })));
 
     await expect(new WebAccess("https://8.8.8.8/mcp").search(
       "broken response",
@@ -131,8 +141,10 @@ describe("Exa Web Search", () => {
   });
 });
 
+/** 构造「exaSse」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function exaSse(items: Array<[title: string, url: string, highlights: string]>): string {
-  const text = items.map(([title, url, highlights]) => [
+  const text = items.map(/** 构造「join」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+([title, url, highlights]) => [
     `Title: ${title}`,
     `URL: ${url}`,
     "Published: N/A",

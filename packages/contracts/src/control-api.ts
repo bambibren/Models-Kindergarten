@@ -1,9 +1,11 @@
+/** 描述「LocalPrincipal」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface LocalPrincipal {
   schemaVersion: 1;
   principalId: "local-admin";
   kind: "local_admin";
 }
 
+/** 描述「ModelStudentSummary」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelStudentSummary {
   schemaVersion: 1;
   modelStudentId: string;
@@ -11,7 +13,7 @@ export interface ModelStudentSummary {
   sizeClass: "small" | "large";
   providerKind: string;
   model: string;
-  status: "ready" | "unavailable" | "unknown";
+  status: "ready" | "capacity_blocked" | "unavailable" | "unknown";
   supports: {
     streaming: boolean;
     toolCalls: boolean;
@@ -26,6 +28,7 @@ export interface ModelStudentSummary {
   deletable?: boolean;
 }
 
+/** 描述「OperationProjectionMeta」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface OperationProjectionMeta {
   schemaVersion: 1;
   kind: "skill_install";
@@ -34,6 +37,7 @@ export interface OperationProjectionMeta {
   itemStates?: Array<{ itemId: string; label: string; state: string }>;
 }
 
+/** 描述「FileReferencesMeta」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface FileReferencesMeta {
   schemaVersion: 1;
   fileReferenceIds: string[];

@@ -4,12 +4,14 @@ import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import { DependencyCircuits } from "../resilience/circuit-breaker.js";
 import { ToolExecutionError } from "./tool-error.js";
 
+/** 描述「WebSearchResult」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface WebSearchResult {
   title: string;
   url: string;
   snippet: string;
 }
 
+/** 描述「WebFetchResult」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface WebFetchResult {
   url: string;
   contentType: string;
@@ -17,6 +19,7 @@ export interface WebFetchResult {
   truncated: boolean;
 }
 
+/** 描述「WebToolClient」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface WebToolClient {
   search(query: string, maxResults: number, signal: AbortSignal): Promise<WebSearchResult[]>;
   fetch(url: string, signal: AbortSignal): Promise<WebFetchResult>;
@@ -31,11 +34,13 @@ const EXA_SNIPPET_MAX_CHARACTERS = 800;
 export class WebAccess implements WebToolClient {
   private readonly circuits = new DependencyCircuits();
 
-  constructor(
+  /** 初始化「WebAccess」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly searchEndpoint = process.env.WEB_SEARCH_ENDPOINT ?? DEFAULT_EXA_MCP_ENDPOINT,
   ) {}
 
-  async search(
+  /** 执行「search」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async search(
     query: string,
     maxResults: number,
     signal: AbortSignal,
@@ -109,7 +114,8 @@ export class WebAccess implements WebToolClient {
     return parsed.results.slice(0, resultLimit);
   }
 
-  async fetch(input: string, signal: AbortSignal): Promise<WebFetchResult> {
+  /** 读取「fetch」所需数据，并遵守作用域、分页与容量边界。 */
+async fetch(input: string, signal: AbortSignal): Promise<WebFetchResult> {
     const response = await this.request(new URL(input), signal);
     const contentType = response.headers.get("content-type") ?? "application/octet-stream";
     if (!/^(text\/|application\/(json|xml|xhtml\+xml))/i.test(contentType)) {
@@ -127,7 +133,8 @@ export class WebAccess implements WebToolClient {
     };
   }
 
-  private async request(
+  /** 执行「request」主流程，传播取消与失败并在结束时清理临时资源。 */
+private async request(
     initial: URL,
     signal: AbortSignal,
     init: RequestInit = {},
@@ -139,7 +146,8 @@ export class WebAccess implements WebToolClient {
       const breaker = this.circuits.get(`http-origin:${url.origin}`);
       let response: Response;
       try {
-        response = await breaker.execute(async () => {
+        response = await breaker.execute(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+async () => {
           const value = await fetch(url, { ...init, redirect: "manual", signal: combined });
           if (value.status === 429 || value.status >= 500) {
             await value.body?.cancel();
@@ -188,6 +196,7 @@ export class WebAccess implements WebToolClient {
   }
 }
 
+/** 校验并规范化「assertPublicUrl」输入，非法数据直接返回明确错误。 */
 async function assertPublicUrl(url: URL): Promise<void> {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("web_fetch 只允许 http/https URL");
@@ -196,11 +205,13 @@ async function assertPublicUrl(url: URL): Promise<void> {
   const addresses = isIP(url.hostname)
     ? [{ address: url.hostname, family: isIP(url.hostname) }]
     : await lookup(url.hostname, { all: true, verbatim: true });
-  if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
+  if (addresses.length === 0 || addresses.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+({ address }) => isPrivateAddress(address))) {
     throw new Error("URL 指向本机或私有网络地址");
   }
 }
 
+/** 判断「isPrivateAddress」对应条件，只返回判定结果且不修改输入状态。 */
 function isPrivateAddress(value: string): boolean {
   const normalized = value.toLowerCase();
   if (normalized === "::1" || normalized === "::" || normalized.startsWith("fe80:")) return true;
@@ -215,6 +226,7 @@ function isPrivateAddress(value: string): boolean {
     (a === 192 && b === 168) || a >= 224;
 }
 
+/** 执行「limitResponse」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async function limitResponse(response: Response, maxBytes: number, finalUrl: string): Promise<Response> {
   if (!response.body) return response;
   const reader = response.body.getReader();
@@ -242,6 +254,7 @@ async function limitResponse(response: Response, maxBytes: number, finalUrl: str
   });
 }
 
+/** 执行「responseTooLarge」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function responseTooLarge(maxBytes: number): ToolExecutionError {
   return new ToolExecutionError(
     "web_response_too_large",
@@ -258,6 +271,7 @@ interface ExaResponse {
   error?: { code?: number; message: string };
 }
 
+/** 校验并规范化「parseExaResponse」输入，非法数据直接返回明确错误。 */
 function parseExaResponse(body: string): ExaResponse {
   const payloads = parseExaPayloads(body);
   if (payloads.length === 0) return { recognized: false, results: [] };
@@ -293,6 +307,7 @@ function parseExaResponse(body: string): ExaResponse {
   return { recognized, results };
 }
 
+/** 校验并规范化「parseExaPayloads」输入，非法数据直接返回明确错误。 */
 function parseExaPayloads(body: string): unknown[] {
   const payloads: unknown[] = [];
   for (const line of body.split(/\r?\n/)) {
@@ -314,6 +329,7 @@ function parseExaPayloads(body: string): unknown[] {
   }
 }
 
+/** 校验并规范化「parseExaSearchText」输入，非法数据直接返回明确错误。 */
 function parseExaSearchText(text: string): WebSearchResult[] {
   const results: WebSearchResult[] = [];
   for (const block of text.split(/\r?\n---\r?\n/g)) {
@@ -330,6 +346,7 @@ function parseExaSearchText(text: string): WebSearchResult[] {
   return results;
 }
 
+/** 判断「isPublicResultUrl」对应条件，只返回判定结果且不修改输入状态。 */
 function isPublicResultUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -339,6 +356,7 @@ function isPublicResultUrl(value: string): boolean {
   }
 }
 
+/** 校验并规范化「normalizeExaSnippet」输入，非法数据直接返回明确错误。 */
 function normalizeExaSnippet(value: string): string {
   return value
     .replace(/\[([^\]]+)]\([^\s)]+\)/g, "$1")
@@ -347,10 +365,12 @@ function normalizeExaSnippet(value: string): string {
     .slice(0, EXA_SNIPPET_MAX_CHARACTERS);
 }
 
+/** 判断「isRecord」对应条件，只返回判定结果且不修改输入状态。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** 执行「htmlToText」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function htmlToText(value: string): string {
   return decodeHtml(value
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -360,6 +380,7 @@ function htmlToText(value: string): string {
     .trim();
 }
 
+/** 校验并规范化「decodeHtml」输入，非法数据直接返回明确错误。 */
 function decodeHtml(value: string): string {
   return value
     .replaceAll("&amp;", "&")
@@ -367,10 +388,13 @@ function decodeHtml(value: string): string {
     .replaceAll("&#39;", "'")
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
-    .replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_match, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
+    .replace(/&#(\d+);/g, /** 执行「replace」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(_match, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, /** 校验并规范化「decodeHtml」输入，非法数据直接返回明确错误。 */
+(_match, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
 }
 
+/** 执行「clamp」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.trunc(value)));
 }

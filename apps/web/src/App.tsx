@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import type * as acp from "@agentclientprotocol/sdk";
-import type { ArtifactMentionInput, ModelReasoningCapability, ReasoningProfile, TurnState } from "@kindergarten/contracts";
+import { PRODUCT_CONFIG, type ArtifactMentionInput, type ModelReasoningCapability, type ReasoningProfile, type TurnState } from "@kindergarten/contracts";
 import { AcpWebClient } from "./acp/acp-client.js";
 import { ChatViewport } from "./components/chat/ChatViewport.js";
 import { Composer } from "./components/composer/Composer.js";
@@ -25,15 +25,21 @@ import { isMissingAgentError, projectSessionAvailability, type SessionAgentAvail
 import { sessionResumeMeta } from "./chat/chat-resume.js";
 import { clampArtifactWidth, defaultArtifactWidth } from "./session/artifact-split-pane.js";
 import { selectContextWindowUsage } from "./chat/context-window-usage.js";
+import { projectSessionTurnPage } from "./chat/session-history-page.js";
 
 const ACP_URL = import.meta.env.VITE_ACP_URL ?? "ws://127.0.0.1:7331/acp";
 const REMOTE_CWD = "/workspace";
 
+/** 渲染「App」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export default function App() {
-  const connection = useAppStore((state) => state.connection);
-  const sessions = useAppStore((state) => state.sessions);
-  const chat = useAppStore((state) => state.chat);
-  const promptTurn = useAppStore((state) => state.promptTurn);
+  const connection = useAppStore(/** 执行「connection」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(state) => state.connection);
+  const sessions = useAppStore(/** 执行「sessions」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(state) => state.sessions);
+  const chat = useAppStore(/** 执行「chat」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(state) => state.chat);
+  const promptTurn = useAppStore(/** 执行「promptTurn」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(state) => state.promptTurn);
   const contextWindowUsage = selectContextWindowUsage(chat.historyChatEntries, chat.streamingChatEntries);
   const clientRef = useRef<AcpWebClient | null>(null);
   const reconnectRef = useRef<(() => Promise<void>) | null>(null);
@@ -44,12 +50,19 @@ export default function App() {
   const [publishedArtifactId, setPublishedArtifactId] = useState<string | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(520);
   const [narrowView, setNarrowView] = useState<"artifact" | "chat">("artifact");
+  const [historyPaging, setHistoryPaging] = useState<{
+    loading: boolean;
+    hasMore: boolean;
+    nextBeforeTurnId?: string;
+  }>({ loading: false, hasMore: false });
   const workspaceRef = useRef<HTMLDivElement>(null);
   const artifactWidthRef = useRef(artifactWidth);
   const artifactDragRef = useRef<{ pointerId: number; workspaceLeft: number; workspaceWidth: number } | null>(null);
 
-  useEffect(() => {
-    const open = (event: Event) => {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
+    const open = /** 执行「open」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(event: Event) => {
       const id = (event as CustomEvent<unknown>).detail;
       if (typeof id !== "string" || id.length === 0) return;
       const containerWidth = workspaceRef.current?.clientWidth;
@@ -62,18 +75,21 @@ export default function App() {
       setNarrowView("artifact");
     };
     window.addEventListener("mk-open-artifact", open);
-    return () => window.removeEventListener("mk-open-artifact", open);
+    return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => window.removeEventListener("mk-open-artifact", open);
   }, []);
 
-  useEffect(() => {
-    const stop = (event: PointerEvent) => {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
+    const stop = /** 执行「stop」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(event: PointerEvent) => {
       const drag = artifactDragRef.current;
       if (!drag || event.pointerId !== drag.pointerId) return;
       artifactDragRef.current = null;
       document.body.classList.remove("artifact-resizing");
       setArtifactWidth(artifactWidthRef.current);
     };
-    const move = (event: PointerEvent) => {
+    const move = /** 执行「move」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(event: PointerEvent) => {
       const drag = artifactDragRef.current;
       const workspace = workspaceRef.current;
       if (!drag || !workspace || event.pointerId !== drag.pointerId) return;
@@ -84,7 +100,7 @@ export default function App() {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
     window.addEventListener("pointercancel", stop);
-    return () => {
+    return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
@@ -93,13 +109,15 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
     let disposed = false;
     let current: AcpWebClient | null = null;
     let opening = false;
     const store = useAppStore.getState;
 
-    const connect = async (mode: "initial" | "resume"): Promise<void> => {
+    const connect = /** 执行「connect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async (mode: "initial" | "resume"): Promise<void> => {
       if (opening || disposed) return;
       opening = true;
       store().setConnection({ phase: "connecting" });
@@ -107,25 +125,30 @@ export default function App() {
       try {
         let client: AcpWebClient | null = null;
         client = await AcpWebClient.open(ACP_URL, {
-          onUpdate: (value) => {
+          onUpdate: /** 处理「onUpdate」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => {
             store().dispatchChat({ type: "acp/update", value });
             if (value.sessionId === store().chat.sessionId && value.update.sessionUpdate === "config_option_update") {
               setConfigOptions(value.update.configOptions);
             }
           },
-          onContextSummary: (value) => store().dispatchChat({
+          onContextSummary: /** 处理「onContextSummary」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => store().dispatchChat({
             type: "context/summary",
             value,
           }),
-          onTokenUsage: (value) => store().dispatchChat({
+          onTokenUsage: /** 处理「onTokenUsage」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => store().dispatchChat({
             type: "token/usage",
             value,
           }),
-          onContextWindowUsage: (value) => store().dispatchChat({
+          onContextWindowUsage: /** 处理「onContextWindowUsage」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => store().dispatchChat({
             type: "context-window/usage",
             value,
           }),
-          onTurnState: (value) => {
+          onTurnState: /** 处理「onTurnState」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => {
             const before = store().promptTurn;
             if (value.sessionId !== store().chat.sessionId) {
               console.warn("[turn-machine] ignored state for inactive session", {
@@ -160,7 +183,8 @@ export default function App() {
               store().dispatchChat({ type: "stream/commit", operationId: before.request.operationId });
             }
           },
-          onInteraction: (interaction) => {
+          onInteraction: /** 处理「onInteraction」事件，校验归属后再推进状态且避免重复提交。 */
+(interaction) => {
             const before = store().promptTurn;
             store().dispatchPromptTurn({ type: "interaction/enqueue", interaction });
             console.warn("[turn-machine] interaction enqueued", {
@@ -170,7 +194,8 @@ export default function App() {
               after: turnLogFacts(store().promptTurn),
             });
           },
-          onInteractionResolved: (id) => {
+          onInteractionResolved: /** 处理「onInteractionResolved」事件，校验归属后再推进状态且避免重复提交。 */
+(id) => {
             const before = store().promptTurn;
             store().dispatchPromptTurn({ type: "interaction/remove", id });
             console.warn("[turn-machine] interaction removed", {
@@ -179,7 +204,8 @@ export default function App() {
               after: turnLogFacts(store().promptTurn),
             });
           },
-          onClose: () => {
+          onClose: /** 处理「onClose」事件，校验归属后再推进状态且避免重复提交。 */
+() => {
             if (disposed || current !== client) return;
             current = null;
             clientRef.current = null;
@@ -217,7 +243,8 @@ export default function App() {
           const result = await client.list(REMOTE_CWD);
           store().setSessions(result.sessions);
           const action = initialAction.current;
-          const requested = action.kind === "load" ? result.sessions.find((item) => item.sessionId === action.sessionId) : undefined;
+          const requested = action.kind === "load" ? result.sessions.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.sessionId === action.sessionId) : undefined;
           if (requested) {
             await loadSession(client, requested);
             replaceSessionUrl(requested.sessionId);
@@ -271,25 +298,29 @@ export default function App() {
       }
     };
 
-    const navigate = (event: MouseEvent) => {
+    const navigate = /** 执行「navigate」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(event: MouseEvent) => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
       if (!(anchor instanceof HTMLAnchorElement) || anchor.target || anchor.download) return;
       const target = new URL(anchor.href, location.href);
       if (target.origin !== location.origin || target.href === location.href) return;
       event.preventDefault();
-      void closeCurrentSession(current).finally(() => { location.href = target.href; });
+      void closeCurrentSession(current).finally(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => { location.href = target.href; });
     };
-    const pagehide = () => {
+    const pagehide = /** 执行「pagehide」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => {
       current?.close();
     };
 
-    reconnectRef.current = () => connect("resume");
+    reconnectRef.current = /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => connect("resume");
     document.addEventListener("click", navigate);
     window.addEventListener("pagehide", pagehide);
     void connect("initial");
 
-    return () => {
+    return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => {
       disposed = true;
       reconnectRef.current = null;
       document.removeEventListener("click", navigate);
@@ -299,25 +330,31 @@ export default function App() {
     };
   }, []);
 
-  function openEmptySession(sessionId: string): void {
+  /** 执行「openEmptySession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function openEmptySession(sessionId: string): void {
     const store = useAppStore.getState();
     store.dispatchPromptTurn({ type: "turn/reset" });
     store.dispatchChat({ type: "session/open", sessionId });
     setConfigOptions([]);
     setReasoningBusy(false);
-    setIdentity((current) => ({ ...current, agentAvailability: "loading" }));
+    setHistoryPaging({ loading: false, hasMore: false });
+    setIdentity(/** 执行「openEmptySession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(current) => ({ ...current, agentAvailability: "loading" }));
   }
 
-  async function refreshSessions(client = clientRef.current): Promise<void> {
+  /** 执行「refreshSessions」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async function refreshSessions(client = clientRef.current): Promise<void> {
     if (!client) return;
     const result = await client.list(REMOTE_CWD);
     useAppStore.getState().setSessions(result.sessions);
   }
 
-  async function loadSession(client: AcpWebClient, session: SessionInfo): Promise<void> {
+  /** 读取「loadSession」所需数据，并遵守作用域、分页与容量边界。 */
+async function loadSession(client: AcpWebClient, session: SessionInfo): Promise<void> {
     const operationId = crypto.randomUUID();
     const store = useAppStore.getState();
-    setIdentity((current) => ({ ...current, agentAvailability: "loading" }));
+    setIdentity(/** 读取「loadSession」所需数据，并遵守作用域、分页与容量边界。 */
+(current) => ({ ...current, agentAvailability: "loading" }));
     store.dispatchPromptTurn({ type: "turn/reset" });
     store.dispatchChat({ type: "session/open", sessionId: session.sessionId });
     store.dispatchChat({
@@ -327,8 +364,16 @@ export default function App() {
       turnId: `load:${operationId}`,
     });
     try {
-      const response = await client.load(session.sessionId, session.cwd);
+      const [response, page] = await Promise.all([
+        client.load(session.sessionId, session.cwd),
+        controlApi.sessionTurns(session.sessionId),
+      ]);
       setConfigOptions(response.configOptions ?? []);
+      setHistoryPaging({
+        loading: false,
+        hasMore: page.hasMore,
+        ...(page.nextBeforeTurnId ? { nextBeforeTurnId: page.nextBeforeTurnId } : {}),
+      });
     } finally {
       const current = useAppStore.getState();
       const turn = current.promptTurn;
@@ -343,12 +388,48 @@ export default function App() {
     }
   }
 
-  async function createSession(): Promise<void> {
+  /** 只读加载更早一页；模型 historyPolicy 与该 UI 分页完全独立。 */
+  async function loadOlderHistory(): Promise<void> {
+    const sessionId = useAppStore.getState().chat.sessionId;
+    if (!sessionId || historyPaging.loading || !historyPaging.hasMore || !historyPaging.nextBeforeTurnId) return;
+    setHistoryPaging(/** 读取「loadOlderHistory」所需数据，并遵守作用域、分页与容量边界。 */
+(current) => ({ ...current, loading: true }));
+    try {
+      const page = await controlApi.sessionTurns(sessionId, historyPaging.nextBeforeTurnId);
+      const store = useAppStore.getState();
+      if (store.chat.sessionId !== sessionId) return;
+      store.dispatchChat({
+        type: "history/prepend",
+        entries: projectSessionTurnPage(page),
+        maxTurns: PRODUCT_CONFIG.agent.maxWebRetainedTurns,
+      });
+      const currentChat = useAppStore.getState().chat;
+      const retainedTurns = new Set(currentChat.historyChatEntries.order.flatMap(/** 执行「size」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(id) => {
+        const turnId = currentChat.historyChatEntries.byId[id]?.turnId;
+        return turnId ? [turnId] : [];
+      })).size;
+      const atLimit = retainedTurns >= PRODUCT_CONFIG.agent.maxWebRetainedTurns;
+      setHistoryPaging({
+        loading: false,
+        hasMore: page.hasMore && !atLimit,
+        ...(!atLimit && page.nextBeforeTurnId ? { nextBeforeTurnId: page.nextBeforeTurnId } : {}),
+      });
+    } catch (error) {
+      console.error("加载更早的 Session 历史失败", error);
+      setHistoryPaging(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(current) => ({ ...current, loading: false }));
+    }
+  }
+
+  /** 根据已校验输入构建「createSession」结果，不额外持有调用方的大对象。 */
+async function createSession(): Promise<void> {
     await closeCurrentSession();
     location.href = "/";
   }
 
-  async function selectSession(session: SessionInfo): Promise<void> {
+  /** 执行「selectSession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async function selectSession(session: SessionInfo): Promise<void> {
     const client = clientRef.current;
     if (!client || session.sessionId === useAppStore.getState().chat.sessionId) return;
     try {
@@ -362,12 +443,15 @@ export default function App() {
     }
   }
 
-  async function loadIdentity(sessionId: string): Promise<void> {
-    setIdentity((current) => ({ ...current, agentAvailability: "loading" }));
+  /** 读取「loadIdentity」所需数据，并遵守作用域、分页与容量边界。 */
+async function loadIdentity(sessionId: string): Promise<void> {
+    setIdentity(/** 读取「loadIdentity」所需数据，并遵守作用域、分页与容量边界。 */
+(current) => ({ ...current, agentAvailability: "loading" }));
     try {
       const session = await fetchSessionIdentity(sessionId);
       const models = await controlApi.models();
-      const model = models.items.find((item) => item.modelStudentId === session.modelStudentId);
+      const model = models.items.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.modelStudentId === session.modelStudentId);
       let agent: Awaited<ReturnType<typeof controlApi.agent>>;
       try {
         agent = await controlApi.agent(session.agentId);
@@ -392,7 +476,8 @@ export default function App() {
     } catch (error) { console.error("读取 Session 身份失败", error); }
   }
 
-  async function changeReasoning(profile: ReasoningProfile): Promise<void> {
+  /** 执行「changeReasoning」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async function changeReasoning(profile: ReasoningProfile): Promise<void> {
     const client = clientRef.current;
     const sessionId = useAppStore.getState().chat.sessionId;
     const reasoning = projectReasoningConfig(configOptions, identity.reasoningCapability);
@@ -408,7 +493,8 @@ export default function App() {
     }
   }
 
-  async function send(text: string, artifactMentions: ArtifactMentionInput[] = [], retryOperationId?: string): Promise<boolean> {
+  /** 执行「send」主流程，传播取消与失败并在结束时清理临时资源。 */
+async function send(text: string, artifactMentions: ArtifactMentionInput[] = [], retryOperationId?: string): Promise<boolean> {
     const client = clientRef.current;
     const state = useAppStore.getState();
     const sessionId = state.chat.sessionId;
@@ -439,7 +525,8 @@ export default function App() {
           reason: response.stopReason,
         });
       }
-      void refreshSessions(client).catch((cause: unknown) => {
+      void refreshSessions(client).catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+(cause: unknown) => {
         console.error("刷新 Session 列表失败", cause);
       });
       return true;
@@ -466,7 +553,8 @@ export default function App() {
     }
   }
 
-  function cancel(): void {
+  /** 判断「cancel」对应条件，只返回判定结果且不修改输入状态。 */
+function cancel(): void {
     const client = clientRef.current;
     const state = useAppStore.getState();
     const turn = state.promptTurn;
@@ -480,14 +568,16 @@ export default function App() {
     void client.cancel(state.chat.sessionId);
   }
 
-  function resolveInteraction(
+  /** 执行「resolveInteraction」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function resolveInteraction(
     interaction: PendingInteractionState,
     value: acp.RequestPermissionResponse | acp.CreateElicitationResponse,
   ): void {
     clientRef.current?.resolveInteraction(interaction, value);
   }
 
-  function handleTurnAction(action: TurnAction): void {
+  /** 处理「handleTurnAction」事件，校验归属后再推进状态且避免重复提交。 */
+function handleTurnAction(action: TurnAction): void {
     if (action.type === "reconnect") {
       reconnectCurrentSession();
       return;
@@ -515,7 +605,8 @@ export default function App() {
   const workspaceStyle = { "--artifact-width": `${artifactWidth}px` } as CSSProperties;
   const hasArtifact = Boolean(publishedArtifactId);
 
-  function startArtifactResize(event: ReactPointerEvent<HTMLDivElement>): void {
+  /** 执行「startArtifactResize」主流程，传播取消与失败并在结束时清理临时资源。 */
+function startArtifactResize(event: ReactPointerEvent<HTMLDivElement>): void {
     const workspace = workspaceRef.current;
     if (!workspace || event.button !== 0) return;
     event.preventDefault();
@@ -534,16 +625,21 @@ export default function App() {
       sessions={sessions}
       activeId={chat.sessionId}
       disabled={!availability.navigationEnabled || active}
-      onCreate={() => void createSession()}
-      onSelect={(session) => void selectSession(session)}
+      onCreate={/** 处理「onCreate」事件，校验归属后再推进状态且避免重复提交。 */
+() => void createSession()}
+      onSelect={/** 处理「onSelect」事件，校验归属后再推进状态且避免重复提交。 */
+(session) => void selectSession(session)}
     />
     <section className={`session-main ${hasArtifact ? "has-artifact" : ""}`}>
       {hasArtifact && <div aria-label="窄屏视图" className="session-narrow-switch">
-        <button className={narrowView === "artifact" ? "active" : ""} type="button" onClick={() => setNarrowView("artifact")}>产物</button>
-        <button className={narrowView === "chat" ? "active" : ""} type="button" onClick={() => setNarrowView("chat")}>聊天</button>
+        <button className={narrowView === "artifact" ? "active" : ""} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setNarrowView("artifact")}>产物</button>
+        <button className={narrowView === "chat" ? "active" : ""} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setNarrowView("chat")}>聊天</button>
       </div>}
       <div className={`session-workspace narrow-${narrowView}`} ref={workspaceRef} style={workspaceStyle}>
-        {publishedArtifactId && <PublishedArtifactPanel artifactId={publishedArtifactId} onClose={() => setPublishedArtifactId(null)} />}
+        {publishedArtifactId && <PublishedArtifactPanel artifactId={publishedArtifactId} onClose={/** 处理「onClose」事件，校验归属后再推进状态且避免重复提交。 */
+() => setPublishedArtifactId(null)} />}
         {hasArtifact && <div
           aria-label="调整产物与聊天宽度"
           aria-orientation="vertical"
@@ -554,10 +650,13 @@ export default function App() {
         <section className="chat-screen">
           <ChatHeader connection={connection} identity={identity} />
           <ChatViewport
+            historyPaging={historyPaging}
             historyChatEntries={chat.historyChatEntries}
             streamingChatEntries={chat.streamingChatEntries}
             promptTurn={promptTurn}
             onTurnAction={handleTurnAction}
+            onLoadOlder={/** 处理「onLoadOlder」事件，校验归属后再推进状态且避免重复提交。 */
+() => void loadOlderHistory()}
           />
           <div className="composer-dock">
             {connection.phase === "disconnected" && <ComposerAvailabilityNotice
@@ -578,7 +677,8 @@ export default function App() {
               {...(reasoning ? { reasoning } : {})}
               {...(identity.reasoningCapability ? { reasoningCapability: identity.reasoningCapability } : {})}
               reasoningBusy={reasoningBusy}
-              onReasoningChange={(profile) => void changeReasoning(profile)}
+              onReasoningChange={/** 处理「onReasoningChange」事件，校验归属后再推进状态且避免重复提交。 */
+(profile) => void changeReasoning(profile)}
               onSend={send}
               onCancel={cancel}
             />
@@ -588,11 +688,13 @@ export default function App() {
     </section>
   </main>;
 
-  function reconnectCurrentSession(): void {
+  /** 执行「reconnectCurrentSession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function reconnectCurrentSession(): void {
     void reconnectRef.current?.();
   }
 
-  async function closeCurrentSession(client = clientRef.current): Promise<void> {
+  /** 释放或删除「closeCurrentSession」对应资源，重复调用仍保持安全。 */
+async function closeCurrentSession(client = clientRef.current): Promise<void> {
     const sessionId = useAppStore.getState().chat.sessionId;
     if (!client || !sessionId) return;
     try {
@@ -611,6 +713,7 @@ interface SessionIdentity {
   contextWindowTokens?: number;
   reasoningCapability?: ModelReasoningCapability;
 }
+/** 读取「readInitialAction」所需数据，并遵守作用域、分页与容量边界。 */
 function readInitialAction(): InitialAction {
   const query = new URLSearchParams(location.search);
   const pathSessionId = location.pathname.match(/^\/sessions\/([^/]+)\/?$/)?.[1];
@@ -622,18 +725,23 @@ function readInitialAction(): InitialAction {
   return { kind: "latest" };
 }
 
+/** 执行「replaceSessionUrl」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function replaceSessionUrl(sessionId: string): void {
   history.replaceState(null, "", `/sessions/${encodeURIComponent(sessionId)}`);
 }
 
+/** 执行「rememberLaunchSession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function rememberLaunchSession(launchId: string, sessionId: string): void {
   sessionStorage.setItem(`mk-launch-session:${launchId}`, sessionId);
 }
 
+/** 执行「rememberedLaunchSession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function rememberedLaunchSession(launchId: string, sessions: SessionInfo[]): SessionInfo | undefined {
   const sessionId = sessionStorage.getItem(`mk-launch-session:${launchId}`);
-  return sessionId ? sessions.find((item) => item.sessionId === sessionId) : undefined;
+  return sessionId ? sessions.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.sessionId === sessionId) : undefined;
 }
+/** 读取「fetchSessionIdentity」所需数据，并遵守作用域、分页与容量边界。 */
 async function fetchSessionIdentity(sessionId: string): Promise<{ modelStudentId: string; agentId: string }> {
   const base = import.meta.env.VITE_CONTROL_API_URL ?? "http://127.0.0.1:7331/api/control/v1";
   const response = await fetch(`${base}/sessions/${encodeURIComponent(sessionId)}`);
@@ -642,16 +750,20 @@ async function fetchSessionIdentity(sessionId: string): Promise<{ modelStudentId
   return value.data;
 }
 
+/** 把未知异常转换为「errorMessage」文本，避免错误序列化过程再次抛出。 */
 function errorMessage(value: unknown): string {
   if (value instanceof Error && value.message.trim()) return value.message;
   if (typeof value === "string" && value.trim()) return value;
   return "发生未知错误";
 }
 
+/** 由规范字段生成稳定的「thoughtLevelConfigId」标识，供索引精确定位且不保留原始大对象。 */
 function thoughtLevelConfigId(options: acp.SessionConfigOption[]): string | undefined {
-  return options.find((option) => option.type === "select" && option.category === "thought_level")?.id;
+  return options.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(option) => option.type === "select" && option.category === "thought_level")?.id;
 }
 
+/** 生成「turnLogFacts」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
 function turnLogFacts(state: PromptTurnState) {
   if (state.status === "idle") return { status: state.status };
   return {
@@ -662,20 +774,23 @@ function turnLogFacts(state: PromptTurnState) {
       ? {
           phase: state.phase,
           waitingFor: state.waitingFor,
-          pendingInteractionIds: state.pendingInteractions.map((interaction) => interaction.interactionId),
+          pendingInteractionIds: state.pendingInteractions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(interaction) => interaction.interactionId),
           interactionCount: state.interactions.order.length,
         }
       : {}),
   };
 }
 
+/** 生成「remoteTurnLogFacts」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
 function remoteTurnLogFacts(state: TurnState) {
   return state.status === "active"
     ? {
         status: state.status,
         phase: state.phase,
         waitingFor: state.waitingFor,
-        pendingInteractions: state.pendingInteractions.map((interaction) => ({
+        pendingInteractions: state.pendingInteractions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(interaction) => ({
           interactionId: interaction.interactionId,
           kind: interaction.kind,
           toolCallId: interaction.kind === "permission" ? interaction.toolCall.toolCallId : interaction.toolCallId,
@@ -685,23 +800,27 @@ function remoteTurnLogFacts(state: TurnState) {
     : { status: state.status };
 }
 
+/** 执行「restoredTurnPrompt」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function restoredTurnPrompt(chat: ReturnType<typeof useAppStore.getState>["chat"], turnId: string): string {
   for (const collection of [chat.streamingChatEntries, chat.historyChatEntries]) {
     for (let index = collection.order.length - 1; index >= 0; index -= 1) {
       const entry = collection.byId[collection.order[index]!];
       if (entry?.type !== "message" || entry.role !== "user" || entry.turnId !== turnId) continue;
-      return entry.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("");
+      return entry.content.flatMap(/** 执行「join」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(block) => block.type === "text" ? [block.text] : []).join("");
     }
   }
   return "";
 }
 
+/** 执行「restoredTurnArtifactMentions」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function restoredTurnArtifactMentions(chat: ReturnType<typeof useAppStore.getState>["chat"], turnId: string): ArtifactMentionInput[] {
   for (const collection of [chat.streamingChatEntries, chat.historyChatEntries]) {
     for (let index = collection.order.length - 1; index >= 0; index -= 1) {
       const entry = collection.byId[collection.order[index]!];
       if (entry?.type !== "message" || entry.role !== "user" || entry.turnId !== turnId) continue;
-      return (entry.artifactMentions ?? []).map((mention) => ({ artifactId: mention.artifactId }));
+      return (entry.artifactMentions ?? []).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(mention) => ({ artifactId: mention.artifactId }));
     }
   }
   return [];

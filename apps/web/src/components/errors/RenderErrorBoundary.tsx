@@ -14,9 +14,11 @@ interface State { failed: boolean; }
 export class RenderErrorBoundary extends Component<Props, State> {
   state: State = { failed: false };
 
-  static getDerivedStateFromError(): State { return { failed: true }; }
+  /** 读取「getDerivedStateFromError」所需数据，并遵守作用域、分页与容量边界。 */
+static getDerivedStateFromError(): State { return { failed: true }; }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
+  /** 执行「componentDidCatch」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("[web-react] render failed", {
       scope: this.props.scope,
       message: error.message,
@@ -25,7 +27,8 @@ export class RenderErrorBoundary extends Component<Props, State> {
     });
   }
 
-  render(): ReactNode {
+  /** 执行「render」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+render(): ReactNode {
     if (!this.state.failed) return this.props.children;
     if (this.props.scope === "app") {
       return <main className="app-render-fallback" role="alert">

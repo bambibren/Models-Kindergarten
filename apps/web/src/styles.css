@@ -82,6 +82,10 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid #343431; outli
 
 .chat-viewport { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .chat-content { width: min(760px, 100%); min-height: 100%; margin: 0 auto; padding: 38px 32px 28px; }
+.history-page-control { display: flex; justify-content: center; margin: -22px 0 24px; }
+.history-page-control button { padding: 7px 12px; border: 1px solid #deded9; border-radius: 999px; color: #777972; background: #fafaf8; font-size: 10px; cursor: pointer; }
+.history-page-control button:hover:not(:disabled) { color: #3f403c; background: #f2f2ef; }
+.history-page-control button:disabled { opacity: .55; cursor: wait; }
 .empty-state { align-self: center; justify-self: center; width: min(620px, calc(100% - 48px)); text-align: center; }
 .empty-mark { display: grid; place-items: center; width: 48px; height: 48px; margin: 0 auto 18px; border: 1px solid #dfdfda; border-radius: 14px; color: #343531; background: #f3f3f0; box-shadow: 0 4px 14px rgb(32 33 30 / .06); }
 .empty-state h1 { margin: 0; color: #292a27; font-size: clamp(24px, 3vw, 32px); font-weight: 620; letter-spacing: -.035em; }

@@ -13,6 +13,7 @@ const colors = {
   green: "#66c6a0",
 } as const;
 
+/** 渲染「RadarChart」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function RadarChart({
   agents,
   scoreFor,
@@ -26,12 +27,15 @@ export function RadarChart({
 
   return <div className="radar-wrap">
     <svg aria-label="三个 Agent 的综合能力雷达图" className="radar-chart" role="img" viewBox="0 0 360 310">
-      {[0.25, 0.5, 0.75, 1].map((level) => <polygon
+      {[0.25, 0.5, 0.75, 1].map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(level) => <polygon
         className="radar-grid"
         key={level}
-        points={axes.map((_, index) => point(index, axes.length, radius * level, centerX, centerY)).join(" ")}
+        points={axes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(_, index) => point(index, axes.length, radius * level, centerX, centerY)).join(" ")}
       />)}
-      {axes.map((axis, index) => {
+      {axes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(axis, index) => {
         const axisPoint = cartesian(index, axes.length, radius, centerX, centerY);
         const labelPoint = cartesian(index, axes.length, radius + 30, centerX, centerY);
         return <g key={axis.id}>
@@ -39,32 +43,39 @@ export function RadarChart({
           <text className="radar-label" dominantBaseline="middle" textAnchor="middle" x={labelPoint.x} y={labelPoint.y}>{axis.label}</text>
         </g>;
       })}
-      {agents.map((agent) => {
+      {agents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(agent) => {
         const values = [
           scoreFor("understanding", agent),
           scoreFor("planning", agent),
           scoreFor("output", agent),
           agent.execution.score,
         ];
-        const coordinates = values.map((value, index) => cartesian(index, axes.length, radius * value / 100, centerX, centerY));
-        const points = coordinates.map((value) => `${value.x},${value.y}`);
+        const coordinates = values.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(value, index) => cartesian(index, axes.length, radius * value / 100, centerX, centerY));
+        const points = coordinates.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(value) => `${value.x},${value.y}`);
         return <g key={agent.id}>
           <polygon fill={colors[agent.tone]} fillOpacity=".09" points={points.join(" ")} stroke={colors[agent.tone]} strokeWidth="2" />
-          {coordinates.map((value, index) => <circle cx={value.x} cy={value.y} fill={colors[agent.tone]} key={axes[index]?.id} r="3" />)}
+          {coordinates.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(value, index) => <circle cx={value.x} cy={value.y} fill={colors[agent.tone]} key={axes[index]?.id} r="3" />)}
         </g>;
       })}
     </svg>
     <div className="radar-legend">
-      {agents.map((agent) => <span key={agent.id}><i style={{ background: colors[agent.tone] }} />{agent.name} · {agent.variant}</span>)}
+      {agents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(agent) => <span key={agent.id}><i style={{ background: colors[agent.tone] }} />{agent.name} · {agent.variant}</span>)}
     </div>
   </div>;
 }
 
+/** 执行「point」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function point(index: number, count: number, radius: number, centerX: number, centerY: number): string {
   const value = cartesian(index, count, radius, centerX, centerY);
   return `${value.x},${value.y}`;
 }
 
+/** 执行「cartesian」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function cartesian(index: number, count: number, radius: number, centerX: number, centerY: number) {
   const angle = -Math.PI / 2 + index * Math.PI * 2 / count;
   return {

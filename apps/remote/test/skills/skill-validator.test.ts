@@ -7,10 +7,14 @@ import { validateSkillDirectory } from "../../src/skills/skill-validator.js";
 
 const dirs: string[] = [];
 
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("Skill directory validation", () => {
-  it("只保留目录安全、总大小和文件数限制，不修改 Skill 自身格式", async () => {
+describe("Skill directory validation", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("只保留目录安全、总大小和文件数限制，不修改 Skill 自身格式", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const root = await skillRoot("folder-name", `${"Custom ".repeat(10)}Skill`, "d".repeat(1_100));
     await mkdir(join(root, "bin"), { recursive: true });
     await writeFile(join(root, ".notes"), "hidden file is valid skill content");
@@ -24,16 +28,19 @@ describe("Skill directory validation", () => {
     expect(skill.description).toBe("d".repeat(1_100));
   });
 
-  it("仍按统一配置拒绝文件数超限", async () => {
+  it("仍按统一配置拒绝文件数超限", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const root = await skillRoot("too-many-files", "many-files", "test");
-    await Promise.all(Array.from({ length: PRODUCT_CONFIG.skill.maxFiles }, (_, index) =>
+    await Promise.all(Array.from({ length: PRODUCT_CONFIG.skill.maxFiles }, /** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(_, index) =>
       writeFile(join(root, `file-${index}.txt`), String(index))));
 
     await expect(validateSkillDirectory(root, base()))
       .rejects.toThrow(`Skill 文件数量超过 ${PRODUCT_CONFIG.skill.maxFiles}`);
   });
 
-  it("仍按统一配置拒绝总大小超限", async () => {
+  it("仍按统一配置拒绝总大小超限", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const root = await skillRoot("too-large", "large-skill", "test");
     await writeFile(join(root, "payload.bin"), Buffer.alloc(PRODUCT_CONFIG.skill.maxTotalBytes, 1));
 
@@ -42,6 +49,7 @@ describe("Skill directory validation", () => {
   });
 });
 
+/** 构造「skillRoot」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function skillRoot(directoryName: string, name: string, description: string): Promise<string> {
   const parent = await mkdtemp(join(tmpdir(), "mk-skill-validator-"));
   dirs.push(parent);
@@ -51,6 +59,7 @@ async function skillRoot(directoryName: string, name: string, description: strin
   return root;
 }
 
+/** 构造「base」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function base() {
   return {
     source: { kind: "user" as const, path: "/tmp/source" },

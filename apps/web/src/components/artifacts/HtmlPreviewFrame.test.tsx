@@ -2,8 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { buildHtmlPreviewDocument, HtmlPreviewFrame } from "./HtmlPreviewFrame.js";
 
-describe("HtmlPreviewFrame", () => {
-  it("使用普通 srcDoc 预览，不增加 sandbox 限制", () => {
+describe("HtmlPreviewFrame", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("使用普通 srcDoc 预览，不增加 sandbox 限制", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const html = renderToStaticMarkup(<HtmlPreviewFrame
       csp="script-src 'unsafe-inline'"
       html="<script>document.body.dataset.executed = 'yes'</script>"
@@ -15,7 +17,8 @@ describe("HtmlPreviewFrame", () => {
     expect(html).toContain("document.body.dataset.executed");
   });
 
-  it("在页面脚本前接管当前文档锚点，避免 sandboxed srcDoc 导航为空白页", () => {
+  it("在页面脚本前接管当前文档锚点，避免 sandboxed srcDoc 导航为空白页", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const document = buildHtmlPreviewDocument(
       "<!doctype html><html><head><script>window.pageScript = true</script></head><body><a href=\"#game\">小游戏</a><section id=\"game\"></section></body></html>",
       "script-src 'unsafe-inline'",

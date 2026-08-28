@@ -3,7 +3,89 @@
  *
  * 这些数值先保留现有行为，但不再散落在业务逻辑里；后续有产品依据时只在这里调整。
  */
+/**
+ * 单个 Agent Turn 的硬执行预算。
+ *
+ * Runtime 允许在测试或部署组合根注入更小的值，但不能在一次 Turn 中动态放宽，
+ * 以免模型循环、流式正文或工具参数把 Remote 堆内存持续推高。
+ */
+export interface RuntimeExecutionBudget {
+  /** 一个 Turn 最多发起的模型请求轮数。 */
+  maxModelRounds: number;
+  /** 单轮最多接受的工具调用数。 */
+  maxToolCallsPerRound: number;
+  /** 一个 Turn 累计最多接受的工具调用数。 */
+  maxToolCallsPerTurn: number;
+  /** 单轮 assistant 正文的 UTF-8 字节上限。 */
+  maxTextBytesPerRound: number;
+  /** 单轮 thinking 正文的 UTF-8 字节上限。 */
+  maxThinkingBytesPerRound: number;
+  /** 单个工具调用参数序列化后的 UTF-8 字节上限。 */
+  maxToolArgumentBytesPerCall: number;
+  /** 一个 Turn 中全部工具参数的累计 UTF-8 字节上限。 */
+  maxToolArgumentBytesPerTurn: number;
+  /** Provider 连续多久没有事件即判定流已失活。 */
+  modelStreamIdleTimeoutMs: number;
+  /** 一个 Remote 进程同时允许执行的 Prompt Turn 数。 */
+  maxConcurrentTurns: number;
+}
+
 export const PRODUCT_CONFIG = {
+  runtime: {
+    maxModelRounds: 32,
+    maxToolCallsPerRound: 16,
+    maxToolCallsPerTurn: 64,
+    maxTextBytesPerRound: 8 * 1024 * 1024,
+    maxThinkingBytesPerRound: 8 * 1024 * 1024,
+    maxToolArgumentBytesPerCall: 1024 * 1024,
+    maxToolArgumentBytesPerTurn: 4 * 1024 * 1024,
+    modelStreamIdleTimeoutMs: 60_000,
+    maxConcurrentTurns: 8,
+  } satisfies RuntimeExecutionBudget,
+  server: {
+    /** Remote 同时允许进入 ACP upgrade 的 WebSocket 连接数。 */
+    maxAcpConnections: 16,
+    /** Control API 同时执行的路由 Handler 数；超限请求立即返回 503，不进入等待队列。 */
+    maxConcurrentControlRequests: 32,
+    /** Node HTTP Server 同时保留的 TCP 连接数，覆盖慢连接的进程级上界。 */
+    maxHttpConnections: 64,
+    /** 完整 HTTP 请求允许占用连接的最长时间。 */
+    requestTimeoutMs: 120_000,
+    /** 请求头必须在该时间内接收完成。 */
+    headersTimeoutMs: 60_000,
+    /** 空闲 keep-alive 连接的保留时间。 */
+    keepAliveTimeoutMs: 5_000,
+    /** 同一 keep-alive socket 服务固定次数后主动轮换。 */
+    maxRequestsPerSocket: 100,
+  },
+  capacity: {
+    /** 包含内置模型在内，进程运行目录最多持有的 ModelStudent 数。 */
+    maxModelStudents: 64,
+    /** 同时执行真实网络探针的 Model Admission Test 数；超限不排队。 */
+    maxConcurrentModelAdmissionTests: 4,
+    /** Remote 内暂存、等待 install 消费的含 Secret Candidate 数。 */
+    maxRetainedModelCandidates: 32,
+    /** 持久化 MCP Installation 的全局数量上限。 */
+    maxMcpInstallations: 100,
+    /** 同一进程最多保持连接的 MCP Client 数。 */
+    maxEnabledMcpClients: 32,
+    /** 单个 MCP Server 最多向 Runtime 暴露的 Tool 数。 */
+    maxMcpToolsPerServer: 256,
+    /** 单个 MCP Server 全部能力描述的序列化字节上限。 */
+    maxMcpDescriptorBytes: 2 * 1024 * 1024,
+    /** Skill Registry 最多常驻的元数据条数。 */
+    maxInstalledSkills: 200,
+    /** 一个 Agent 最多绑定的 Skill 数。 */
+    maxAgentSkills: 64,
+    /** 一个 Agent 最多绑定的 MCP Installation 数。 */
+    maxAgentMcps: 32,
+    /** 一个 Agent 启用的 Built-in 与 MCP Tool 总数上限。 */
+    maxAgentBoundTools: 128,
+    /** 单次模型请求的全部 Tool Schema 序列化总字节上限。 */
+    maxTurnToolSchemaBytes: 2 * 1024 * 1024,
+    /** 每个 owner 最多保留的终态 Skill 安装任务；活动任务不参与裁剪。 */
+    maxTerminalSkillInstallJobsPerOwner: 100,
+  },
   artifact: {
     /** 每个 Artifact ID 包含当前内容在内最多保留的修订总数。 */
     maxRetainedRevisions: 3,
@@ -11,6 +93,8 @@ export const PRODUCT_CONFIG = {
     maxFileBytes: 100 * 1024 * 1024,
     /** HTML Bundle 的所有文件总量上限。 */
     maxHtmlBundleBytes: 500 * 1024 * 1024,
+    /** HTML Bundle 的文件数上限，防止大量空文件撑爆目录清单和 ZIP 元数据。 */
+    maxHtmlBundleFiles: 2_000,
     /** 单个 Turn 可占用的构建/发布临时空间预算。 */
     maxTurnStagingBytes: 1024 * 1024 * 1024,
     /** 文本预览只进入模型/UI 的前 5 MiB；原始 Artifact 仍可完整下载。 */
@@ -21,6 +105,8 @@ export const PRODUCT_CONFIG = {
     maxSourceBytes: 5 * 1024 * 1024,
     /** 最终 PPTX 复用普通 Artifact 的单文件上限。 */
     maxOutputBytes: 100 * 1024 * 1024,
+    /** 浏览器静态渲染会整体读取 ZIP；超过该值只允许下载或 ONLYOFFICE 流程。 */
+    maxBrowserPreviewBytes: 32 * 1024 * 1024,
     /** 构建只计算源码执行时间；模型生成源码的时间不在其中。 */
     buildTimeoutMs: 120_000,
     /** 子进程 stdout/stderr 只保留诊断摘要，不进入产物。 */
@@ -43,6 +129,10 @@ export const PRODUCT_CONFIG = {
   mcp: {
     /** MCP 连接测试结果的有效时长，当前为 10 分钟。 */
     testResultTtlMs: 10 * 60_000,
+    /** MCP SDK 返回值在第一次结构化克隆前允许的最大序列化字节数。 */
+    maxResultBytes: 4 * 1024 * 1024,
+    /** 一次 Tool 或 Resource 返回允许包含的最大内容块数量。 */
+    maxResultBlocks: 256,
   },
   agent: {
     /** Agent 名称的当前字符上限。 */
@@ -61,8 +151,18 @@ export const PRODUCT_CONFIG = {
     mcpResourceUriMaxCharacters: 2_048,
     /** 最近历史策略当前允许选择的最大完整 Turn 数。 */
     historyRecentTurnsMax: 50,
+    /** Web 与 ACP 首屏每次加载的完整 Turn 数。 */
+    historyPageTurns: 20,
+    /** 浏览器最多同时保留的历史 Turn 数。 */
+    maxWebRetainedTurns: 100,
   },
   tools: {
+    /** 同一模型批次最多并行执行的 Tool 数，结果仍按调用顺序返回。 */
+    maxBatchConcurrency: 4,
+    /** `build_pptx` 等高内存构建在同一 ToolRuntime 内的并发上限。 */
+    maxHeavyConcurrency: 2,
+    /** 提供给模型和 ACP 的一次工具结果视图总字节上限。 */
+    maxResultViewBytes: 1024 * 1024,
     file: {
       /** FileSandbox 文本和普通文件 Tool 的默认读写上限。 */
       maxBytes: 5 * 1024 * 1024,

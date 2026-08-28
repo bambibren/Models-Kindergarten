@@ -10,14 +10,18 @@ import {
 import { ModelProviderPresetRegistry } from "../../src/model/model-provider-preset-registry.js";
 import { FixtureProvider } from "../../src/model/fixture-provider.js";
 
-describe("provider-neutral model admission registry", () => {
-  it("只发布已有真实协议适配器的 ready 预设，不发布未来 Anthropic", () => {
+describe("provider-neutral model admission registry", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("只发布已有真实协议适配器的 ready 预设，不发布未来 Anthropic", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const adapters = registry();
-    expect(new ModelProviderPresetRegistry(adapters).views().map((item) => item.presetId))
+    expect(new ModelProviderPresetRegistry(adapters).views().map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.presetId))
       .toEqual(["openai", "custom_responses", "siliconflow"]);
   });
 
-  it("固定预设由 Remote 解析官方地址，自定义预设才接收输入地址", () => {
+  it("固定预设由 Remote 解析官方地址，自定义预设才接收输入地址", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const presets = new ModelProviderPresetRegistry(registry());
     expect(presets.resolve({
       presetId: "openai", displayName: "OpenAI", model: "gpt-x", apiKey: "k",
@@ -34,9 +38,11 @@ describe("provider-neutral model admission registry", () => {
     }).baseUrl).toBe("https://models.example/v1");
   });
 
-  it("按协议分发体检，并由 registry 写入版本及不含 Secret 的稳定连接指纹", async () => {
+  it("按协议分发体检，并由 registry 写入版本及不含 Secret 的稳定连接指纹", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const seen: ResolvedModelStudentCandidate[] = [];
-    const adapters = registry((candidate) => { seen.push(candidate); });
+    const adapters = registry(/** 构造「adapters」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(candidate) => { seen.push(candidate); });
     const candidate = new ModelProviderPresetRegistry(adapters).resolve({
       presetId: "openai",
       displayName: "OpenAI",
@@ -54,14 +60,18 @@ describe("provider-neutral model admission registry", () => {
     expect(JSON.stringify(snapshot)).not.toContain(candidate.apiKey);
   });
 
-  it("启动时拒绝重复协议和缺失 ready 协议", () => {
+  it("启动时拒绝重复协议和缺失 ready 协议", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const responses = adapter("openai_responses");
-    expect(() => new ModelAdmissionAdapterRegistry([responses, responses])).toThrow("重复注册");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => new ModelAdmissionAdapterRegistry([responses, responses])).toThrow("重复注册");
     const onlyResponses = new ModelAdmissionAdapterRegistry([responses]);
-    expect(() => new ModelProviderPresetRegistry(onlyResponses)).toThrow("缺少协议适配器");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => new ModelProviderPresetRegistry(onlyResponses)).toThrow("缺少协议适配器");
   });
 });
 
+/** 构造「registry」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function registry(onProbe?: (candidate: ResolvedModelStudentCandidate) => void) {
   return new ModelAdmissionAdapterRegistry([
     adapter("openai_responses", onProbe),
@@ -69,6 +79,7 @@ function registry(onProbe?: (candidate: ResolvedModelStudentCandidate) => void) 
   ]);
 }
 
+/** 构造「adapter」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function adapter(
   protocol: ModelAdmissionAdapter["protocol"],
   onProbe?: (candidate: ResolvedModelStudentCandidate) => void,
@@ -77,14 +88,17 @@ function adapter(
     protocol,
     adapterRevision: protocol === "openai_responses" ? "responses-test-v2" : "chat-test-v1",
     probeVersion: protocol === "openai_responses" ? 2 : 1,
-    probe: async (candidate) => {
+    probe: /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (candidate) => {
       onProbe?.(candidate);
       return snapshot(protocol);
     },
-    createProvider: () => new FixtureProvider(),
+    createProvider: /** 构造「createProvider」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => new FixtureProvider(),
   };
 }
 
+/** 构造「snapshot」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function snapshot(protocol: ModelAdmissionAdapter["protocol"]): ProviderCapabilitySnapshot {
   return {
     schemaVersion: 1,

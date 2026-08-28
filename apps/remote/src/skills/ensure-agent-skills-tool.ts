@@ -23,21 +23,25 @@ export class EnsureAgentSkillsToolProvider implements RuntimeToolProvider {
   private readonly providedUrls: string[];
   private readonly allowedModes: Array<"ensure" | "update">;
 
-  constructor(
+  /** 初始化「EnsureAgentSkillsToolProvider」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly service: SkillInstallationService,
     private readonly scope: TurnScope,
     private readonly currentUserMessage: string,
   ) {
-    this.providedUrls = service.explicitSourceUrlCandidates(currentUserMessage).map((item) => item.providedUrl);
+    this.providedUrls = service.explicitSourceUrlCandidates(currentUserMessage).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.providedUrl);
     this.allowedModes = explicitlyRequestsUpdate(currentUserMessage) ? ["ensure", "update"] : ["ensure"];
     this.definitions = this.providedUrls.length > 0 ? definitions(this.providedUrls, this.allowedModes) : [];
   }
 
-  prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
+  /** 执行「prepare」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     if (call.name !== NAME) throw new Error(`未知 Skill 安装 Tool: ${call.name}`);
     const sourceUrls = validStringArray(call.arguments.source_urls);
     const mode = call.arguments.mode;
-    const invalidSource = sourceUrls?.find((url) => !this.providedUrls.includes(url));
+    const invalidSource = sourceUrls?.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(url) => !this.providedUrls.includes(url));
     const sourceError = sourceUrls === undefined
       ? "source_urls 必须是非空字符串数组"
       : invalidSource ? `SKILL_SOURCE_NOT_USER_PROVIDED: ${invalidSource}` : undefined;
@@ -76,7 +80,8 @@ export class EnsureAgentSkillsToolProvider implements RuntimeToolProvider {
     };
   }
 
-  async execute(call: PreparedToolCall, _context: ToolExecutionContext): Promise<ToolResult> {
+  /** 执行「execute」主流程，传播取消与失败并在结束时清理临时资源。 */
+async execute(call: PreparedToolCall, _context: ToolExecutionContext): Promise<ToolResult> {
     const input: EnsureAgentSkillsInput = {
       sourceUrls: stringArray(call.arguments.source_urls, "source_urls"),
       mode: call.arguments.mode === "update" ? "update" : "ensure",
@@ -97,14 +102,16 @@ export class EnsureAgentSkillsToolProvider implements RuntimeToolProvider {
     const rawOutput = {
       jobId: job.jobId,
       state: job.state,
-      items: job.items.map((item) => ({
+      items: job.items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => ({
         source: item.source,
         state: item.state,
         disposition: item.disposition,
         skillInstallationId: item.skillInstallationId,
       })),
     };
-    const skillNames = [...new Set(await Promise.all(job.items.map(async (item) => {
+    const skillNames = [...new Set(await Promise.all(job.items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+async (item) => {
       if (!item.skillInstallationId) throw new Error("Skill 安装成功但缺少 Installation ID");
       return (await this.service.get(item.skillInstallationId, job.ownerId)).skillName;
     })))];
@@ -122,9 +129,11 @@ export class EnsureAgentSkillsToolProvider implements RuntimeToolProvider {
     };
   }
 
-  capabilitySnapshot(): RuntimeCapabilitySnapshot {
+  /** 生成「capabilitySnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
+capabilitySnapshot(): RuntimeCapabilitySnapshot {
     return {
-      tools: this.definitions.map((definition) => ({
+      tools: this.definitions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(definition) => ({
         id: "skill-installation:tool:ensure_agent_skills",
         modelName: NAME,
         origin: "skill_runtime",
@@ -136,6 +145,7 @@ export class EnsureAgentSkillsToolProvider implements RuntimeToolProvider {
   }
 }
 
+/** 执行「definitions」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function definitions(
   providedUrls: string[],
   allowedModes: Array<"ensure" | "update">,
@@ -165,18 +175,22 @@ function definitions(
   }];
 }
 
+/** 执行「stringArray」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function stringArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value) || value.length === 0 || !value.every((item) => typeof item === "string" && item.length > 0)) {
+  if (!Array.isArray(value) || value.length === 0 || !value.every(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => typeof item === "string" && item.length > 0)) {
     throw new Error(`${label} 必须是非空字符串数组`);
   }
   return [...new Set(value)];
 }
 
+/** 执行「validStringArray」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function validStringArray(value: unknown): string[] | undefined {
   try { return stringArray(value, "source_urls"); }
   catch { return undefined; }
 }
 
+/** 执行「explicitlyRequestsUpdate」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function explicitlyRequestsUpdate(message: string): boolean {
   const withoutUrls = message.replace(/https?:\/\/[^\s<>()"']+/gi, " ");
   return /(?:更新|升级|最新版|update)/i.test(withoutUrls);

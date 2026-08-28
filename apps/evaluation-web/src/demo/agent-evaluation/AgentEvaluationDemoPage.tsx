@@ -33,8 +33,10 @@ import type {
 } from "./types.js";
 import "./agent-evaluation-demo.css";
 
+/** 渲染「AgentEvaluationDemoPage」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function AgentEvaluationDemoPage() {
-  const query = useMemo(() => new URLSearchParams(location.search), []);
+  const query = useMemo(/** 缓存「query」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => new URLSearchParams(location.search), []);
   const linkedComparisonId = query.get("comparisonId");
   const [comparisonRecords, setComparisonRecords] = useState<DemoSavedComparison[]>(savedComparisons);
   const [selectedComparisonId, setSelectedComparisonId] = useState<string | null>(linkedComparisonId);
@@ -48,25 +50,34 @@ export function AgentEvaluationDemoPage() {
   const [textMarks, setTextMarks] = useState<TextMark[]>([]);
   const [completedTabs, setCompletedTabs] = useState<Partial<Record<ScoreTabId, boolean>>>({});
 
-  function completeTab(tab: ScoreTabId): void {
-    setCompletedTabs((current) => current[tab] ? current : { ...current, [tab]: true });
+  /** 执行「completeTab」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function completeTab(tab: ScoreTabId): void {
+    setCompletedTabs(/** 执行「completeTab」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(current) => current[tab] ? current : { ...current, [tab]: true });
   }
 
-  function toggleRequirement(requirementId: string): void {
+  /** 根据已校验输入构建「toggleRequirement」结果，不额外持有调用方的大对象。 */
+function toggleRequirement(requirementId: string): void {
     completeTab("understanding");
-    setSelectedRequirements((current) => current.includes(requirementId)
-      ? current.filter((item) => item !== requirementId)
+    setSelectedRequirements(/** 根据已校验输入构建「toggleRequirement」结果，不额外持有调用方的大对象。 */
+(current) => current.includes(requirementId)
+      ? current.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item !== requirementId)
       : [...current, requirementId]);
   }
 
-  function toggleOtherRequirement(): void {
+  /** 根据已校验输入构建「toggleOtherRequirement」结果，不额外持有调用方的大对象。 */
+function toggleOtherRequirement(): void {
     completeTab("understanding");
-    setHasOtherRequirement((current) => !current);
+    setHasOtherRequirement(/** 根据已校验输入构建「toggleOtherRequirement」结果，不额外持有调用方的大对象。 */
+(current) => !current);
   }
 
-  function togglePlanMark(stepId: string, color: MarkColor): void {
+  /** 根据已校验输入构建「togglePlanMark」结果，不额外持有调用方的大对象。 */
+function togglePlanMark(stepId: string, color: MarkColor): void {
     completeTab("planning");
-    setPlanMarks((current) => {
+    setPlanMarks(/** 根据已校验输入构建「togglePlanMark」结果，不额外持有调用方的大对象。 */
+(current) => {
       const next = { ...current };
       if (next[stepId] === color) delete next[stepId];
       else next[stepId] = color;
@@ -74,23 +85,29 @@ export function AgentEvaluationDemoPage() {
     });
   }
 
-  function setAgentTextMarks(agentId: AgentId, marks: TextMark[]): void {
+  /** 更新「setAgentTextMarks」对应状态，并保持写入顺序、原子性与容量约束。 */
+function setAgentTextMarks(agentId: AgentId, marks: TextMark[]): void {
     completeTab("output");
-    setTextMarks((current) => [
-      ...current.filter((mark) => mark.agentId !== agentId),
+    setTextMarks(/** 更新「setAgentTextMarks」对应状态，并保持写入顺序、原子性与容量约束。 */
+(current) => [
+      ...current.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mark) => mark.agentId !== agentId),
       ...marks,
     ]);
   }
 
-  function scoreFor(tab: ScoreTabId, agentId: AgentId): number {
-    const agent = demoAgents.find((item) => item.id === agentId);
+  /** 执行「scoreFor」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function scoreFor(tab: ScoreTabId, agentId: AgentId): number {
+    const agent = demoAgents.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.id === agentId);
     if (!agent) return 100;
     if (tab === "understanding") return understandingScore(agent, selectedRequirements, hasOtherRequirement, listedRequirementsWeight);
     if (tab === "planning") return planningScore(agent, planMarks);
     return outputMarkScore(agent, textMarks).score;
   }
 
-  function saveComparison(): void {
+  /** 更新「saveComparison」对应状态，并保持写入顺序、原子性与容量约束。 */
+function saveComparison(): void {
     if (saveState === "saved") return;
     const record: DemoSavedComparison = {
       id: "cmp-demo-current",
@@ -98,7 +115,8 @@ export function AgentEvaluationDemoPage() {
       createdAt: "08-10 刚刚",
       variantCount: demoAgents.length,
     };
-    setComparisonRecords((current) => [record, ...current]);
+    setComparisonRecords(/** 更新「saveComparison」对应状态，并保持写入顺序、原子性与容量约束。 */
+(current) => [record, ...current]);
     setSelectedComparisonId(record.id);
     setSaveState("saved");
   }
@@ -107,7 +125,8 @@ export function AgentEvaluationDemoPage() {
     <ComparisonHistoryRail records={comparisonRecords} selectedId={selectedComparisonId} />
     <main className="agent-evaluation-demo">
     <header className="demo-header">
-      <button aria-label="返回" className="demo-back" onClick={() => history.back()} type="button"><ArrowLeft size={17} /></button>
+      <button aria-label="返回" className="demo-back" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => history.back()} type="button"><ArrowLeft size={17} /></button>
       <div className="demo-title"><span>MODEL CONTEXT · COMPARISON</span><h1>上下文对比实验结果</h1></div>
       <button className={`comparison-save ${saveState}`} disabled={saveState === "saved"} type="button" onClick={saveComparison}>{saveState === "saved" ? <BookmarkCheck size={14} /> : <BookmarkPlus size={14} />}{saveState === "saved" ? "已保存本次结果" : "保存本次对照实验结果"}</button>
     </header>
@@ -116,8 +135,10 @@ export function AgentEvaluationDemoPage() {
       <div className="task-label"><span>USER TASK</span><strong>{demoTask.title}</strong></div>
       <p>{demoTask.prompt}</p>
       <div className="mode-switch" aria-label="页面模式">
-        <button className={mode === "answer" ? "active" : ""} onClick={() => setMode("answer")} type="button"><MessageSquareText size={14} />回答模式</button>
-        <button className={mode === "annotation" ? "active" : ""} onClick={() => setMode("annotation")} type="button"><Highlighter size={14} />标注模式</button>
+        <button className={mode === "answer" ? "active" : ""} onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setMode("answer")} type="button"><MessageSquareText size={14} />回答模式</button>
+        <button className={mode === "annotation" ? "active" : ""} onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setMode("annotation")} type="button"><Highlighter size={14} />标注模式</button>
       </div>
     </section>
 
@@ -133,7 +154,8 @@ export function AgentEvaluationDemoPage() {
           hasOtherRequirement={hasOtherRequirement}
           listedRequirementsWeight={listedRequirementsWeight}
           onOtherRequirementToggle={toggleOtherRequirement}
-          onWeightChange={(value) => {
+          onWeightChange={/** 处理「onWeightChange」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => {
             completeTab("understanding");
             setListedRequirementsWeight(value);
           }}
@@ -155,15 +177,18 @@ export function AgentEvaluationDemoPage() {
   </div>;
 }
 
+/** 渲染「AnswerMode」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function AnswerMode() {
   return <section className="demo-section">
     <SectionHeading icon={<MessageSquareText size={17} />} title="Agent回答对比" detail="每栏按上下文、思考、工具与回答的原始顺序投影；历史版本不会重新运行。" />
     <AgentComparisonGrid agents={demoAgents} className="answer-grid">
-      {(agent) => <DemoAgentStream agent={agent} />}
+      {/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(agent) => <DemoAgentStream agent={agent} />}
     </AgentComparisonGrid>
   </section>;
 }
 
+/** 渲染「UnderstandingPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function UnderstandingPanel({
   hasOtherRequirement,
   listedRequirementsWeight,
@@ -186,9 +211,11 @@ function UnderstandingPanel({
       <div className="requirement-pool">
         <header><div><span>待标注 LIST</span><strong>请选出您真正的需求</strong></div><small>{selectedRequirements.length}{hasOtherRequirement ? " + 其他" : ""} 已选</small></header>
         <div className="requirement-pool-list">
-          {demoTask.requirements.map((requirement) => {
+          {demoTask.requirements.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(requirement) => {
             const selected = selectedRequirements.includes(requirement.id);
-            return <button className={selected ? "selected" : ""} key={requirement.id} onClick={() => onToggle(requirement.id)} type="button">
+            return <button className={selected ? "selected" : ""} key={requirement.id} onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => onToggle(requirement.id)} type="button">
               <span className="pool-check">{selected && <Check size={12} />}</span>
               <span className="pool-content">
                 <strong className="pool-title">{requirement.label}</strong>
@@ -209,7 +236,8 @@ function UnderstandingPanel({
                 aria-label="已列需求权重"
                 max="100"
                 min="0"
-                onChange={(event) => onWeightChange(Number(event.target.value))}
+                onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => onWeightChange(Number(event.target.value))}
                 type="range"
                 value={listedRequirementsWeight}
               />
@@ -222,11 +250,14 @@ function UnderstandingPanel({
       <AgentComparisonGrid
         agents={demoAgents}
         className="understanding-grid"
-        headerScore={(agent) => understandingScore(agent, selectedRequirements, hasOtherRequirement, listedRequirementsWeight)}
+        headerScore={/** 执行「headerScore」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(agent) => understandingScore(agent, selectedRequirements, hasOtherRequirement, listedRequirementsWeight)}
       >
-        {(agent) => <div className="annotation-column-body" title={hasStarted ? `命中 ${understandingMatchCount(agent, selectedRequirements)} / ${demoTask.requirements.length}` : "尚未开始标注，显示默认分"}>
+        {/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(agent) => <div className="annotation-column-body" title={hasStarted ? `命中 ${understandingMatchCount(agent, selectedRequirements)} / ${demoTask.requirements.length}` : "尚未开始标注，显示默认分"}>
           <div className="agent-understanding-list">
-            {agent.understandingPoints.map((point) => {
+            {agent.understandingPoints.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(point) => {
               const matched = selectedRequirements.includes(point.requirementId);
               return <div className={matched ? "matched" : ""} key={point.id}>
                 <span>{matched ? <Check size={10} /> : <X size={10} />}</span><p>{point.text}</p>
@@ -239,6 +270,7 @@ function UnderstandingPanel({
   </section>;
 }
 
+/** 渲染「PlanningPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function PlanningPanel({
   marks,
   onMark,
@@ -248,15 +280,20 @@ function PlanningPanel({
 }) {
   return <section className="tab-panel" role="tabpanel">
     <SectionHeading icon={<Route size={17} />} title="Workflow 规划能力 打分" detail="点击步骤右侧色点添加或取消标记，颜色含义暂不预设。" />
-    <AgentComparisonGrid agents={demoAgents} headerScore={(agent) => planningScore(agent, marks)}>
-      {(agent) => <div className="annotation-column-body">
+    <AgentComparisonGrid agents={demoAgents} headerScore={/** 执行「headerScore」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(agent) => planningScore(agent, marks)}>
+      {/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(agent) => <div className="annotation-column-body">
         <div className="plan-flow">
-          {agent.plan.map((step, index) => <div className={`plan-step ${marks[step.id] ? `marked-${marks[step.id]}` : ""}`} key={step.id}>
+          {agent.plan.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(step, index) => <div className={`plan-step ${marks[step.id] ? `marked-${marks[step.id]}` : ""}`} key={step.id}>
             <span className="plan-number">{String(index + 1).padStart(2, "0")}</span>
             <div><strong>{step.title}</strong><p>{step.detail}</p></div>
             <div className="plan-marker-actions">
-              <button aria-label="蓝色标记" className="blue" onClick={() => onMark(step.id, "blue")} type="button" />
-              <button aria-label="红色标记" className="red" onClick={() => onMark(step.id, "red")} type="button" />
+              <button aria-label="蓝色标记" className="blue" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => onMark(step.id, "blue")} type="button" />
+              <button aria-label="红色标记" className="red" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => onMark(step.id, "red")} type="button" />
             </div>
           </div>)}
         </div>
@@ -265,6 +302,7 @@ function PlanningPanel({
   </section>;
 }
 
+/** 渲染「OutputPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function OutputPanel({
   marks,
   onMarksChange,
@@ -274,14 +312,18 @@ function OutputPanel({
 }) {
   return <section className="tab-panel" role="tabpanel">
     <SectionHeading icon={<Highlighter size={17} />} title="最终有效输出结果 标注" detail="拖选回答中的任意文本，使用红色或蓝色马克笔；点击已有标注可改色或删除。" />
-    <AgentComparisonGrid agents={demoAgents} headerScore={(agent) => outputMarkScore(agent, marks).score}>
-      {(agent) => {
-        const agentMarks = marks.filter((mark) => mark.agentId === agent.id);
+    <AgentComparisonGrid agents={demoAgents} headerScore={/** 执行「headerScore」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(agent) => outputMarkScore(agent, marks).score}>
+      {/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(agent) => {
+        const agentMarks = marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mark) => mark.agentId === agent.id);
         return <div className="annotation-column-body">
           <MarkerText
             agentId={agent.id}
             marks={agentMarks}
-            onChange={(next) => onMarksChange(agent.id, next)}
+            onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(next) => onMarksChange(agent.id, next)}
             sections={agent.answerSections}
           />
         </div>;
@@ -290,16 +332,19 @@ function OutputPanel({
   </section>;
 }
 
+/** 渲染「SummaryPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function SummaryPanel({ scoreFor }: { scoreFor: (tab: ScoreTabId, agentId: AgentId) => number }) {
   return <section className="summary-panel" role="tabpanel">
     <div className="summary-grid">
       <div className="summary-chart-card">
         <SectionHeading icon={<BarChart3 size={17} />} title="综合能力分布" detail="未填写的人工模块按默认满分展示。" />
-        <RadarChart agents={demoAgents} scoreFor={(tab, agent) => scoreFor(tab, agent.id)} />
+        <RadarChart agents={demoAgents} scoreFor={/** 执行「scoreFor」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(tab, agent) => scoreFor(tab, agent.id)} />
       </div>
       <div className="score-ledger">
         <div className="ledger-heading"><span>SCORE LEDGER</span><strong>四维评分</strong></div>
-        {demoAgents.map((agent) => <div className="ledger-row" key={agent.id}>
+        {demoAgents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(agent) => <div className="ledger-row" key={agent.id}>
           <div><strong>{agent.name}</strong><small>{agent.variant}</small></div>
           <span>{scoreFor("understanding", agent.id)}<small>理解</small></span>
           <span>{scoreFor("planning", agent.id)}<small>规划</small></span>
@@ -312,11 +357,13 @@ function SummaryPanel({ scoreFor }: { scoreFor: (tab: ScoreTabId, agentId: Agent
   </section>;
 }
 
+/** 渲染「ExecutionPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function ExecutionPanel() {
   return <section className="execution-panel" role="tabpanel">
     <SectionHeading icon={<Wrench size={17} />} title="执行能力" detail="根据 Runtime Trace 自动生成，不需要人工标注。" />
     <div className="execution-grid">
-      {demoAgents.map((agent) => <article className={`execution-card tone-${agent.tone}`} key={agent.id}>
+      {demoAgents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(agent) => <article className={`execution-card tone-${agent.tone}`} key={agent.id}>
         <header><div><span>{agent.name}</span><strong>{agent.variant}</strong></div><b>{agent.execution.score}</b></header>
         <div className="execution-metrics">
           <span><Clock3 size={13} /><strong>{agent.execution.duration}</strong><small>总耗时</small></span>
@@ -329,10 +376,12 @@ function ExecutionPanel() {
   </section>;
 }
 
+/** 渲染「SectionHeading」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function SectionHeading({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
   return <div className="demo-section-heading">{icon}<div><h2>{title}</h2><p>{detail}</p></div></div>;
 }
 
+/** 执行「understandingScore」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function understandingScore(
   agent: DemoAgent,
   selectedRequirements: string[],
@@ -344,31 +393,41 @@ function understandingScore(
   return Math.round(understandingMatchCount(agent, selectedRequirements) / demoTask.requirements.length * availableWeight);
 }
 
+/** 执行「understandingMatchCount」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function understandingMatchCount(agent: DemoAgent, selectedRequirements: string[]): number {
-  const understood = new Set(agent.understandingPoints.map((point) => point.requirementId));
-  return selectedRequirements.filter((requirementId) => understood.has(requirementId)).length;
+  const understood = new Set(agent.understandingPoints.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(point) => point.requirementId));
+  return selectedRequirements.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(requirementId) => understood.has(requirementId)).length;
 }
 
+/** 执行「planningScore」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function planningScore(agent: DemoAgent, marks: Record<string, MarkColor>): number {
-  const selected = agent.plan.flatMap((step) => marks[step.id] ? [marks[step.id]] : []);
+  const selected = agent.plan.flatMap(/** 执行「selected」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(step) => marks[step.id] ? [marks[step.id]] : []);
   if (selected.length === 0) return 100;
-  const weighted = selected.reduce((sum, color) => sum + (color === "red" ? 1 : .5), 0);
+  const weighted = selected.reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
+(sum, color) => sum + (color === "red" ? 1 : .5), 0);
   return Math.round(weighted / agent.plan.length * 100);
 }
 
+/** 执行「outputMarkScore」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function outputMarkScore(agent: DemoAgent, marks: TextMark[]): {
   score: number;
   redPercent: number;
   bluePercent: number;
   started: boolean;
 } {
-  const agentMarks = marks.filter((mark) => mark.agentId === agent.id);
+  const agentMarks = marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mark) => mark.agentId === agent.id);
   if (agentMarks.length === 0) return { score: 100, redPercent: 0, bluePercent: 0, started: false };
-  const totalCharacters = agent.answerSections.reduce((sum, section) => sum + effectiveCharacters(section.text), 0);
+  const totalCharacters = agent.answerSections.reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
+(sum, section) => sum + effectiveCharacters(section.text), 0);
   let redCharacters = 0;
   let blueCharacters = 0;
   for (const mark of agentMarks) {
-    const section = agent.answerSections.find((item) => item.id === mark.sectionId);
+    const section = agent.answerSections.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.id === mark.sectionId);
     if (!section) continue;
     const characters = effectiveCharacters(section.text.slice(mark.start, mark.end));
     if (mark.color === "red") redCharacters += characters;
@@ -384,6 +443,7 @@ function outputMarkScore(agent: DemoAgent, marks: TextMark[]): {
   };
 }
 
+/** 执行「effectiveCharacters」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function effectiveCharacters(value: string): number {
   return value.replace(/\s/g, "").length;
 }

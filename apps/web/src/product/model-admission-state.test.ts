@@ -111,15 +111,18 @@ const successfulTest: ModelStudentTestRecord = {
   expiresAt: "2026-08-14T08:10:00.000Z",
 };
 
-describe("production model admission state", () => {
-  it("uses the ready presets returned by Remote instead of a Web-owned provider list", () => {
+describe("production model admission state", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("uses the ready presets returned by Remote instead of a Web-owned provider list", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const initialized = initializeModelAdmissionPresets(createModelAdmissionState(), [siliconflowPreset, openaiPreset]);
     expect(initialized.phase).toBe("editing");
     expect(initialized.draft.presetId).toBe("siliconflow");
     expect(initialized.draft.contextWindowTokens).toBe("");
   });
 
-  it("accepts an opaque credential without assuming an sk- prefix", () => {
+  it("accepts an opaque credential without assuming an sk- prefix", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(validateModelAdmissionDraft({
       presetId: "custom_responses",
       displayName: "大聪明",
@@ -130,7 +133,8 @@ describe("production model admission state", () => {
     }, customPreset)).toEqual({ valid: true, errors: {} });
   });
 
-  it("rejects unsafe custom URLs but never asks for Base URL on fixed presets", () => {
+  it("rejects unsafe custom URLs but never asks for Base URL on fixed presets", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(validateModelAdmissionDraft({
       presetId: "custom_responses",
       displayName: "",
@@ -157,7 +161,8 @@ describe("production model admission state", () => {
     }, openaiPreset)).toEqual({ valid: true, errors: {} });
   });
 
-  it("never sends a browser-supplied Base URL for fixed presets", () => {
+  it("never sends a browser-supplied Base URL for fixed presets", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const input = buildModelStudentCandidate({
       presetId: "openai",
       displayName: "官方学生",
@@ -176,7 +181,8 @@ describe("production model admission state", () => {
     expect("contextWindowTokens" in input).toBe(false);
   });
 
-  it("invalidates a verified probe when connection facts change", () => {
+  it("invalidates a verified probe when connection facts change", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const verified = {
       ...initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
       phase: "verified" as const,
@@ -197,7 +203,8 @@ describe("production model admission state", () => {
     }
   });
 
-  it("clears protocol-specific fields and secret when the preset changes", () => {
+  it("clears protocol-specific fields and secret when the preset changes", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const current = {
       ...initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
       draft: { presetId: "custom_responses" as const, displayName: "大聪明", baseUrl: "https://custom.example", model: "model-a", apiKey: "secret", contextWindowTokens: "262144" },
@@ -208,7 +215,8 @@ describe("production model admission state", () => {
     expect(changed.test).toBeUndefined();
   });
 
-  it("keeps a verified probe when only the ModelStudent nickname changes", () => {
+  it("keeps a verified probe when only the ModelStudent nickname changes", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const editing = {
       ...initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
       draft: { presetId: "custom_responses" as const, displayName: "原名", baseUrl: "https://responses.example.test", model: "same-model-id", apiKey: "secret", contextWindowTokens: "262144" },
@@ -228,7 +236,8 @@ describe("production model admission state", () => {
     });
   });
 
-  it("keeps a verified probe when the optional context window changes", () => {
+  it("keeps a verified probe when the optional context window changes", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const editing = {
       ...initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
       draft: {
@@ -252,7 +261,8 @@ describe("production model admission state", () => {
     expect(updated.draft.contextWindowTokens).toBe("262144");
   });
 
-  it("omits a blank context window and rejects a provided non-positive integer", () => {
+  it("omits a blank context window and rejects a provided non-positive integer", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const editing = updateModelAdmissionDisplayName(
       initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]),
       "大聪明",
@@ -266,11 +276,13 @@ describe("production model admission state", () => {
 
     for (const value of ["0", "-1", "1.5", "9007199254740992"]) {
       const invalid = updateModelAdmissionContextWindowTokens(verified, value);
-      expect(() => buildModelStudentInstallInput(invalid)).toThrow("上下文窗口必须是正整数，或留空");
+      expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => buildModelStudentInstallInput(invalid)).toThrow("上下文窗口必须是正整数，或留空");
     }
   });
 
-  it("validates the optional context window independently from capability probing", () => {
+  it("validates the optional context window independently from capability probing", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(validateOptionalContextWindowTokens("")).toBeUndefined();
     expect(validateOptionalContextWindowTokens(" 262144 ")).toBeUndefined();
     expect(validateOptionalContextWindowTokens("0")).toBe("请输入正整数，或留空。");
@@ -291,7 +303,8 @@ describe("production model admission state", () => {
     }, {})).toEqual({ contextWindowTokens: "请输入正整数，或留空。" });
   });
 
-  it("starts from the probe default and resets the selection before every new probe", () => {
+  it("starts from the probe default and resets the selection before every new probe", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const editing = initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]);
     const verified = acceptSuccessfulModelStudentTest(editing, successfulTest);
     expect(verified.defaultReasoningProfile).toBe("balanced");
@@ -316,7 +329,8 @@ describe("production model admission state", () => {
     expect(acceptSuccessfulModelStudentTest(testing, nextTest).defaultReasoningProfile).toBe("deep");
   });
 
-  it("shows validation errors only after a field contains an invalid value", () => {
+  it("shows validation errors only after a field contains an invalid value", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const empty = initializeModelAdmissionPresets(createModelAdmissionState(), [customPreset]).draft;
     const emptyValidation = validateModelAdmissionDraft(empty, customPreset);
     expect(visibleModelAdmissionErrors(empty, emptyValidation.errors, {})).toEqual({});
@@ -326,19 +340,22 @@ describe("production model admission state", () => {
     });
   });
 
-  it("returns to Home with only the new public ModelStudent id in the URL", () => {
+  it("returns to Home with only the new public ModelStudent id in the URL", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const url = modelStudentHomeUrl("student/大聪明");
     expect(url).toBe("/?modelStudentId=student%2F%E5%A4%A7%E8%81%AA%E6%98%8E");
     expect(url).not.toContain("secret");
   });
 
-  it("preselects the admitted model from the Home query and safely falls back", () => {
+  it("preselects the admitted model from the Home query and safely falls back", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const models = [model("local"), model("managed")];
     expect(selectInitialModelStudentId(models, "?modelStudentId=managed")).toBe("managed");
     expect(selectInitialModelStudentId(models, "?modelStudentId=missing")).toBe("local");
   });
 });
 
+/** 构造「model」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function model(modelStudentId: string): ModelStudentSummary {
   return {
     schemaVersion: 1,

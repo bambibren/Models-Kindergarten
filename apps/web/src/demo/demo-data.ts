@@ -47,13 +47,15 @@ export const demoModelStudents: DemoModelStudent[] = [
 ];
 
 const defaultAgentModules = createDefaultModules();
-const conciseAgentModules = createDefaultModules().map((module) => {
+const conciseAgentModules = createDefaultModules().map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(module) => {
   if (module.id === "history") return { ...module, historyTurns: 2, value: "运行时保留最近 2 轮对话" };
   if (module.id === "mcp") return { ...module, selectedItems: [], value: "", tokens: 0 };
   if (module.id === "memory") return { ...module, enabled: false };
   return module;
 });
-const sandboxAgentModules = createDefaultModules().map((module) => {
+const sandboxAgentModules = createDefaultModules().map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(module) => {
   if (module.id === "skills") return { ...module, selectedItems: ["sandbox-notes"], value: "sandbox-notes" };
   if (module.id === "mcp") return { ...module, selectedItems: ["mcp-huaben-map"], value: "mcp-huaben-map", tokens: 164 };
   if (module.id === "memory") return { ...module, enabled: true };
@@ -160,7 +162,8 @@ export const demoChatStream: DemoStreamItem[] = [
   },
 ];
 
-export const demoExperiments: DemoExperimentRecord[] = Array.from({ length: 23 }, (_, index) => {
+export const demoExperiments: DemoExperimentRecord[] = Array.from({ length: 23 }, /** 执行「demoExperiments」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(_, index) => {
   const number = 23 - index;
   const variants = ["聊天历史裁剪", "工具说明开关", "Skills 索引差异", "系统提示改写"];
   return {
@@ -232,11 +235,13 @@ export const demoMcpInstallations: DemoMcpInstallation[] = [
   },
 ];
 
-export const demoMcps: DemoResourceRow[] = demoMcpInstallations.map((mcp) => ({
+export const demoMcps: DemoResourceRow[] = demoMcpInstallations.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(mcp) => ({
   id: mcp.id,
   name: mcp.name,
   detail: mcp.description,
-  meta: `HTTP · ${mcp.capabilities.filter((item) => item.kind === "tool").length} tools`,
+  meta: `HTTP · ${mcp.capabilities.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.kind === "tool").length} tools`,
   state: mcp.state === "ready" ? "可用" : mcp.state === "disabled" ? "已停用" : "未连接",
 }));
 

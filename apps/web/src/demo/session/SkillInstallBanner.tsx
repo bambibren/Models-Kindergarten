@@ -6,6 +6,7 @@ import {
   type DemoSkillInstallBatch,
 } from "../skills/skill-install-state.js";
 
+/** 渲染「SkillInstallBanner」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function SkillInstallBanner({ batch }: { batch: DemoSkillInstallBatch }) {
   const progress = skillInstallProgress(batch);
   const ready = isDemoSkillInstallComplete(batch);
@@ -17,7 +18,8 @@ export function SkillInstallBanner({ batch }: { batch: DemoSkillInstallBatch }) 
       <ChevronDown size={13} />
     </summary>
     <div className="mk-skill-install-banner-list">
-      {batch.items.map((item) => <div key={item.id}><span>{item.phase === "ready" || item.phase === "reused" ? <Check size={11} /> : <LoaderCircle className="mk-demo-spin" size={11} />}</span><strong>{item.name}</strong><small>{demoSkillPhaseLabel(item.phase)}</small></div>)}
+      {batch.items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => <div key={item.id}><span>{item.phase === "ready" || item.phase === "reused" ? <Check size={11} /> : <LoaderCircle className="mk-demo-spin" size={11} />}</span><strong>{item.name}</strong><small>{demoSkillPhaseLabel(item.phase)}</small></div>)}
     </div>
   </details>;
 }

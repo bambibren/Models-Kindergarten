@@ -4,7 +4,8 @@
  * 原始 cause 留在 Remote，供日志和调试使用。
  */
 export class RunFailure extends Error {
-  constructor(
+  /** 初始化「RunFailure」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     message: string,
     readonly code = "INTERNAL_ERROR",
     readonly retryable = true,
@@ -24,6 +25,7 @@ export function toRunFailure(cause: unknown): RunFailure {
   return new RunFailure(errorMessage(cause), "INTERNAL_ERROR", true, { cause });
 }
 
+/** 把未知异常转换为「errorMessage」文本，避免错误序列化过程再次抛出。 */
 function errorMessage(cause: unknown): string {
   if (cause instanceof Error && cause.message.trim()) return cause.message;
   if (typeof cause === "string" && cause.trim()) return cause;

@@ -24,6 +24,7 @@ import type { McpBinding } from "@kindergarten/contracts";
 
 const RESOURCE_TOOL = "read_mcp_resource";
 
+/** 描述「McpToolProvider」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class McpToolProvider implements RuntimeToolProvider {
   readonly providerId = "mcp";
   readonly definitions: ModelToolDefinition[];
@@ -31,14 +32,20 @@ export class McpToolProvider implements RuntimeToolProvider {
   private readonly validators = new Map<string, ValidateFunction>();
   private readonly resourceIds: Set<string>;
 
-  constructor(private readonly manager: McpClientManager, agentBindings?: McpBinding[]) {
+  /** 初始化「McpToolProvider」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(private readonly manager: McpClientManager, agentBindings?: McpBinding[]) {
     const config = manager.config();
     const snapshots = manager.capabilitySnapshots();
     const configured = agentBindings === undefined
-      ? new Map(config.agentCapabilities.mcpTools.map((item) => [item.id, item.permission]))
-      : new Map(agentBindings.filter((item) => item.enabled).flatMap((item) => item.tools
-        .filter((tool) => tool.enabled)
-        .map((tool) => [mcpToolCapabilityId(item.mcpInstallationId, tool.remoteName), tool.permission] as const)));
+      ? new Map(config.agentCapabilities.mcpTools.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => [item.id, item.permission]))
+      : new Map(agentBindings.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled).flatMap(/** 执行「configured」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => item.tools
+        .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(tool) => tool.enabled)
+        .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(tool) => [mcpToolCapabilityId(item.mcpInstallationId, tool.remoteName), tool.permission] as const)));
     const ajv = new Ajv({ strict: false, allErrors: true, allowUnionTypes: true });
     for (const snapshot of snapshots) {
       for (const descriptor of snapshot.tools) {
@@ -65,24 +72,31 @@ export class McpToolProvider implements RuntimeToolProvider {
         this.validators.set(modelName, validator);
       }
     }
-    const discovered = new Set([...this.bindings.values()].map((item) => item.capabilityId));
+    const discovered = new Set([...this.bindings.values()].map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.capabilityId));
     for (const capabilityId of configured.keys()) {
       if (!discovered.has(capabilityId)) {
         console.warn(`已配置的 MCP Tool 当前不可用：${capabilityId}`);
       }
     }
     this.resourceIds = new Set(agentBindings === undefined
-      ? config.agentCapabilities.resources.map((item) => resourceKey(item.serverId, item.uri))
-      : agentBindings.filter((item) => item.enabled).flatMap((item) => item.resources
-        .filter((resource) => resource.enabled)
-        .map((resource) => resourceKey(item.mcpInstallationId, resource.uri))));
+      ? config.agentCapabilities.resources.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => resourceKey(item.serverId, item.uri))
+      : agentBindings.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled).flatMap(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(item) => item.resources
+        .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(resource) => resource.enabled)
+        .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(resource) => resourceKey(item.mcpInstallationId, resource.uri))));
     this.definitions = [
       ...[...this.bindings.values()].map(toDefinition),
       ...(this.resourceIds.size > 0 ? [resourceDefinition()] : []),
     ];
   }
 
-  prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
+  /** 执行「prepare」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     if (call.name === RESOURCE_TOOL) return this.prepareResource(call, fallbackId);
     const binding = this.bindings.get(call.name);
     if (!binding) throw new Error(`当前 AgentVersion 未绑定 MCP Tool: ${call.name}`);
@@ -103,7 +117,8 @@ export class McpToolProvider implements RuntimeToolProvider {
     };
   }
 
-  async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
+  /** 执行「execute」主流程，传播取消与失败并在结束时清理临时资源。 */
+async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
     if (call.name === RESOURCE_TOOL) return this.executeResource(call, context);
     const binding = this.bindings.get(call.name);
     if (!binding) throw new Error(`当前 AgentVersion 未绑定 MCP Tool: ${call.name}`);
@@ -147,10 +162,12 @@ export class McpToolProvider implements RuntimeToolProvider {
     };
   }
 
-  capabilitySnapshot(): RuntimeCapabilitySnapshot {
+  /** 生成「capabilitySnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
+capabilitySnapshot(): RuntimeCapabilitySnapshot {
     const snapshots = this.manager.capabilitySnapshots();
     return {
-      tools: this.definitions.map((definition) => {
+      tools: this.definitions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(definition) => {
         const binding = this.bindings.get(definition.function.name);
         return {
           id: binding?.capabilityId ?? "mcp:host:tool:read_resource",
@@ -160,11 +177,14 @@ export class McpToolProvider implements RuntimeToolProvider {
           ...(binding ? { serverId: binding.serverId, remoteName: binding.remoteName } : {}),
         };
       }),
-      mcpServers: snapshots.map((snapshot) => ({
+      mcpServers: snapshots.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(snapshot) => ({
         serverId: snapshot.serverId,
-        protocolEra: this.manager.serverStates().find((item) => item.serverId === snapshot.serverId)?.protocolEra ?? "legacy",
+        protocolEra: this.manager.serverStates().find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.serverId === snapshot.serverId)?.protocolEra ?? "legacy",
         revision: snapshot.revision,
-        toolSchemaHashes: Object.fromEntries(snapshot.tools.map((tool) => [
+        toolSchemaHashes: Object.fromEntries(snapshot.tools.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(tool) => [
           tool.name,
           createHash("sha256").update(canonicalJson(tool.inputSchema)).digest("hex"),
         ])),
@@ -173,7 +193,8 @@ export class McpToolProvider implements RuntimeToolProvider {
     };
   }
 
-  private prepareResource(call: ModelToolCall, fallbackId: string): PreparedToolCall {
+  /** 执行「prepareResource」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private prepareResource(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     const serverId = stringArg(call.arguments.server_id, "server_id");
     const uri = stringArg(call.arguments.uri, "uri");
     const allowed = this.resourceIds.has(resourceKey(serverId, uri));
@@ -192,7 +213,8 @@ export class McpToolProvider implements RuntimeToolProvider {
     };
   }
 
-  private async executeResource(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
+  /** 执行「executeResource」主流程，传播取消与失败并在结束时清理临时资源。 */
+private async executeResource(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
     const serverId = String(call.arguments.server_id);
     const uri = String(call.arguments.uri);
     try {
@@ -200,7 +222,8 @@ export class McpToolProvider implements RuntimeToolProvider {
       return {
         modelContent: modelEnvelope(call, true, { serverId, uri, contents: result.contents }),
         rawOutput: { serverId, uri, contents: result.contents },
-        content: result.contents.map((resource) => ({
+        content: result.contents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(resource) => ({
           type: "content",
           content: { type: "resource", resource },
         })) as ToolCallContent[],
@@ -212,6 +235,7 @@ export class McpToolProvider implements RuntimeToolProvider {
   }
 }
 
+/** 根据已校验输入构建「toDefinition」结果，不额外持有调用方的大对象。 */
 function toDefinition(binding: McpToolBinding): ModelToolDefinition {
   return {
     type: "function",
@@ -223,6 +247,7 @@ function toDefinition(binding: McpToolBinding): ModelToolDefinition {
   };
 }
 
+/** 执行「resourceDefinition」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function resourceDefinition(): ModelToolDefinition {
   return {
     type: "function",
@@ -242,6 +267,7 @@ function resourceDefinition(): ModelToolDefinition {
   };
 }
 
+/** 执行「modelToolName」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function modelToolName(serverId: string, remoteName: string): string {
   const base = `mcp__${slug(serverId)}__${slug(remoteName)}`;
   if (base.length <= 64) return base;
@@ -249,38 +275,49 @@ function modelToolName(serverId: string, remoteName: string): string {
   return `${base.slice(0, 55)}_${hash}`;
 }
 
+/** 执行「slug」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function slug(value: string): string {
   const result = value.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
   return result || "tool";
 }
 
+/** 根据已校验输入构建「toolKind」结果，不额外持有调用方的大对象。 */
 function toolKind(descriptor: McpToolDescriptor): ToolKind {
   if (descriptor.annotations?.readOnlyHint === true) return "read";
   if (descriptor.annotations?.destructiveHint === true) return "delete";
   return "other";
 }
 
+/** 根据已校验输入构建「toAcpContent」结果，不额外持有调用方的大对象。 */
 function toAcpContent(content: McpToolCallResult["content"]): ToolCallContent[] {
-  return content.map((item) => ({ type: "content", content: structuredClone(item) })) as ToolCallContent[];
+  return content.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => ({ type: "content", content: structuredClone(item) })) as ToolCallContent[];
 }
 
+/** 执行「contentText」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function contentText(content: McpToolCallResult["content"]): string {
-  return content.flatMap((item) => item.type === "text" && typeof item.text === "string" ? [item.text] : []).join("\n");
+  return content.flatMap(/** 执行「join」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => item.type === "text" && typeof item.text === "string" ? [item.text] : []).join("\n");
 }
 
+/** 执行「ajvErrorText」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function ajvErrorText(validator: ValidateFunction): string {
-  return (validator.errors ?? []).map((error) => `${error.instancePath || "/"} ${error.message ?? "无效"}`).join("; ");
+  return (validator.errors ?? []).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(error) => `${error.instancePath || "/"} ${error.message ?? "无效"}`).join("; ");
 }
 
+/** 执行「stringArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function stringArg(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} 必须是非空字符串`);
   return value;
 }
 
+/** 由规范字段生成稳定的「resourceKey」标识，供索引精确定位且不保留原始大对象。 */
 function resourceKey(serverId: string, uri: string): string {
   return `${serverId}\u0000${uri}`;
 }
 
+/** 根据已校验输入构建「toToolError」结果，不额外持有调用方的大对象。 */
 function toToolError(error: unknown): ToolExecutionError {
   if (error instanceof ToolExecutionError) return error;
   if (error instanceof McpRuntimeError) {
@@ -301,6 +338,7 @@ function toToolError(error: unknown): ToolExecutionError {
   return new ToolExecutionError("mcp_execution_failed", "execution", errorText(error), false);
 }
 
+/** 把未知异常转换为「errorText」文本，避免错误序列化过程再次抛出。 */
 function errorText(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
 }

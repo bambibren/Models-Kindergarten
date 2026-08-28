@@ -14,20 +14,27 @@ import type { McpManagementRepository } from "./mcp-management-repository.js";
 import type { McpClientManager } from "./mcp-client-manager.js";
 import type { McpCapabilitySnapshot, McpServerConfig } from "./mcp-types.js";
 
+/** 描述「McpManagementService」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class McpManagementService {
   private readonly protectedIds: Set<string>;
-  constructor(
+  /** 初始化「McpManagementService」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly repository: McpManagementRepository,
     private readonly manager: McpClientManager,
     private readonly agents: AgentService,
-  ) { this.protectedIds = new Set(manager.config().servers.map((server) => server.id)); }
+  ) { this.protectedIds = new Set(manager.config().servers.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(server) => server.id)); }
 
-  async importExisting(ownerId = "local-admin"): Promise<void> {
-    const existing = new Set((await this.repository.listInstallations()).map((item) => item.mcpInstallationId));
+  /** 执行「importExisting」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async importExisting(ownerId = "local-admin"): Promise<void> {
+    const existing = new Set((await this.repository.listInstallations()).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.mcpInstallationId));
     for (const server of this.manager.config().servers) {
       if (existing.has(server.id) || server.transport.kind !== "streamable_http") continue;
-      const state = this.manager.serverStates().find((item) => item.serverId === server.id);
-      const snapshot = this.manager.capabilitySnapshots().find((item) => item.serverId === server.id);
+      const state = this.manager.serverStates().find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.serverId === server.id);
+      const snapshot = this.manager.capabilitySnapshots().find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.serverId === server.id);
       const now = new Date().toISOString();
       await this.repository.putInstallation({
         schemaVersion: 1,
@@ -38,7 +45,11 @@ export class McpManagementService {
         url: server.transport.url,
         authKind: server.transport.authProfileId ? "externally_managed_bearer" : "none",
         enabled: server.enabled,
-        state: server.enabled ? state?.status === "ready" ? "connected" : "failed" : "disabled",
+        state: server.enabled
+          ? state?.status === "ready"
+            ? "connected"
+            : state?.status === "capacity_blocked" ? "capacity_blocked" : "failed"
+          : "disabled",
         deletable: false,
         ...(snapshot ? { snapshot: toPublicSnapshot(snapshot, 1) } : {}),
         ...(state?.connectedAt ? { lastConnectedAt: new Date(state.connectedAt).toISOString() } : {}),
@@ -48,7 +59,8 @@ export class McpManagementService {
     }
   }
 
-  async test(raw: unknown, ownerId = "local-admin"): Promise<McpTestRecord> {
+  /** 执行「test」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async test(raw: unknown, ownerId = "local-admin"): Promise<McpTestRecord> {
     let candidate: McpCandidateInput;
     try { candidate = parseMcpCandidateInput(raw); }
     catch (error) { throw parseProblem(error); }
@@ -80,14 +92,16 @@ export class McpManagementService {
     }
   }
 
-  async getTest(testId: string, ownerId = "local-admin"): Promise<McpTestRecord> {
+  /** 读取「getTest」所需数据，并遵守作用域、分页与容量边界。 */
+async getTest(testId: string, ownerId = "local-admin"): Promise<McpTestRecord> {
     const test = await this.repository.getTest(testId);
     if (!test || test.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "MCP 测试不存在", false);
     if (test.state === "succeeded" && Date.parse(test.expiresAt) <= Date.now()) return { ...test, state: "expired" };
     return test;
   }
 
-  async install(raw: unknown, ownerId = "local-admin"): Promise<McpInstallationView> {
+  /** 执行「install」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async install(raw: unknown, ownerId = "local-admin"): Promise<McpInstallationView> {
     if (!record(raw) || typeof raw.testId !== "string") throw new ApiProblemError(400, "VALIDATION_FAILED", "testId 必填", false);
     const test = await this.getTest(raw.testId, ownerId);
     if (test.state !== "succeeded" || Date.parse(test.expiresAt) <= Date.now() || !test.snapshot) {
@@ -118,20 +132,26 @@ export class McpManagementService {
     return view;
   }
 
-  async list(ownerId = "local-admin"): Promise<McpInstallationView[]> {
+  /** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
+async list(ownerId = "local-admin"): Promise<McpInstallationView[]> {
     return (await this.repository.listInstallations())
-      .filter((item) => item.ownerId === ownerId && item.state !== "uninstalled")
-      .map((item) => ({ ...item, deletable: !this.protectedIds.has(item.mcpInstallationId) }))
-      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.ownerId === ownerId && item.state !== "uninstalled")
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => ({ ...item, deletable: !this.protectedIds.has(item.mcpInstallationId) }))
+      .toSorted(/** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
+(left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
-  async get(id: string, ownerId = "local-admin"): Promise<McpInstallationView> {
+  /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */
+async get(id: string, ownerId = "local-admin"): Promise<McpInstallationView> {
     const value = await this.repository.getInstallation(id);
     if (!value || value.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "MCP Installation 不存在", false);
     return { ...value, deletable: !this.protectedIds.has(value.mcpInstallationId) };
   }
 
-  async reconnect(id: string, ownerId = "local-admin"): Promise<McpInstallationView> {
+  /** 执行「reconnect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async reconnect(id: string, ownerId = "local-admin"): Promise<McpInstallationView> {
     const current = await this.get(id, ownerId);
     const snapshot = await this.manager.reconnect(id);
     const now = new Date().toISOString();
@@ -140,7 +160,8 @@ export class McpManagementService {
     return next;
   }
 
-  async setEnabled(id: string, enabled: boolean, ownerId = "local-admin"): Promise<McpInstallationView> {
+  /** 更新「setEnabled」对应状态，并保持写入顺序、原子性与容量约束。 */
+async setEnabled(id: string, enabled: boolean, ownerId = "local-admin"): Promise<McpInstallationView> {
     const current = await this.get(id, ownerId);
     await this.manager.setEnabled(id, enabled);
     const next = { ...current, enabled, state: enabled ? "connected" as const : "disabled" as const, updatedAt: new Date().toISOString() };
@@ -148,16 +169,19 @@ export class McpManagementService {
     return next;
   }
 
-  async uninstall(id: string, ownerId = "local-admin"): Promise<{ removedAgentBindings: string[] }> {
+  /** 执行「uninstall」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async uninstall(id: string, ownerId = "local-admin"): Promise<{ removedAgentBindings: string[] }> {
     if (this.protectedIds.has(id)) throw new ApiProblemError(409, "CONFLICT", "系统内置 MCP 不可删除", false);
     await this.get(id, ownerId);
     await this.manager.uninstall(id);
     const agents = await this.agents.removeMcpBindings(id, ownerId);
     await this.repository.removeInstallation(id);
-    return { removedAgentBindings: agents.map((item) => item.agentId) };
+    return { removedAgentBindings: agents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.agentId) };
   }
 }
 
+/** 执行「serverConfig」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function serverConfig(id: string, candidate: McpCandidateInput): McpServerConfig {
   return {
     id,
@@ -169,31 +193,40 @@ function serverConfig(id: string, candidate: McpCandidateInput): McpServerConfig
   };
 }
 
+/** 根据已校验输入构建「toPublicSnapshot」结果，不额外持有调用方的大对象。 */
 function toPublicSnapshot(value: McpCapabilitySnapshot, generation: number): PublicSnapshot {
   return {
     schemaVersion: 1,
     generation,
-    tools: value.tools.map((tool) => ({
+    tools: value.tools.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(tool) => ({
       name: tool.name,
       ...(tool.description ? { description: tool.description } : {}),
       inputSchema: structuredClone(tool.inputSchema),
       inputSchemaHash: hash(tool.inputSchema),
     })),
-    resources: value.resources.map((item) => ({
+    resources: value.resources.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => ({
       uri: item.uri,
       ...(item.name ? { name: item.name } : {}),
       ...(item.description ? { description: item.description } : {}),
       ...(item.mimeType ? { mimeType: item.mimeType } : {}),
     })),
-    prompts: value.prompts.map((item) => ({ name: item.name, ...(item.description ? { description: item.description } : {}) })),
+    prompts: value.prompts.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => ({ name: item.name, ...(item.description ? { description: item.description } : {}) })),
     discoveredAt: new Date(value.fetchedAt).toISOString(),
   };
 }
 
+/** 判断「hash」对应条件，只返回判定结果且不修改输入状态。 */
 function hash(value: unknown): string { return createHash("sha256").update(stableJson(value)).digest("hex"); }
+/** 判断「isLoopbackUrl」对应条件，只返回判定结果且不修改输入状态。 */
 function isLoopbackUrl(value: string): boolean { return /^(?:http:\/\/)?(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/)/i.test(value); }
+/** 更新「record」对应状态，并保持写入顺序、原子性与容量约束。 */
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+/** 执行「publicMessage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function publicMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+/** 校验并规范化「parseProblem」输入，非法数据直接返回明确错误。 */
 function parseProblem(error: unknown): ApiProblemError {
   const message = publicMessage(error);
   if (message.startsWith("MCP_AUTH_NOT_SUPPORTED")) return new ApiProblemError(400, "MCP_AUTH_NOT_SUPPORTED", message, false);

@@ -4,6 +4,7 @@ import { cjk } from "@streamdown/cjk";
 import type { DemoArtifact } from "../demo-types.js";
 import { HtmlPreviewFrame } from "../../components/artifacts/HtmlPreviewFrame.js";
 
+/** 渲染「ArtifactPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ArtifactPanel({ artifact, onClose }: { artifact: DemoArtifact; onClose: () => void }) {
   return <section className="mk-demo-artifact-panel">
     <header>

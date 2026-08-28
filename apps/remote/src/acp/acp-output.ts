@@ -13,6 +13,7 @@ import {
 } from "@kindergarten/contracts";
 import { SessionAcpChannel } from "./session-acp-channel.js";
 
+/** 描述「MessageRole」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type MessageRole = "user" | "assistant";
 type MessageUpdate =
   | "user_message_chunk"
@@ -20,13 +21,16 @@ type MessageUpdate =
   | "agent_thought_chunk";
 
 /** 把 ModelEvent 翻译成唯一的对外协议：ACP session/update。 */
+/** 描述「AcpOutput」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class AcpOutput {
-  constructor(
+  /** 初始化「AcpOutput」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly sessionId: string,
     private readonly channel: SessionAcpChannel,
   ) {}
 
-  async message(
+  /** 执行「message」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async message(
     role: MessageRole,
     messageId: string,
     text: string,
@@ -40,7 +44,8 @@ export class AcpOutput {
     );
   }
 
-  async thought(
+  /** 执行「thought」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async thought(
     messageId: string,
     text: string,
     meta: MessageMeta,
@@ -48,55 +53,69 @@ export class AcpOutput {
     await this.content("agent_thought_chunk", messageId, text, meta);
   }
 
-  async toolCall(value: acp.ToolCall): Promise<void> {
-    await this.channel.project((client) => client.notify(acp.methods.client.session.update, {
+  /** 根据已校验输入构建「toolCall」结果，不额外持有调用方的大对象。 */
+async toolCall(value: acp.ToolCall): Promise<void> {
+    await this.channel.project(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(client) => client.notify(acp.methods.client.session.update, {
       sessionId: this.sessionId,
       update: { sessionUpdate: "tool_call", ...value },
     }), `tool_call/${value.toolCallId}`);
   }
 
-  async toolUpdate(value: acp.ToolCallUpdate): Promise<void> {
-    await this.channel.project((client) => client.notify(acp.methods.client.session.update, {
+  /** 根据已校验输入构建「toolUpdate」结果，不额外持有调用方的大对象。 */
+async toolUpdate(value: acp.ToolCallUpdate): Promise<void> {
+    await this.channel.project(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(client) => client.notify(acp.methods.client.session.update, {
       sessionId: this.sessionId,
       update: { sessionUpdate: "tool_call_update", ...value },
     }), `tool_call_update/${value.toolCallId}`);
   }
 
-  async contextSummary(summary: ContextSummary): Promise<void> {
-    await this.channel.project((client) => client.notify(CONTEXT_SUMMARY_NOTIFICATION, {
+  /** 执行「contextSummary」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async contextSummary(summary: ContextSummary): Promise<void> {
+    await this.channel.project(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(client) => client.notify(CONTEXT_SUMMARY_NOTIFICATION, {
       sessionId: this.sessionId,
       summary,
     }), `context_summary/${summary.turnId}`);
   }
 
-  async tokenUsage(usage: TurnTokenUsage): Promise<void> {
-    await this.channel.project((client) => client.notify(TOKEN_USAGE_NOTIFICATION, {
+  /** 根据已校验输入构建「tokenUsage」结果，不额外持有调用方的大对象。 */
+async tokenUsage(usage: TurnTokenUsage): Promise<void> {
+    await this.channel.project(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(client) => client.notify(TOKEN_USAGE_NOTIFICATION, {
       sessionId: this.sessionId,
       usage,
     }), `token_usage/${usage.turnId}`);
   }
 
-  async contextWindowUsage(state: ContextWindowUsageState): Promise<void> {
-    await this.channel.project((client) => client.notify(CONTEXT_WINDOW_USAGE_NOTIFICATION, {
+  /** 执行「contextWindowUsage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async contextWindowUsage(state: ContextWindowUsageState): Promise<void> {
+    await this.channel.project(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(client) => client.notify(CONTEXT_WINDOW_USAGE_NOTIFICATION, {
       sessionId: this.sessionId,
       state,
     }), `context_window_usage/${state.afterTurnId}`);
   }
 
-  async turnState(turn: TurnState): Promise<void> {
-    await this.channel.project((client) => client.notify(TURN_STATE_NOTIFICATION, {
+  /** 执行「turnState」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async turnState(turn: TurnState): Promise<void> {
+    await this.channel.project(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(client) => client.notify(TURN_STATE_NOTIFICATION, {
         sessionId: this.sessionId,
         turn,
       }), `turn_state/${turn.turnId}/${turn.status}`);
   }
 
-  private async content(
+  /** 执行「content」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async content(
     sessionUpdate: MessageUpdate,
     messageId: string,
     text: string,
     meta: MessageMeta,
   ): Promise<void> {
-    await this.channel.project((client) => client.notify(acp.methods.client.session.update, {
+    await this.channel.project(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(client) => client.notify(acp.methods.client.session.update, {
       sessionId: this.sessionId,
       update: {
         sessionUpdate,

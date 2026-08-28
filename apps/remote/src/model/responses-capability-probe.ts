@@ -34,6 +34,7 @@ const PROFILE_EFFORTS = [
   effort: string;
 }>;
 
+/** 描述「ResponsesCapabilityProberOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ResponsesCapabilityProberOptions {
   timeoutMs?: number;
   maxOutputTokens?: number;
@@ -63,7 +64,8 @@ export class ResponsesCapabilityProber {
   private readonly endpointResolver?: ResponsesCapabilityProberOptions["endpointResolver"];
   private readonly now: () => Date;
 
-  constructor(options: ResponsesCapabilityProberOptions = {}) {
+  /** 初始化「ResponsesCapabilityProber」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(options: ResponsesCapabilityProberOptions = {}) {
     this.timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS, "timeoutMs");
     this.maxOutputTokens = positiveInteger(
       options.maxOutputTokens,
@@ -72,13 +74,16 @@ export class ResponsesCapabilityProber {
     );
     this.endpointGuard = options.endpointGuard;
     this.endpointResolver = options.endpointResolver;
-    this.now = options.now ?? (() => new Date());
+    this.now = options.now ?? (/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => new Date());
   }
 
-  async probe(candidate: ResponsesModelCandidateInput): Promise<ResponsesCapabilityProbe> {
+  /** 执行「probe」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async probe(candidate: ResponsesModelCandidateInput): Promise<ResponsesCapabilityProbe> {
     const student = probeStudent(candidate);
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => candidate.apiKey,
+      readBearerToken: /** 读取「readBearerToken」所需数据，并遵守作用域、分页与容量边界。 */
+() => candidate.apiKey,
       reasoning: probeReasoningConfiguration(),
       ...(this.endpointGuard ? { endpointGuard: this.endpointGuard } : {}),
       ...(this.endpointResolver ? { endpointResolver: this.endpointResolver } : {}),
@@ -155,12 +160,16 @@ export class ResponsesCapabilityProber {
     }
 
     const profiles = PROFILE_EFFORTS
-      .filter((item) => accepted.has(item.profile))
-      .map((item) => item.profile);
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => accepted.has(item.profile))
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.profile);
     const efforts = Object.fromEntries(
-      profiles.map((profile) => [profile, accepted.get(profile)!]),
+      profiles.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(profile) => [profile, accepted.get(profile)!]),
     ) as Partial<Record<ConcreteReasoningProfile, string>>;
-    const acceptedEfforts = profiles.map((profile) => efforts[profile]!);
+    const acceptedEfforts = profiles.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(profile) => efforts[profile]!);
     const defaultProfile = preferredDefaultProfile(profiles);
     return readResponsesCapabilityProbe({
       schemaVersion: 1,
@@ -187,27 +196,32 @@ export class ResponsesCapabilityProber {
           native: { parameter: "reasoning.effort", values: acceptedEfforts },
         },
         nativeByProfile: Object.fromEntries(
-          profiles.map((profile) => [profile, { effort: efforts[profile]! }]),
+          profiles.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(profile) => [profile, { effort: efforts[profile]! }]),
         ),
-        acceptedNativeValues: acceptedEfforts.map((effort) => ({ effort })),
+        acceptedNativeValues: acceptedEfforts.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(effort) => ({ effort })),
       },
       testedAt: this.now().toISOString(),
     });
   }
 
-  private async run(
+  /** 执行「run」主流程，传播取消与失败并在结束时清理临时资源。 */
+private async run(
     provider: ResponsesApiProvider,
     input: ModelInput,
     options: Omit<ResponsesProbeStreamOptions, "maxOutputTokens" | "onTerminalResponse">,
   ): Promise<ProbeRunResult> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => controller.abort(), this.timeoutMs);
     const result: ProbeRunResult = { text: "", thought: "", calls: [], usage: false };
     try {
       for await (const event of provider.streamProbe(input, controller.signal, {
         ...options,
         maxOutputTokens: this.maxOutputTokens,
-        onTerminalResponse: (response) => {
+        onTerminalResponse: /** 处理「onTerminalResponse」事件，校验归属后再推进状态且避免重复提交。 */
+(response) => {
           const effort = effectiveReasoningEffort(response);
           if (effort !== undefined) result.effectiveReasoningEffort = effort;
         },
@@ -231,6 +245,7 @@ export class ResponsesCapabilityProber {
   }
 }
 
+/** 执行「collect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function collect(result: ProbeRunResult, event: ModelEvent): void {
   if (event.type === "text_delta") result.text += event.text;
   if (event.type === "thinking_delta") result.thought += event.text;
@@ -240,6 +255,7 @@ function collect(result: ProbeRunResult, event: ModelEvent): void {
   if (event.type === "finish") result.finishReason = event.reason;
 }
 
+/** 执行「textInput」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function textInput(reasoning?: ModelInput["reasoning"]): ModelInput {
   return {
     systemPrompt: "You are performing a bounded API compatibility probe.",
@@ -249,6 +265,7 @@ function textInput(reasoning?: ModelInput["reasoning"]): ModelInput {
   };
 }
 
+/** 根据已校验输入构建「toolInput」结果，不额外持有调用方的大对象。 */
 function toolInput(reasoning: ModelInput["reasoning"]): ModelInput {
   return {
     systemPrompt: "You are performing a bounded API compatibility probe.",
@@ -261,6 +278,7 @@ function toolInput(reasoning: ModelInput["reasoning"]): ModelInput {
   };
 }
 
+/** 根据已校验输入构建「toolContinuationInput」结果，不额外持有调用方的大对象。 */
 function toolContinuationInput(
   reasoning: ModelInput["reasoning"],
   continuation: ProviderOpaqueContinuation,
@@ -286,6 +304,7 @@ function toolContinuationInput(
   };
 }
 
+/** 执行「probeTool」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function probeTool(): ModelInput["tools"][number] {
   return {
     type: "function",
@@ -302,6 +321,7 @@ function probeTool(): ModelInput["tools"][number] {
   };
 }
 
+/** 执行「validProbeCall」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function validProbeCall(calls: ModelToolCall[]): (ModelToolCall & { id: string }) | undefined {
   if (calls.length !== 1) return undefined;
   const call = calls[0];
@@ -315,6 +335,7 @@ function validProbeCall(calls: ModelToolCall[]): (ModelToolCall & { id: string }
   return call as ModelToolCall & { id: string };
 }
 
+/** 生成「reasoningSnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
 function reasoningSnapshot(
   student: ModelStudent,
   profile: ConcreteReasoningProfile,
@@ -331,6 +352,7 @@ function reasoningSnapshot(
   };
 }
 
+/** 执行「probeStudent」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function probeStudent(candidate: ResponsesModelCandidateInput): ModelStudent {
   return {
     id: "responses-admission-probe",
@@ -345,25 +367,30 @@ function probeStudent(candidate: ResponsesModelCandidateInput): ModelStudent {
   };
 }
 
+/** 执行「probeReasoningConfiguration」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function probeReasoningConfiguration(): ResponsesReasoningConfiguration {
   return {
     capability: {
       schemaVersion: 1,
       control: "effort_levels",
       adjustable: true,
-      supportedProfiles: PROFILE_EFFORTS.map((item) => item.profile),
+      supportedProfiles: PROFILE_EFFORTS.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.profile),
       defaultProfile: "balanced",
       native: {
         parameter: "reasoning.effort",
-        values: PROFILE_EFFORTS.map((item) => item.effort),
+        values: PROFILE_EFFORTS.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.effort),
       },
     },
     efforts: Object.fromEntries(
-      PROFILE_EFFORTS.map((item) => [item.profile, item.effort]),
+      PROFILE_EFFORTS.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => [item.profile, item.effort]),
     ),
   };
 }
 
+/** 执行「effectiveReasoningEffort」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function effectiveReasoningEffort(response: Readonly<Record<string, unknown>>): string | undefined {
   if (typeof response.reasoning_effort === "string") return response.reasoning_effort;
   const reasoning = response.reasoning;
@@ -372,6 +399,7 @@ function effectiveReasoningEffort(response: Readonly<Record<string, unknown>>): 
   return typeof effort === "string" ? effort : undefined;
 }
 
+/** 执行「preferredDefaultProfile」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function preferredDefaultProfile(
   profiles: readonly ConcreteReasoningProfile[],
 ): ConcreteReasoningProfile {
@@ -382,6 +410,7 @@ function preferredDefaultProfile(
   return first;
 }
 
+/** 执行「preferredToolProfile」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function preferredToolProfile(
   accepted: ReadonlyMap<ConcreteReasoningProfile, string>,
 ): ConcreteReasoningProfile {
@@ -391,6 +420,7 @@ function preferredToolProfile(
   throw new Error("Responses reasoning profile 不能为空");
 }
 
+/** 执行「positiveInteger」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function positiveInteger(value: number | undefined, fallback: number, field: string): number {
   if (value === undefined) return fallback;
   if (!Number.isInteger(value) || value <= 0) throw new Error(`${field} 必须是正整数`);

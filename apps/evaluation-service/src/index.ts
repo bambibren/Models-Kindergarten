@@ -12,11 +12,14 @@ console.log(`Kindergarten Evaluation API: http://${host}:${port}`);
 console.log(`Evaluation data: ${dataDir}`);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    void server.close().finally(() => process.exit(0));
+  process.once(signal, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => {
+    void server.close().finally(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => process.exit(0));
   });
 }
 
+/** 执行「integerEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function integerEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;

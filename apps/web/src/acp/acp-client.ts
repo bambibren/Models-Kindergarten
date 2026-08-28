@@ -23,12 +23,14 @@ import {
 } from "@kindergarten/contracts";
 import type { PendingInteractionState } from "../prompt-turn/prompt-turn-types.js";
 
+/** 描述「PromptIds」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PromptIds {
   turnId: string;
   operationId?: string;
   artifactMentions?: ArtifactMentionInput[];
 }
 
+/** 描述「ClientHandlers」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ClientHandlers {
   onUpdate: (value: acp.SessionNotification) => void;
   onContextSummary: (value: ContextSummaryNotification) => void;
@@ -45,19 +47,22 @@ export interface ClientHandlers {
  * 这里不做自动重试，避免旧系统中“连接恢复”和“历史回放”互相触发。
  */
 export class AcpWebClient {
-  private constructor(
+  /** 初始化「AcpWebClient」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+private constructor(
     private readonly connection: acp.ClientConnection,
     private readonly interactions: PendingAcpInteractions,
   ) {}
 
-  static async open(
+  /** 执行「open」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+static async open(
     url: string,
     handlers: ClientHandlers,
   ): Promise<AcpWebClient> {
     const interactions = new PendingAcpInteractions(handlers);
     const app = acp
       .client({ name: "model-kindergarten-web" })
-      .onNotification(acp.methods.client.session.update, ({ params }) => {
+      .onNotification(acp.methods.client.session.update, /** 处理「onNotification」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) => {
         try {
           handlers.onUpdate(params);
         } catch (error) {
@@ -68,27 +73,33 @@ export class AcpWebClient {
       .onNotification(
         CONTEXT_SUMMARY_NOTIFICATION,
         { parse: readContextSummaryNotification },
-        ({ params }) => handlers.onContextSummary(params),
+        /** 处理「onNotification」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) => handlers.onContextSummary(params),
       )
       .onNotification(
         TOKEN_USAGE_NOTIFICATION,
         { parse: readTokenUsageNotification },
-        ({ params }) => handlers.onTokenUsage(params),
+        /** 处理「onNotification」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) => handlers.onTokenUsage(params),
       )
       .onNotification(
         CONTEXT_WINDOW_USAGE_NOTIFICATION,
         { parse: readContextWindowUsageNotification },
-        ({ params }) => handlers.onContextWindowUsage(params),
+        /** 处理「onNotification」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) => handlers.onContextWindowUsage(params),
       )
       .onNotification(
         TURN_STATE_NOTIFICATION,
         { parse: readTurnStateNotification },
-        ({ params }) => handlers.onTurnState(params),
+        /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) => handlers.onTurnState(params),
       )
-      .onRequest(acp.methods.client.session.requestPermission, ({ params }) =>
+      .onRequest(acp.methods.client.session.requestPermission, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) =>
         interactions.requestPermission(params),
       )
-      .onRequest(acp.methods.client.elicitation.create, ({ params }) =>
+      .onRequest(acp.methods.client.elicitation.create, /** 执行「app」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+({ params }) =>
         interactions.requestElicitation(params),
       );
 
@@ -114,7 +125,8 @@ export class AcpWebClient {
       throw error;
     }
 
-    void connection.closed.then(() => {
+    void connection.closed.then(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => {
       console.warn("[acp-web] connection closed");
       interactions.abandonAll();
       handlers.onClose();
@@ -122,11 +134,13 @@ export class AcpWebClient {
     return client;
   }
 
-  list(cwd: string): Promise<acp.ListSessionsResponse> {
+  /** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
+list(cwd: string): Promise<acp.ListSessionsResponse> {
     return this.connection.agent.request(acp.methods.agent.session.list, { cwd });
   }
 
-  create(cwd: string, binding: { modelStudentId: string; agentId: string }): Promise<acp.NewSessionResponse> {
+  /** 根据已校验输入构建「create」结果，不额外持有调用方的大对象。 */
+create(cwd: string, binding: { modelStudentId: string; agentId: string }): Promise<acp.NewSessionResponse> {
     return this.connection.agent.request(acp.methods.agent.session.new, {
       cwd,
       mcpServers: [],
@@ -134,7 +148,8 @@ export class AcpWebClient {
     });
   }
 
-  createExperiment(cwd: string, experimentId: string, variantId: string): Promise<acp.NewSessionResponse> {
+  /** 根据已校验输入构建「createExperiment」结果，不额外持有调用方的大对象。 */
+createExperiment(cwd: string, experimentId: string, variantId: string): Promise<acp.NewSessionResponse> {
     return this.connection.agent.request(acp.methods.agent.session.new, {
       cwd,
       mcpServers: [],
@@ -142,7 +157,8 @@ export class AcpWebClient {
     });
   }
 
-  load(sessionId: string, cwd: string): Promise<acp.LoadSessionResponse> {
+  /** 读取「load」所需数据，并遵守作用域、分页与容量边界。 */
+load(sessionId: string, cwd: string): Promise<acp.LoadSessionResponse> {
     return this.connection.agent.request(acp.methods.agent.session.load, {
       sessionId,
       cwd,
@@ -167,11 +183,13 @@ export class AcpWebClient {
     });
   }
 
-  closeSession(sessionId: string): Promise<acp.CloseSessionResponse> {
+  /** 释放或删除「closeSession」对应资源，重复调用仍保持安全。 */
+closeSession(sessionId: string): Promise<acp.CloseSessionResponse> {
     return this.connection.agent.request(acp.methods.agent.session.close, { sessionId });
   }
 
-  setConfigOption(
+  /** 更新「setConfigOption」对应状态，并保持写入顺序、原子性与容量约束。 */
+setConfigOption(
     sessionId: string,
     configId: string,
     value: string,
@@ -183,7 +201,8 @@ export class AcpWebClient {
     });
   }
 
-  prompt(
+  /** 通过当前唯一 ACP connection owner 提交 Prompt；终态只能以 Remote 响应和通知为准。 */
+prompt(
     sessionId: string,
     text: string,
     ids: PromptIds,
@@ -200,7 +219,8 @@ export class AcpWebClient {
     });
   }
 
-  cancel(sessionId: string): Promise<void> {
+  /** 判断「cancel」对应条件，只返回判定结果且不修改输入状态。 */
+cancel(sessionId: string): Promise<void> {
     return this.connection.agent.notify(acp.methods.agent.session.cancel, {
       sessionId,
     });
@@ -217,11 +237,13 @@ export class AcpWebClient {
     this.interactions.resolve(interaction, value);
   }
 
-  cancelInteractions(): void {
+  /** 判断「cancelInteractions」对应条件，只返回判定结果且不修改输入状态。 */
+cancelInteractions(): void {
     this.interactions.cancelAll();
   }
 
-  close(): void {
+  /** 释放或删除「close」对应资源，重复调用仍保持安全。 */
+close(): void {
     this.interactions.abandonAll();
     this.connection.close();
   }
@@ -241,9 +263,11 @@ type PendingReply =
 class PendingAcpInteractions {
   private readonly byId = new Map<string, PendingReply>();
 
-  constructor(private readonly handlers: ClientHandlers) {}
+  /** 初始化「PendingAcpInteractions」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(private readonly handlers: ClientHandlers) {}
 
-  requestPermission(
+  /** 执行「requestPermission」主流程，传播取消与失败并在结束时清理临时资源。 */
+requestPermission(
     request: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
     const id = makeTurnInteractionId("permission", request.toolCall.toolCallId);
@@ -253,26 +277,30 @@ class PendingAcpInteractions {
       toolCallId: request.toolCall.toolCallId,
       name: request.toolCall.name,
     });
-    return new Promise((resolve) => {
+    return new Promise(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
+(resolve) => {
       this.byId.set(id, { kind: "permission", resolve });
       this.handlers.onInteraction({ id, kind: "permission", request });
     });
   }
 
-  requestElicitation(
+  /** 执行「requestElicitation」主流程，传播取消与失败并在结束时清理临时资源。 */
+requestElicitation(
     request: acp.CreateElicitationRequest,
   ): Promise<acp.CreateElicitationResponse> {
     const toolCallId = "toolCallId" in request && typeof request.toolCallId === "string"
       ? request.toolCallId
       : crypto.randomUUID();
     const id = makeTurnInteractionId("elicitation", toolCallId);
-    return new Promise((resolve) => {
+    return new Promise(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
+(resolve) => {
       this.byId.set(id, { kind: "elicitation", resolve });
       this.handlers.onInteraction({ id, kind: "elicitation", request });
     });
   }
 
-  resolve(
+  /** 执行「resolve」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+resolve(
     interaction: PendingInteractionState,
     value: acp.RequestPermissionResponse | acp.CreateElicitationResponse,
   ): void {
@@ -293,7 +321,8 @@ class PendingAcpInteractions {
     this.handlers.onInteractionResolved(interaction.id);
   }
 
-  cancelAll(): void {
+  /** 判断「cancelAll」对应条件，只返回判定结果且不修改输入状态。 */
+cancelAll(): void {
     for (const [id, pending] of [...this.byId]) {
       this.byId.delete(id);
       if (pending.kind === "permission") {
@@ -314,6 +343,7 @@ class PendingAcpInteractions {
   }
 }
 
+/** 生成「notificationFacts」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
 function notificationFacts(value: acp.SessionNotification) {
   const update = value.update;
   return {
@@ -325,6 +355,7 @@ function notificationFacts(value: acp.SessionNotification) {
   };
 }
 
+/** 由规范字段生成稳定的「interactionToolCallId」标识，供索引精确定位且不保留原始大对象。 */
 function interactionToolCallId(interaction: PendingInteractionState): string | undefined {
   if (interaction.kind === "permission") return interaction.request.toolCall.toolCallId;
   return "toolCallId" in interaction.request && typeof interaction.request.toolCallId === "string"

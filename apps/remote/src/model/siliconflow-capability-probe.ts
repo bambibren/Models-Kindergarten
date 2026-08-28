@@ -25,6 +25,7 @@ const PROBE_NONCE = "mk-siliconflow-probe-nonce";
 const ADAPTER_REVISION = "siliconflow-chat-completions-v1";
 const PROBE_VERSION = 1;
 
+/** 描述「SiliconFlowCapabilityProberOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SiliconFlowCapabilityProberOptions {
   timeoutMs?: number;
   maxOutputTokens?: number;
@@ -43,10 +44,11 @@ interface ProbeRunResult {
 }
 
 /**
- * Bounded active probe for SiliconFlow's Chat Completions endpoint.
- * Toggle support is declared only when false and true both complete and the
- * wire output observably changes from no reasoning_content to reasoning_content.
+ * 对硅基流动 Chat Completions 端点执行有界主动探针。
+ * 只有 false/true 两次请求都完成，且 wire 输出从无 `reasoning_content` 明确变为有该字段，
+ * 才声明端点支持 reasoning 开关。
  */
+/** 描述「SiliconFlowCapabilityProber」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class SiliconFlowCapabilityProber {
   private readonly timeoutMs: number;
   private readonly maxOutputTokens: number;
@@ -54,7 +56,8 @@ export class SiliconFlowCapabilityProber {
   private readonly endpointResolver?: SiliconFlowCapabilityProberOptions["endpointResolver"];
   private readonly now: () => Date;
 
-  constructor(options: SiliconFlowCapabilityProberOptions = {}) {
+  /** 初始化「SiliconFlowCapabilityProber」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(options: SiliconFlowCapabilityProberOptions = {}) {
     this.timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS, "timeoutMs");
     this.maxOutputTokens = positiveInteger(
       options.maxOutputTokens,
@@ -63,10 +66,12 @@ export class SiliconFlowCapabilityProber {
     );
     this.endpointGuard = options.endpointGuard;
     this.endpointResolver = options.endpointResolver;
-    this.now = options.now ?? (() => new Date());
+    this.now = options.now ?? (/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => new Date());
   }
 
-  async probe(
+  /** 执行「probe」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async probe(
     candidate: ResolvedModelStudentCandidate,
   ): Promise<ProviderCapabilitySnapshot> {
     if (
@@ -77,7 +82,8 @@ export class SiliconFlowCapabilityProber {
     }
     const student = probeStudent(candidate);
     const provider = new ChatCompletionsProvider(student, {
-      readBearerToken: () => candidate.apiKey,
+      readBearerToken: /** 读取「readBearerToken」所需数据，并遵守作用域、分页与容量边界。 */
+() => candidate.apiKey,
       reasoning: fixedReasoningConfiguration(),
       ...(this.endpointGuard ? { endpointGuard: this.endpointGuard } : {}),
       ...(this.endpointResolver ? { endpointResolver: this.endpointResolver } : {}),
@@ -93,8 +99,7 @@ export class SiliconFlowCapabilityProber {
       );
     }
 
-    // stream_options is OpenAI-compatible but not required by SiliconFlow's base
-    // streaming contract, so test it independently instead of breaking admission.
+    // `stream_options` 与 OpenAI 兼容，但不是硅基流动基础流协议的必需项；单独探测，失败不应破坏基础入园。
     const usageRun = await this.tryRun(provider, textInput(), { includeUsage: true });
 
     const thinkingOffNative = { enable_thinking: false } as const;
@@ -147,7 +152,8 @@ export class SiliconFlowCapabilityProber {
     }
 
     const runs = [baseline, usageRun, thinkingOff, thinkingOn, toolRound].filter(
-      (item): item is ProbeRunResult => item !== undefined,
+      /** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item): item is ProbeRunResult => item !== undefined,
     );
     return {
       schemaVersion: 1,
@@ -160,13 +166,15 @@ export class SiliconFlowCapabilityProber {
       toolCalls,
       toolContinuation,
       usage: usageRun?.usage === true,
-      thought: runs.some((item) => item.thought.length > 0),
+      thought: runs.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.thought.length > 0),
       reasoning,
       testedAt: this.now().toISOString(),
     };
   }
 
-  private async tryRun(
+  /** 执行「tryRun」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async tryRun(
     provider: ChatCompletionsProvider,
     input: ModelInput,
     options: ChatCompletionsProbeStreamOptions,
@@ -179,13 +187,15 @@ export class SiliconFlowCapabilityProber {
     }
   }
 
-  private async run(
+  /** 执行「run」主流程，传播取消与失败并在结束时清理临时资源。 */
+private async run(
     provider: ChatCompletionsProvider,
     input: ModelInput,
     options: ChatCompletionsProbeStreamOptions,
   ): Promise<ProbeRunResult> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => controller.abort(), this.timeoutMs);
     const result: ProbeRunResult = { text: "", thought: "", calls: [], usage: false };
     try {
       for await (const event of provider.streamProbe(input, controller.signal, {
@@ -211,6 +221,7 @@ export class SiliconFlowCapabilityProber {
   }
 }
 
+/** 执行「collect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function collect(result: ProbeRunResult, event: ModelEvent): void {
   if (event.type === "text_delta") result.text += event.text;
   if (event.type === "thinking_delta") result.thought += event.text;
@@ -224,6 +235,7 @@ function collect(result: ProbeRunResult, event: ModelEvent): void {
   if (event.type === "finish") result.finishReason = event.reason;
 }
 
+/** 执行「completedText」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function completedText(result: ProbeRunResult | undefined): result is ProbeRunResult {
   return result !== undefined
     && result.finishReason !== undefined
@@ -231,6 +243,7 @@ function completedText(result: ProbeRunResult | undefined): result is ProbeRunRe
     && result.text.length > 0;
 }
 
+/** 执行「textInput」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function textInput(): ModelInput {
   return {
     systemPrompt: "You are performing a bounded API compatibility probe.",
@@ -239,6 +252,7 @@ function textInput(): ModelInput {
   };
 }
 
+/** 执行「reasoningInput」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function reasoningInput(): ModelInput {
   return {
     systemPrompt: "You are performing a bounded API compatibility probe.",
@@ -250,6 +264,7 @@ function reasoningInput(): ModelInput {
   };
 }
 
+/** 根据已校验输入构建「toolInput」结果，不额外持有调用方的大对象。 */
 function toolInput(): ModelInput {
   return {
     systemPrompt: "You are performing a bounded API compatibility probe.",
@@ -261,6 +276,7 @@ function toolInput(): ModelInput {
   };
 }
 
+/** 根据已校验输入构建「toolContinuationInput」结果，不额外持有调用方的大对象。 */
 function toolContinuationInput(call: ModelToolCall & { id: string }): ModelInput {
   return {
     systemPrompt: "You are performing a bounded API compatibility probe.",
@@ -289,6 +305,7 @@ function toolContinuationInput(call: ModelToolCall & { id: string }): ModelInput
   };
 }
 
+/** 执行「probeTool」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function probeTool(): ModelInput["tools"][number] {
   return {
     type: "function",
@@ -305,6 +322,7 @@ function probeTool(): ModelInput["tools"][number] {
   };
 }
 
+/** 执行「validProbeCall」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function validProbeCall(
   calls: ModelToolCall[],
 ): (ModelToolCall & { id: string }) | undefined {
@@ -318,6 +336,7 @@ function validProbeCall(
   return call as ModelToolCall & { id: string };
 }
 
+/** 执行「fixedReasoningConfiguration」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function fixedReasoningConfiguration(): ChatCompletionsReasoningConfiguration {
   return {
     capability: {
@@ -331,6 +350,7 @@ function fixedReasoningConfiguration(): ChatCompletionsReasoningConfiguration {
   };
 }
 
+/** 生成「fixedReasoningSnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
 function fixedReasoningSnapshot(): ProviderCapabilitySnapshot["reasoning"] {
   return {
     capability: {
@@ -345,6 +365,7 @@ function fixedReasoningSnapshot(): ProviderCapabilitySnapshot["reasoning"] {
   };
 }
 
+/** 根据已校验输入构建「toggleReasoningSnapshot」结果，不额外持有调用方的大对象。 */
 function toggleReasoningSnapshot(): ProviderCapabilitySnapshot["reasoning"] {
   const nativeByProfile: Partial<
     Record<ConcreteReasoningProfile, ChatCompletionsNativeReasoning>
@@ -372,6 +393,7 @@ function toggleReasoningSnapshot(): ProviderCapabilitySnapshot["reasoning"] {
   };
 }
 
+/** 执行「probeStudent」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function probeStudent(candidate: ResolvedModelStudentCandidate): ModelStudent {
   return {
     id: "siliconflow-admission-probe",
@@ -386,6 +408,7 @@ function probeStudent(candidate: ResolvedModelStudentCandidate): ModelStudent {
   };
 }
 
+/** 执行「connectionFingerprint」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function connectionFingerprint(
   candidate: Pick<
     ResolvedModelStudentCandidate,
@@ -402,6 +425,7 @@ export function connectionFingerprint(
     .digest("hex");
 }
 
+/** 执行「positiveInteger」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function positiveInteger(value: number | undefined, fallback: number, field: string): number {
   const result = value ?? fallback;
   if (!Number.isInteger(result) || result < 1) throw new Error(`${field} 必须是正整数`);

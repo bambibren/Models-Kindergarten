@@ -15,7 +15,8 @@ import "./styles.css";
 const root = document.getElementById("root");
 if (!root) throw new Error("找不到 #root");
 
-window.addEventListener("error", (event) => {
+window.addEventListener("error", /** 处理当前外部事件；注册方必须在对称生命周期中移除监听器。 */
+(event) => {
   console.error("[web-runtime] uncaught error", {
     message: event.message,
     filename: event.filename,
@@ -24,7 +25,8 @@ window.addEventListener("error", (event) => {
     stack: event.error instanceof Error ? event.error.stack : undefined,
   });
 });
-window.addEventListener("unhandledrejection", (event) => {
+window.addEventListener("unhandledrejection", /** 处理当前外部事件；注册方必须在对称生命周期中移除监听器。 */
+(event) => {
   const reason = event.reason;
   console.error("[web-runtime] unhandled rejection", {
     message: reason instanceof Error ? reason.message : String(reason),
@@ -35,6 +37,7 @@ window.addEventListener("unhandledrejection", (event) => {
 // Demo 路径不挂载真实 App，避免创建第二个 ACP connection owner。
 const application = route();
 
+/** 执行「route」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function route() {
   const path = normalize(location.pathname);
   if (isDemoRoute(path)) return <DemoApp />;
@@ -55,6 +58,7 @@ function route() {
   return <main className="product-page"><section className="product-state"><strong>页面不存在</strong><a href="/">返回首页</a></section></main>;
 }
 
+/** 校验并规范化「normalize」输入，非法数据直接返回明确错误。 */
 function normalize(pathname: string) { return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname; }
 
 // 不启用开发期双挂载，确保页面只有一个明确的 ACP 连接拥有者。

@@ -25,6 +25,7 @@ import { ArtifactToolProvider } from "../artifacts/artifact-tool-provider.js";
 import { PptxBuildService } from "../pptx/pptx-build-service.js";
 import { PptxToolProvider } from "../pptx/pptx-tool-provider.js";
 
+/** 描述「ResolvedRuntimeCapabilities」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ResolvedRuntimeCapabilities {
   scope: TurnScope;
   agent: AgentRecord;
@@ -37,15 +38,18 @@ export interface ResolvedRuntimeCapabilities {
   expectedFirstProviderInputHash?: string;
 }
 
+/** 描述「RuntimeCapabilityResolverPort」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface RuntimeCapabilityResolverPort {
   resolve(scope: TurnScope, currentUserMessage?: string): Promise<ResolvedRuntimeCapabilities>;
 }
 
+/** 描述「RuntimeCapabilityResolver」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort {
   private readonly models: ModelStudentCatalog;
   private experimentSnapshot?: (experimentId: string, testId: string) => Promise<ExperimentTestSnapshotV2 | undefined>;
 
-  constructor(
+  /** 初始化「RuntimeCapabilityResolver」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly agents: AgentService,
     modelOrCatalog: ModelProvider | ModelStudentCatalog,
     private readonly skills: SkillRegistry,
@@ -59,7 +63,8 @@ export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort 
       : new ModelStudentCatalog(modelOrCatalog, "ready");
   }
 
-  async resolve(scope: TurnScope, currentUserMessage = ""): Promise<ResolvedRuntimeCapabilities> {
+  /** 执行「resolve」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async resolve(scope: TurnScope, currentUserMessage = ""): Promise<ResolvedRuntimeCapabilities> {
     const model = this.models.requireProvider(scope.modelStudentId);
     if (scope.experimentRunRef && this.experimentSnapshot) {
       const snapshot = await this.experimentSnapshot(scope.experimentRunRef.experimentId, scope.experimentRunRef.variantId);
@@ -86,17 +91,20 @@ export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort 
     return this.resolveAgent(scope, agent, currentUserMessage, model);
   }
 
-  setExperimentSnapshotResolver(
+  /** 更新「setExperimentSnapshotResolver」对应状态，并保持写入顺序、原子性与容量约束。 */
+setExperimentSnapshotResolver(
     resolver: (experimentId: string, testId: string) => Promise<ExperimentTestSnapshotV2 | undefined>,
   ): void {
     this.experimentSnapshot = resolver;
   }
 
-  modelSummary(modelStudentId: string) {
+  /** 执行「modelSummary」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+modelSummary(modelStudentId: string) {
     return this.models.get(modelStudentId);
   }
 
-  async preview(
+  /** 执行「preview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async preview(
     ownerId: string,
     policy: ExperimentContextPolicy,
     prompt: string,
@@ -117,7 +125,8 @@ export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort 
     return this.resolveAgent({ schemaVersion: 1, ownerId, sessionId: "context-preview", turnId: "context-preview", purpose: "experiment", modelStudentId: model.student.id, agentId: agent.agentId }, agent, prompt, model);
   }
 
-  private async resolveAgent(
+  /** 执行「resolveAgent」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async resolveAgent(
     scope: TurnScope,
     agent: AgentRecord,
     currentUserMessage: string,
@@ -125,11 +134,14 @@ export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort 
   ): Promise<ResolvedRuntimeCapabilities> {
     const sandbox = new FileSandbox(join(this.workspacesRoot, scope.sessionId));
     await sandbox.initialize();
-    const builtinBindings = new Map(agent.builtinTools.map((item) => [item.toolId, {
+    const builtinBindings = new Map(agent.builtinTools.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => [item.toolId, {
       enabled: item.enabled,
       permission: item.permission,
     }]));
-    const installationIds = agent.skills.filter((item) => item.enabled).map((item) => item.skillInstallationId);
+    const installationIds = agent.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.skillInstallationId);
     const skillNames = this.skillInstallations
       ? await this.skillInstallations.runtimeSkillNames(installationIds, scope.ownerId)
       : installationIds;
@@ -177,19 +189,22 @@ export class RuntimeCapabilityResolver implements RuntimeCapabilityResolverPort 
   }
 }
 
+/** 执行「agentRecordFields」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function agentRecordFields(input: AgentInput): Pick<AgentRecord, "name" | "description" | "systemPrompt" | "builtinTools" | "skills" | "mcps" | "historyPolicy" | "memoryPolicy"> {
   return {
     name: input.name,
     ...(input.description ? { description: input.description } : {}),
     systemPrompt: input.systemPrompt,
     builtinTools: input.builtinTools,
-    skills: input.skillInstallationIds.map((skillInstallationId) => ({ skillInstallationId, enabled: true })),
+    skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(skillInstallationId) => ({ skillInstallationId, enabled: true })),
     mcps: input.mcps,
     historyPolicy: input.historyPolicy,
     memoryPolicy: input.memoryPolicy,
   };
 }
 
+/** 判断「hash」对应条件，只返回判定结果且不修改输入状态。 */
 function hash(value: unknown): string {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }

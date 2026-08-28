@@ -18,19 +18,26 @@ import { SkillInstallBanner } from "./SkillInstallBanner.js";
 import { clampArtifactWidth, defaultArtifactWidth } from "./split-pane.js";
 import "./session-demo.css";
 
+/** 渲染「SessionDemoPage」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function SessionDemoPage() {
-  const query = useMemo(() => new URLSearchParams(location.search), []);
+  const query = useMemo(/** 缓存「query」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => new URLSearchParams(location.search), []);
   const draftPrompt = query.get("draft") === "home-prompt" ? sessionStorage.getItem("mk-demo-home-prompt") : null;
   const selectedModelId = sessionStorage.getItem("mk-demo-model-student");
   const initialAgentId = sessionStorage.getItem("mk-demo-agent") ?? "agent-default";
   const websiteFlow = Boolean(draftPrompt && sessionStorage.getItem("mk-demo-home-flow") === "website-development" && isWebsiteDevelopmentRequest(draftPrompt));
-  const selectedModel = demoModelStudents.find((model) => model.id === selectedModelId) ?? demoModelStudents[0];
-  const [agents] = useState(() => mergeAgentStrategies(loadSavedAgents(sessionStorage), demoAgentStrategies));
-  const [installations] = useState(() => mergeMcpInstallations(loadSavedMcps(sessionStorage), demoMcpInstallations, loadRemovedMcpIds(sessionStorage)));
-  const selectedAgent = agents.find((agent) => agent.id === initialAgentId) ?? agents[0] ?? demoAgentStrategies[0];
+  const selectedModel = demoModelStudents.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(model) => model.id === selectedModelId) ?? demoModelStudents[0];
+  const [agents] = useState(/** 执行「[agents]」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => mergeAgentStrategies(loadSavedAgents(sessionStorage), demoAgentStrategies));
+  const [installations] = useState(/** 执行「[installations]」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => mergeMcpInstallations(loadSavedMcps(sessionStorage), demoMcpInstallations, loadRemovedMcpIds(sessionStorage)));
+  const selectedAgent = agents.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(agent) => agent.id === initialAgentId) ?? agents[0] ?? demoAgentStrategies[0];
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [activeSession, setActiveSession] = useState(query.get("draft") ? "demo-new-session" : query.get("sessionId") ?? demoSessions[0]?.id ?? "");
-  const [reasoningProfile, setReasoningProfile] = useState<ReasoningProfile>(() => loadDemoSessionReasoning(sessionStorage, query.get("draft") ? "demo-new-session" : query.get("sessionId") ?? demoSessions[0]?.id ?? ""));
+  const [reasoningProfile, setReasoningProfile] = useState<ReasoningProfile>(/** 执行「[reasoningProfile, setReasoningProfile]」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => loadDemoSessionReasoning(sessionStorage, query.get("draft") ? "demo-new-session" : query.get("sessionId") ?? demoSessions[0]?.id ?? ""));
   const [artifact, setArtifact] = useState<DemoArtifact | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(520);
   const [isResizing, setIsResizing] = useState(false);
@@ -39,46 +46,56 @@ export function SessionDemoPage() {
   const [showInstallBanner, setShowInstallBanner] = useState(websiteFlow);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const installStarted = useRef(false);
-  const { batch: installBatch, start: startInstall } = useDemoSkillInstall((records) => {
-    if (selectedAgent) saveAgent(sessionStorage, bindSkillsToAgent(selectedAgent, records.map((record) => record.name)));
+  const { batch: installBatch, start: startInstall } = useDemoSkillInstall(/** 执行「{ batch: installBatch, start: startInstall }」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(records) => {
+    if (selectedAgent) saveAgent(sessionStorage, bindSkillsToAgent(selectedAgent, records.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(record) => record.name)));
     setWebsiteReady(true);
-    window.setTimeout(() => setShowInstallBanner(false), 1100);
+    window.setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => setShowInstallBanner(false), 1100);
   });
 
-  useEffect(() => {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
     if (!websiteFlow || installStarted.current) return;
     installStarted.current = true;
     startInstall(websiteSkillSources);
   }, [startInstall, websiteFlow]);
 
-  function selectSession(sessionId: string) {
+  /** 执行「selectSession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function selectSession(sessionId: string) {
     setActiveSession(sessionId);
     setReasoningProfile(loadDemoSessionReasoning(sessionStorage, sessionId));
   }
 
-  function changeReasoning(profile: ReasoningProfile) {
+  /** 执行「changeReasoning」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function changeReasoning(profile: ReasoningProfile) {
     saveDemoSessionReasoning(sessionStorage, activeSession, profile);
     setReasoningProfile(profile);
   }
 
-  function openArtifact(next: DemoArtifact) {
+  /** 执行「openArtifact」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function openArtifact(next: DemoArtifact) {
     const containerWidth = workspaceRef.current?.clientWidth;
     if (containerWidth) setArtifactWidth(defaultArtifactWidth(containerWidth));
     setArtifact(next);
     setNarrowView("artifact");
   }
 
-  function startResize(event: ReactPointerEvent<HTMLDivElement>) {
+  /** 执行「startResize」主流程，传播取消与失败并在结束时清理临时资源。 */
+function startResize(event: ReactPointerEvent<HTMLDivElement>) {
     const workspace = workspaceRef.current;
     if (!workspace || event.button !== 0) return;
     event.preventDefault();
     const pointerId = event.pointerId;
     const rect = workspace.getBoundingClientRect();
-    const move = (pointer: PointerEvent) => {
+    const move = /** 执行「move」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(pointer: PointerEvent) => {
       if (pointer.pointerId !== pointerId) return;
       setArtifactWidth(clampArtifactWidth(pointer.clientX - rect.left, rect.width));
     };
-    const stop = (pointer: PointerEvent) => {
+    const stop = /** 执行「stop」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(pointer: PointerEvent) => {
       if (pointer.pointerId !== pointerId) return;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
@@ -92,25 +109,35 @@ export function SessionDemoPage() {
   }
 
   const workspaceStyle = { "--artifact-width": `${artifactWidth}px` } as CSSProperties;
-  const baseChatItems = useMemo(() => {
+  const baseChatItems = useMemo(/** 缓存「baseChatItems」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => {
     if (!draftPrompt) return demoChatStream;
-    if (!websiteFlow) return demoChatStream.map((item) => item.type === "user" ? { ...item, text: draftPrompt } : item);
+    if (!websiteFlow) return demoChatStream.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.type === "user" ? { ...item, text: draftPrompt } : item);
     return websiteDevelopmentStream(draftPrompt, websiteReady, installBatch ? skillInstallProgress(installBatch).phase : "queued");
   }, [draftPrompt, installBatch, websiteFlow, websiteReady]);
-  const chatItems = useMemo(() => selectedAgent ? projectStreamForAgent(baseChatItems, selectedAgent, installations) : baseChatItems, [baseChatItems, installations, selectedAgent]);
-  const readyMcpCount = selectedAgent ? installations.filter((mcp) => mcp.state === "ready" && boundMcpIds(selectedAgent).includes(mcp.id)).length : 0;
-  const sessionTitle = websiteFlow ? "设计 Model Kindergarten 课程网站" : demoSessions.find((session) => session.id === activeSession)?.title ?? "新对话";
+  const chatItems = useMemo(/** 缓存「chatItems」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => selectedAgent ? projectStreamForAgent(baseChatItems, selectedAgent, installations) : baseChatItems, [baseChatItems, installations, selectedAgent]);
+  const readyMcpCount = selectedAgent ? installations.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mcp) => mcp.state === "ready" && boundMcpIds(selectedAgent).includes(mcp.id)).length : 0;
+  const sessionTitle = websiteFlow ? "设计 Model Kindergarten 课程网站" : demoSessions.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(session) => session.id === activeSession)?.title ?? "新对话";
   return <main className={`mk-demo-app mk-session-demo ${railCollapsed ? "rail-collapsed" : ""}`}>
     <DemoTopNav active="session" />
     <div className="mk-session-shell">
       <aside className="mk-session-rail">
         <header>
           {!railCollapsed && <span><strong>Admin 的会话</strong><small>写死数据 Demo</small></span>}
-          <button aria-label={railCollapsed ? "展开会话列表" : "收起会话列表"} type="button" onClick={() => setRailCollapsed((value) => !value)}>{railCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
+          <button aria-label={railCollapsed ? "展开会话列表" : "收起会话列表"} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setRailCollapsed(/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => !value)}>{railCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
         </header>
-        <button className="mk-session-new" type="button" onClick={() => selectSession("demo-new-session")}><Plus size={16} />{!railCollapsed && <span>新对话</span>}</button>
+        <button className="mk-session-new" type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => selectSession("demo-new-session")}><Plus size={16} />{!railCollapsed && <span>新对话</span>}</button>
         <nav aria-label="Admin 历史会话">
-          {demoSessions.map((session) => <button className={activeSession === session.id ? "active" : ""} key={session.id} title={session.title} type="button" onClick={() => selectSession(session.id)}>
+          {demoSessions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(session) => <button className={activeSession === session.id ? "active" : ""} key={session.id} title={session.title} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => selectSession(session.id)}>
             <MessageSquare size={14} />{!railCollapsed && <><span>{session.title}</span><small>{session.updatedAt}</small></>}
           </button>)}
         </nav>
@@ -119,11 +146,14 @@ export function SessionDemoPage() {
 
       <section className={`mk-session-main ${artifact ? "has-artifact" : ""}`}>
         {artifact && <div className="mk-session-narrow-switch" aria-label="窄屏视图">
-          <button className={narrowView === "artifact" ? "active" : ""} type="button" onClick={() => setNarrowView("artifact")}>产物</button>
-          <button className={narrowView === "chat" ? "active" : ""} type="button" onClick={() => setNarrowView("chat")}>聊天</button>
+          <button className={narrowView === "artifact" ? "active" : ""} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setNarrowView("artifact")}>产物</button>
+          <button className={narrowView === "chat" ? "active" : ""} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setNarrowView("chat")}>聊天</button>
         </div>}
         <div className={`mk-session-workspace narrow-${narrowView} ${isResizing ? "is-resizing" : ""}`} ref={workspaceRef} style={workspaceStyle}>
-          {artifact && <ArtifactPanel artifact={artifact} onClose={() => setArtifact(null)} />}
+          {artifact && <ArtifactPanel artifact={artifact} onClose={/** 处理「onClose」事件，校验归属后再推进状态且避免重复提交。 */
+() => setArtifact(null)} />}
           {artifact && <div
             aria-label="调整产物与聊天宽度"
             aria-orientation="vertical"
@@ -138,11 +168,13 @@ export function SessionDemoPage() {
             </div>
             <div className="mk-session-composer-stack">
               {showInstallBanner && installBatch && <SkillInstallBanner batch={installBatch} />}
-              <form className="mk-session-composer" onSubmit={(event) => event.preventDefault()}>
+              <form className="mk-session-composer" onSubmit={/** 处理「onSubmit」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => event.preventDefault()}>
                 <textarea aria-label="Demo 消息输入" disabled={Boolean(installBatch && !websiteReady)} placeholder={installBatch && !websiteReady ? "Skills 安装完成后可继续对话…" : "给 ModelStudent 发送消息…"} rows={1} />
                 {selectedModel?.capabilities.reasoningControl.adjustable && <ReasoningProfileSelect
                   capability={selectedModel.capabilities.reasoningControl}
-                  choices={(["auto", ...selectedModel.capabilities.reasoningControl.supportedProfiles] as ReasoningProfile[]).map((profile) => ({ profile }))}
+                  choices={(["auto", ...selectedModel.capabilities.reasoningControl.supportedProfiles] as ReasoningProfile[]).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(profile) => ({ profile }))}
                   className="mk-demo-reasoning-select"
                   label="Demo 当前会话思考强度"
                   onChange={changeReasoning}
@@ -161,6 +193,7 @@ export function SessionDemoPage() {
   </main>;
 }
 
+/** 执行「websiteDevelopmentStream」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function websiteDevelopmentStream(prompt: string, ready: boolean, phase: string): DemoStreamItem[] {
   const items: DemoStreamItem[] = [
     { id: "website-user", type: "user", text: prompt, inputTokens: Math.max(1, Math.round(prompt.length / 2.1)) },

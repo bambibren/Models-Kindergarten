@@ -1,3 +1,4 @@
+/** 描述「PptxInspection」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PptxInspection {
   slides: number;
   entries: number;
@@ -45,11 +46,13 @@ export function inspectPptx(bytes: Buffer): PptxInspection {
   ]) {
     if (!names.has(required)) invalid(`缺少 OOXML 条目: ${required}`);
   }
-  const slides = [...names].filter((name) => /^ppt\/slides\/slide[1-9]\d*\.xml$/.test(name)).length;
+  const slides = [...names].filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(name) => /^ppt\/slides\/slide[1-9]\d*\.xml$/.test(name)).length;
   if (slides < 1) invalid("PPTX 不包含幻灯片");
   return { slides, entries };
 }
 
+/** 读取「findEnd」所需数据，并遵守作用域、分页与容量边界。 */
 function findEnd(bytes: Buffer): number {
   if (bytes.byteLength < END_MIN_BYTES) invalid("文件不是有效 ZIP");
   const start = Math.max(0, bytes.byteLength - END_MIN_BYTES - MAX_COMMENT_BYTES);
@@ -61,6 +64,7 @@ function findEnd(bytes: Buffer): number {
   invalid("找不到 ZIP end of central directory");
 }
 
+/** 执行「invalid」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function invalid(detail: string): never {
   throw new Error(`PPTX_STRUCTURE_INVALID: ${detail}`);
 }

@@ -1,5 +1,6 @@
 import { isRecord, requiredString } from "./common.js";
 
+/** 描述「McpCandidateInput」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type McpCandidateInput = {
   name: string;
   transport: "streamable_http";
@@ -7,6 +8,7 @@ export type McpCandidateInput = {
   auth: { kind: "none" };
 };
 
+/** 描述「McpCapabilitySnapshot」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface McpCapabilitySnapshot {
   schemaVersion: 1;
   generation: number;
@@ -16,6 +18,7 @@ export interface McpCapabilitySnapshot {
   discoveredAt: string;
 }
 
+/** 描述「McpTestRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface McpTestRecord {
   schemaVersion: 1;
   testId: string;
@@ -29,8 +32,10 @@ export interface McpTestRecord {
   expiresAt: string;
 }
 
-export type McpConnectionState = "installing" | "connecting" | "connected" | "degraded" | "disconnected" | "disabled" | "failed" | "uninstalled";
+/** 描述「McpConnectionState」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
+export type McpConnectionState = "installing" | "connecting" | "connected" | "capacity_blocked" | "degraded" | "disconnected" | "disabled" | "failed" | "uninstalled";
 
+/** 描述「McpInstallationView」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface McpInstallationView {
   schemaVersion: 1;
   mcpInstallationId: string;
@@ -50,9 +55,11 @@ export interface McpInstallationView {
   deletable?: boolean;
 }
 
+/** 校验并规范化「parseMcpCandidateInput」输入，非法数据直接返回明确错误。 */
 export function parseMcpCandidateInput(value: unknown): McpCandidateInput {
   if (!isRecord(value)) throw new Error("MCP candidate 必须是对象");
-  if (!isRecord(value.auth) || value.auth.kind !== "none" || Object.keys(value.auth).some((key) => key !== "kind")) {
+  if (!isRecord(value.auth) || value.auth.kind !== "none" || Object.keys(value.auth).some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(key) => key !== "kind")) {
     throw new Error("MCP_AUTH_NOT_SUPPORTED: 本轮只接受 auth none");
   }
   if (value.transport !== "streamable_http") throw new Error("MCP transport 首版只能为 streamable_http");
@@ -75,6 +82,7 @@ export function parseMcpCandidateInput(value: unknown): McpCandidateInput {
   };
 }
 
+/** 判断「isLoopback」对应条件，只返回判定结果且不修改输入状态。 */
 function isLoopback(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
 }

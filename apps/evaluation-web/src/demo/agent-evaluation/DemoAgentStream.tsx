@@ -1,9 +1,11 @@
 import { Brain, Braces, ChevronDown, Wrench } from "lucide-react";
 import type { DemoAgent } from "./types.js";
 
+/** 渲染「DemoAgentStream」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function DemoAgentStream({ agent }: { agent: DemoAgent }) {
   return <div className="comparison-agent-stream">
-    {agent.stream.map((item) => {
+    {agent.stream.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => {
       if (item.type === "context") return <details className="comparison-stream-item context" key={item.id}>
         <summary><Braces size={14} /><div><strong>{item.title}</strong><small>{item.detail}</small></div><span>{item.tokens} tokens</span><ChevronDown size={13} /></summary>
         <pre>{item.raw}</pre>

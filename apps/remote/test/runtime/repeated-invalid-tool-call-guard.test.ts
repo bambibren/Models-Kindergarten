@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { RepeatedInvalidToolCallGuard } from "../../src/runtime/repeated-invalid-tool-call-guard.js";
 import type { PreparedToolCall, ToolOutcome } from "../../src/tools/tool-registry.js";
 
-describe("RepeatedInvalidToolCallGuard", () => {
-  it("只在第三个模型轮再次出现同工具同参数错误时终止", () => {
+describe("RepeatedInvalidToolCallGuard", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("只在第三个模型轮再次出现同工具同参数错误时终止", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const guard = new RepeatedInvalidToolCallGuard(3);
 
     expect(guard.inspect(0, [call("read_file", { pathName: "a.txt", extra: true })], [invalid()]))
@@ -14,7 +16,8 @@ describe("RepeatedInvalidToolCallGuard", () => {
       .toMatchObject({ toolName: "read_file", attempts: 3, maxAttempts: 3 });
   });
 
-  it("同一模型轮的并行重复调用只累计一次", () => {
+  it("同一模型轮的并行重复调用只累计一次", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const guard = new RepeatedInvalidToolCallGuard(3);
     const calls = [
       call("activate_skill", { skillName: "frontend-design" }),
@@ -22,12 +25,14 @@ describe("RepeatedInvalidToolCallGuard", () => {
       call("activate_skill", { skillName: "frontend-design" }),
     ];
 
-    expect(guard.inspect(0, calls, calls.map(() => invalid()))).toBeUndefined();
+    expect(guard.inspect(0, calls, calls.map(/** 构造「toBeUndefined」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => invalid()))).toBeUndefined();
     expect(guard.inspect(1, [calls[0]!], [invalid()])).toBeUndefined();
     expect(guard.inspect(2, [calls[0]!], [invalid()])).toMatchObject({ attempts: 3 });
   });
 
-  it("不同参数值分别计数且成功会清除对应签名", () => {
+  it("不同参数值分别计数且成功会清除对应签名", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const guard = new RepeatedInvalidToolCallGuard(3);
     const first = call("activate_skill", { skillName: "frontend-design" });
     const second = call("activate_skill", { skillName: "design-brief" });
@@ -43,7 +48,8 @@ describe("RepeatedInvalidToolCallGuard", () => {
     });
   });
 
-  it("新的 Guard 实例不会继承上一个用户 Turn 的计数", () => {
+  it("新的 Guard 实例不会继承上一个用户 Turn 的计数", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const current = new RepeatedInvalidToolCallGuard(3);
     const next = new RepeatedInvalidToolCallGuard(3);
     const repeated = call("read_file", { fileName: "a.txt" });
@@ -54,6 +60,7 @@ describe("RepeatedInvalidToolCallGuard", () => {
   });
 });
 
+/** 构造「call」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function call(name: string, args: Record<string, unknown>): PreparedToolCall {
   return {
     id: `${name}:${JSON.stringify(args)}`,
@@ -68,6 +75,7 @@ function call(name: string, args: Record<string, unknown>): PreparedToolCall {
   };
 }
 
+/** 构造「invalid」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function invalid(): ToolOutcome {
   return {
     status: "error",
@@ -80,6 +88,7 @@ function invalid(): ToolOutcome {
   };
 }
 
+/** 构造「success」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function success(): ToolOutcome {
   return {
     status: "success",

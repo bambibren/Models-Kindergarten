@@ -11,11 +11,14 @@ const capability: ModelReasoningCapability = {
   defaultProfile: "balanced",
 };
 
-describe("ModelDefaultReasoningSelect", () => {
-  it("renders only concrete profiles verified for the current model", () => {
+describe("ModelDefaultReasoningSelect", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("renders only concrete profiles verified for the current model", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const html = renderToStaticMarkup(<ModelDefaultReasoningSelect
       capability={capability}
-      onChange={() => undefined}
+      onChange={/** 构造「onChange」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => undefined}
       value="balanced"
     />);
     expect(html).toContain("模型默认思考设置");

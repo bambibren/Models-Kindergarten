@@ -12,8 +12,10 @@ const SKILL_USE_PROTOCOLS = {
   ].join("\n"),
 } as const;
 
+/** 描述「SkillContextVersion」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type SkillContextVersion = keyof typeof SKILL_USE_PROTOCOLS;
 
+/** 描述「SkillCatalogItem」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SkillCatalogItem {
   name: string;
   description: string;
@@ -34,6 +36,7 @@ export function configuredSkillContextVersion(
   return version as SkillContextVersion;
 }
 
+/** 执行「skillUseProtocol」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function skillUseProtocol(version: SkillContextVersion): string {
   return SKILL_USE_PROTOCOLS[version];
 }

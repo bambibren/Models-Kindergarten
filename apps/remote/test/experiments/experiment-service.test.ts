@@ -14,24 +14,31 @@ import { ModelStudentCatalog } from "../../src/model/model-student-catalog.js";
 import { SessionRepository } from "../../src/repository/session-repository.js";
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("ExperimentService V2", () => {
-  it("创建 draft 不创建隐藏 Agent、Run 或 Session", async () => {
+describe("ExperimentService V2", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("创建 draft 不创建隐藏 Agent、Run 或 Session", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, agents, source } = await setup();
     const experiment = await service.create(draft(source));
     expect(experiment).toMatchObject({ schemaVersion: 2, status: "draft", runs: [] });
-    expect((await agents.list({ limit: 100 })).items.map((item) => item.agentId)).toEqual([source.agentId]);
+    expect((await agents.list({ limit: 100 })).items.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.agentId)).toEqual([source.agentId]);
     expect(await service.binding(experiment.experimentId, "test-a")).toBeUndefined();
   });
 
-  it("prepare-run 原子冻结 Test 快照并按 Idempotency-Key 幂等", async () => {
+  it("prepare-run 原子冻结 Test 快照并按 Idempotency-Key 幂等", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, source } = await setup();
     const created = await service.create(draft(source));
     const prepared = await service.prepareRun(created.experimentId, "prepare-1");
     expect(prepared.status).toBe("prepared");
     expect(prepared.snapshots).toHaveLength(2);
-    expect(prepared.runs.map((run) => [run.testId, run.status])).toEqual([
+    expect(prepared.runs.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(run) => [run.testId, run.status])).toEqual([
       ["test-a", "pending"], ["test-b", "pending"],
     ]);
     expect(await service.prepareRun(created.experimentId, "prepare-1")).toEqual(prepared);
@@ -43,7 +50,8 @@ describe("ExperimentService V2", () => {
     });
   });
 
-  it("只有历史策略不同不构成有效差异", async () => {
+  it("只有历史策略不同不构成有效差异", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, source } = await setup({ ignoreHistory: true });
     const input = draft(source);
     input.tests[1]!.policy.historyPolicy = { mode: "recent_turns", maxTurns: 20 };
@@ -54,7 +62,8 @@ describe("ExperimentService V2", () => {
     });
   });
 
-  it("所有 Test 都以 fresh run 完成，删除时只清理实验 Session", async () => {
+  it("所有 Test 都以 fresh run 完成，删除时只清理实验 Session", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, source, sessions } = await setup();
     const created = await service.create(draft(source));
     const prepared = await service.prepareRun(created.experimentId, "prepare-run");
@@ -74,10 +83,12 @@ describe("ExperimentService V2", () => {
     expect((await service.get(created.experimentId)).status).toBe("completed");
     const removed = await service.delete(created.experimentId);
     expect(removed.removedExperimentSessionIds).toHaveLength(2);
-    expect((await sessions.all()).map((item) => item.id)).toEqual([userSession.id]);
+    expect((await sessions.all()).map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.id)).toEqual([userSession.id]);
   });
 
-  it("所有 lane 被取消时保留 cancelled 终态，不伪装成失败", async () => {
+  it("所有 lane 被取消时保留 cancelled 终态，不伪装成失败", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, source, sessions } = await setup();
     const created = await service.create(draft(source));
     const prepared = await service.prepareRun(created.experimentId, "prepare-cancelled");
@@ -93,7 +104,8 @@ describe("ExperimentService V2", () => {
     expect((await service.get(created.experimentId)).status).toBe("cancelled");
   });
 
-  it("读取 V1 store 但拒绝修改或运行 legacy 记录", async () => {
+  it("读取 V1 store 但拒绝修改或运行 legacy 记录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-experiment-legacy-"));
     dirs.push(dir);
     const source = legacyRecord();
@@ -106,22 +118,28 @@ describe("ExperimentService V2", () => {
   });
 });
 
+/** 构造「setup」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function setup(options: { dir?: string; ignoreHistory?: boolean } = {}) {
   const dir = options.dir ?? await mkdtemp(join(tmpdir(), "mk-experiment-v2-"));
   if (!options.dir) dirs.push(dir);
   const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
-    builtinToolIds: () => ["read_file"], readySkillInstallationIds: () => [], mcpCapabilities: () => [],
+    builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => ["read_file"], readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [], mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [],
   });
   const source = await agents.create(agentInput("source"));
   const sessions = new SessionRepository(dir);
-  const evaluation: EvaluationRecordReader = { get: async () => ({ result: {
+  const evaluation: EvaluationRecordReader = { get: /** 构造「get」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => ({ result: {
     normallyCompleted: true, firstTokenLatencyMs: 20, totalDurationMs: 100,
     toolSuccessCount: 0, toolFailureCount: 0, errorCount: 0,
     permissionViolationCount: 0, hasRepeatedToolCall: false,
     modelRoundCount: 1, toolCallCount: 0, totalContextTokens: 10, totalOutputTokens: 3,
   } }) };
   const fixture = new FixtureProvider();
-  const previews = { previewTest: async (_prompt: string, test: ExperimentDraftV2["tests"][number]) =>
+  const previews = { previewTest: /** 构造「previewTest」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (_prompt: string, test: ExperimentDraftV2["tests"][number]) =>
     preview(test, options.ignoreHistory === true) } as ContextPreviewService;
   const service = new ExperimentService(
     new ExperimentRepository(join(dir, "experiments.json"), join(dir, "scorecards.json")),
@@ -131,6 +149,7 @@ async function setup(options: { dir?: string; ignoreHistory?: boolean } = {}) {
   return { service, agents, sessions, source };
 }
 
+/** 构造「draft」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function draft(source: { agentId: string; name: string; updatedAt: string }): ExperimentDraftV2 {
   const sourceAgent = { agentId: source.agentId, name: source.name, updatedAt: source.updatedAt };
   return {
@@ -146,6 +165,7 @@ function draft(source: { agentId: string; name: string; updatedAt: string }): Ex
   };
 }
 
+/** 构造「preview」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function preview(test: ExperimentDraftV2["tests"][number], ignoreHistory: boolean): ContextPreviewResponseV2 {
   const effective = JSON.stringify({
     model: test.modelStudentId,
@@ -171,6 +191,7 @@ function preview(test: ExperimentDraftV2["tests"][number], ignoreHistory: boolea
   };
 }
 
+/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function policy(systemPrompt: string) {
   return {
     systemPrompt,
@@ -182,11 +203,13 @@ function policy(systemPrompt: string) {
   };
 }
 
+/** 构造「agentInput」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function agentInput(name: string) {
   return { name, systemPrompt: "提示", builtinTools: [], skillInstallationIds: [], mcps: [],
     historyPolicy: { mode: "none" as const }, memoryPolicy: { mode: "off" as const } };
 }
 
+/** 构造「legacyRecord」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function legacyRecord() {
   const now = new Date().toISOString();
   return {

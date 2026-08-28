@@ -5,12 +5,14 @@ import {
   type ParsedGitHubSkillSource,
 } from "./github-skill-source.js";
 
+/** 描述「ParsedSkillSource」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ParsedSkillSource = ParsedGitHubSkillSource | {
   kind: "resource";
   sourceUrl: string;
   source: Extract<SkillSource, { kind: "resource_bundle" }>;
 };
 
+/** 描述「ExplicitSkillSourceUrl」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExplicitSkillSourceUrl {
   providedUrl: string;
   canonicalUrl: string;
@@ -18,10 +20,12 @@ export interface ExplicitSkillSourceUrl {
 
 export const DEFAULT_SKILL_RESOURCE_ORIGIN = "http://127.0.0.1:7342";
 
+/** 执行「configuredSkillResourceOrigins」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function configuredSkillResourceOrigins(value: string | undefined): string[] {
   return (value ?? DEFAULT_SKILL_RESOURCE_ORIGIN)
     .split(",")
-    .map((item) => item.trim())
+    .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.trim())
     .filter(Boolean);
 }
 
@@ -29,11 +33,13 @@ export function configuredSkillResourceOrigins(value: string | undefined): strin
 export class SkillSourceUrlPolicy {
   private readonly resourceOrigins: Set<string>;
 
-  constructor(resourceOrigins: string[] = []) {
+  /** 初始化「SkillSourceUrlPolicy」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(resourceOrigins: string[] = []) {
     this.resourceOrigins = new Set(resourceOrigins.map(normalizeResourceOrigin));
   }
 
-  parse(value: string): ParsedSkillSource {
+  /** 校验并规范化「parse」输入，非法数据直接返回明确错误。 */
+parse(value: string): ParsedSkillSource {
     let url: URL;
     try { url = new URL(value); }
     catch { throw new Error("SKILL_SOURCE_NOT_ALLOWED: Skill 来源 URL 无效"); }
@@ -54,7 +60,8 @@ export class SkillSourceUrlPolicy {
     };
   }
 
-  explicitCandidates(text: string): ExplicitSkillSourceUrl[] {
+  /** 执行「explicitCandidates」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+explicitCandidates(text: string): ExplicitSkillSourceUrl[] {
     const matches = text.match(/https?:\/\/[^\s<>()"']+/gi) ?? [];
     const result: ExplicitSkillSourceUrl[] = [];
     const seen = new Set<string>();
@@ -71,22 +78,27 @@ export class SkillSourceUrlPolicy {
     return result;
   }
 
-  explicitUrls(text: string): string[] {
-    return [...new Set(this.explicitCandidates(text).map((item) => item.canonicalUrl))];
+  /** 执行「explicitUrls」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+explicitUrls(text: string): string[] {
+    return [...new Set(this.explicitCandidates(text).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.canonicalUrl))];
   }
 
-  sourceUrl(source: Exclude<SkillSource, { kind: "approved_local" }>): string {
+  /** 执行「sourceUrl」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+sourceUrl(source: Exclude<SkillSource, { kind: "approved_local" }>): string {
     if (source.kind === "resource_bundle") return source.url;
     if (source.requestedRef === "HEAD" && source.subdirectory === ".") return source.repository;
     return `${source.repository}/tree/${encodeURIComponent(source.requestedRef)}/${source.subdirectory.split("/").map(encodeURIComponent).join("/")}`;
   }
 
-  sameSource(left: SkillSource, right: SkillSource): boolean {
+  /** 执行「sameSource」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+sameSource(left: SkillSource, right: SkillSource): boolean {
     if (left.kind === "github_tree" && right.kind === "github_tree") return sameGitHubSource(left, right);
     return left.kind === "resource_bundle" && right.kind === "resource_bundle" && left.url === right.url;
   }
 }
 
+/** 校验并规范化「normalizeResourceOrigin」输入，非法数据直接返回明确错误。 */
 function normalizeResourceOrigin(value: string): string {
   let url: URL;
   try { url = new URL(value); }

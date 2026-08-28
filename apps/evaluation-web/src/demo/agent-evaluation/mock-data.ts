@@ -118,7 +118,8 @@ export const demoAgents: DemoAgent[] = [
   },
 ];
 
-export const savedComparisons: DemoSavedComparison[] = Array.from({ length: 23 }, (_, index) => ({
+export const savedComparisons: DemoSavedComparison[] = Array.from({ length: 23 }, /** 更新「savedComparisons」对应状态，并保持写入顺序、原子性与容量约束。 */
+(_, index) => ({
   id: `cmp-demo-${String(23 - index).padStart(3, "0")}`,
   title: ["聊天历史裁剪", "工具说明开关", "Skills 索引差异", "系统提示改写"][index % 4] + ` · 对照 ${String(23 - index).padStart(2, "0")}`,
   createdAt: `08-${String(Math.max(1, 10 - Math.floor(index / 3))).padStart(2, "0")} ${String(19 - index % 8).padStart(2, "0")}:20`,

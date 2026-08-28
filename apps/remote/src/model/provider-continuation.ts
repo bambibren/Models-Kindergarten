@@ -1,9 +1,13 @@
 import type { ModelStudent } from "./model-provider.js";
 
+/** 描述「JsonPrimitive」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type JsonPrimitive = null | boolean | number | string;
+/** 描述「JsonValue」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+/** 描述「JsonObject」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type JsonObject = { [key: string]: JsonValue };
 
+/** 描述「ProviderContinuationCorrelation」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ProviderContinuationCorrelation {
   /** 可见 assistant message/thought 的 Session messageId；用于避免重复投喂投影。 */
   messageIds: string[];
@@ -29,6 +33,7 @@ export interface ProviderOpaqueContinuation {
   correlation: ProviderContinuationCorrelation;
 }
 
+/** 描述「CreateProviderOpaqueContinuationInput」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface CreateProviderOpaqueContinuationInput {
   modelStudentId: string;
   providerKind: string;
@@ -39,12 +44,14 @@ export interface CreateProviderOpaqueContinuationInput {
   correlation?: Partial<ProviderContinuationCorrelation>;
 }
 
+/** 描述「LegacyResponsesContinuationMigration」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface LegacyResponsesContinuationMigration {
   modelStudentId: string;
   messageIds: string[];
   toolCallIds: string[];
 }
 
+/** 根据已校验输入构建「createProviderOpaqueContinuation」结果，不额外持有调用方的大对象。 */
 export function createProviderOpaqueContinuation(
   input: CreateProviderOpaqueContinuationInput,
 ): ProviderOpaqueContinuation {
@@ -102,6 +109,7 @@ export function withProviderContinuationCorrelation(
   };
 }
 
+/** 校验并规范化「assertContinuationTargetsStudent」输入，非法数据直接返回明确错误。 */
 export function assertContinuationTargetsStudent(
   continuation: ProviderOpaqueContinuation,
   student: ModelStudent,
@@ -117,6 +125,7 @@ export function assertContinuationTargetsStudent(
   }
 }
 
+/** 读取「readV2」所需数据，并遵守作用域、分页与容量边界。 */
 function readV2(value: Record<string, unknown>): ProviderOpaqueContinuation {
   const modelStudentId = nonEmptyString(value.modelStudentId, "modelStudentId");
   const providerKind = nonEmptyString(value.providerKind, "providerKind");
@@ -153,6 +162,7 @@ function readV2(value: Record<string, unknown>): ProviderOpaqueContinuation {
   };
 }
 
+/** 执行「migrateLegacyResponsesV1」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function migrateLegacyResponsesV1(
   value: Record<string, unknown>,
   migration: LegacyResponsesContinuationMigration,
@@ -181,27 +191,33 @@ function migrateLegacyResponsesV1(
   });
 }
 
+/** 执行「cloneJsonValue」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function cloneJsonValue(value: unknown, field: string): JsonValue {
   if (!isJsonValue(value)) throw new Error(`${field} 必须是 JSON-safe value`);
   return structuredClone(value);
 }
 
+/** 执行「jsonByteLength」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function jsonByteLength(value: JsonValue): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
+/** 读取「readIds」所需数据，并遵守作用域、分页与容量边界。 */
 function readIds(value: unknown, field: string): string[] {
   if (!Array.isArray(value)) throw new Error(`Provider continuation ${field} 无效`);
   return uniqueIds(value, `Provider continuation ${field}`);
 }
 
+/** 执行「uniqueIds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function uniqueIds(value: unknown[], field: string): string[] {
-  if (!value.every((item) => typeof item === "string" && item.length > 0)) {
+  if (!value.every(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => typeof item === "string" && item.length > 0)) {
     throw new Error(`${field} 必须是非空字符串数组`);
   }
   return [...new Set(value as string[])];
 }
 
+/** 执行「nonEmptyString」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function nonEmptyString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`Provider continuation ${field} 无效`);
@@ -209,10 +225,12 @@ function nonEmptyString(value: unknown, field: string): string {
   return value;
 }
 
+/** 判断「isJsonObject」对应条件，只返回判定结果且不修改输入状态。 */
 function isJsonObject(value: unknown): value is JsonObject {
   return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 
+/** 判断「isJsonValue」对应条件，只返回判定结果且不修改输入状态。 */
 function isJsonValue(value: unknown): value is JsonValue {
   if (
     value === null ||
@@ -224,6 +242,7 @@ function isJsonValue(value: unknown): value is JsonValue {
   return isJsonObject(value);
 }
 
+/** 判断「isRecord」对应条件，只返回判定结果且不修改输入状态。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value) as unknown;

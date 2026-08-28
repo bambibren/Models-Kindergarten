@@ -1,5 +1,6 @@
 import type { LocalPrincipal } from "@kindergarten/contracts";
 
+/** 描述「ControlRouteContext」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ControlRouteContext {
   request: Request;
   url: URL;
@@ -9,6 +10,7 @@ export interface ControlRouteContext {
   json(): Promise<unknown>;
 }
 
+/** 描述「ControlRouteHandler」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ControlRouteHandler = (context: ControlRouteContext) => unknown | Promise<unknown>;
 
 interface Route {
@@ -18,14 +20,17 @@ interface Route {
   handler: ControlRouteHandler;
 }
 
+/** 描述「ControlRouter」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class ControlRouter {
   private readonly routes: Route[] = [];
 
-  register(method: string, pattern: string, handler: ControlRouteHandler): void {
+  /** 执行「register」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+register(method: string, pattern: string, handler: ControlRouteHandler): void {
     this.routes.push({ method: method.toUpperCase(), pattern, segments: split(pattern), handler });
   }
 
-  match(method: string, path: string): { handler: ControlRouteHandler; params: Record<string, string> } | undefined {
+  /** 执行「match」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+match(method: string, path: string): { handler: ControlRouteHandler; params: Record<string, string> } | undefined {
     const pathSegments = split(path);
     for (const route of this.routes) {
       if (route.method !== method.toUpperCase()) continue;
@@ -35,22 +40,29 @@ export class ControlRouter {
     return undefined;
   }
 
-  allowedMethods(path: string): string[] {
+  /** 执行「allowedMethods」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+allowedMethods(path: string): string[] {
     const pathSegments = split(path);
     return this.routes
-      .filter((route) => matchSegments(route.segments, pathSegments) !== undefined)
-      .map((route) => route.method)
-      .filter((method, index, all) => all.indexOf(method) === index)
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(route) => matchSegments(route.segments, pathSegments) !== undefined)
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(route) => route.method)
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(method, index, all) => all.indexOf(method) === index)
       .toSorted();
   }
 }
 
+/** 执行「split」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function split(path: string): string[] {
   return path.split("/").filter(Boolean).map(decodeURIComponent);
 }
 
+/** 执行「matchSegments」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function matchSegments(pattern: string[], path: string[]): Record<string, string> | undefined {
-  const wildcardIndex = pattern.findIndex((item) => item.startsWith("*"));
+  const wildcardIndex = pattern.findIndex(/** 执行「wildcardIndex」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => item.startsWith("*"));
   if (wildcardIndex >= 0 && wildcardIndex !== pattern.length - 1) return undefined;
   if (wildcardIndex < 0 && pattern.length !== path.length) return undefined;
   if (wildcardIndex >= 0 && path.length < wildcardIndex) return undefined;

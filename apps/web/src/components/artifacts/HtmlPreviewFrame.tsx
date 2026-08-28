@@ -1,3 +1,4 @@
+/** 渲染「HtmlPreviewFrame」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function HtmlPreviewFrame({ html, csp, title }: { html: string; csp?: string; title: string }) {
   return <iframe
     referrerPolicy="no-referrer"
@@ -6,6 +7,7 @@ export function HtmlPreviewFrame({ html, csp, title }: { html: string; csp?: str
   />;
 }
 
+/** 根据已校验输入构建「buildHtmlPreviewDocument」结果，不额外持有调用方的大对象。 */
 export function buildHtmlPreviewDocument(html: string, csp?: string): string {
   const policy = csp
     ? `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(csp)}">`
@@ -13,7 +15,8 @@ export function buildHtmlPreviewDocument(html: string, csp?: string): string {
   const prefix = `${policy}${SAME_DOCUMENT_NAVIGATION_BRIDGE}`;
   const head = /<head(?:\s[^>]*)?>/i;
 
-  return head.test(html) ? html.replace(head, (opening) => `${opening}${prefix}`) : `${prefix}${html}`;
+  return head.test(html) ? html.replace(head, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(opening) => `${opening}${prefix}`) : `${prefix}${html}`;
 }
 
 // 与 JoyCode 的预览导航桥一致：捕获当前文档锚点，阻止默认行为和内联 onclick，再由桥接层完成滚动。
@@ -49,6 +52,7 @@ const SAME_DOCUMENT_NAVIGATION_BRIDGE = `<script data-models-kindergarten-previe
 })();
 </script>`;
 
+/** 执行「escapeAttribute」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function escapeAttribute(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 }

@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
+/** 构造「ChatCompletionsMockRequest」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export interface ChatCompletionsMockRequest {
   method: string;
   url: string;
@@ -8,23 +9,27 @@ export interface ChatCompletionsMockRequest {
   body: Record<string, unknown>;
 }
 
+/** 构造「ChatCompletionsMockServer」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export interface ChatCompletionsMockServer {
   baseUrl: string;
   requests: ChatCompletionsMockRequest[];
   close(): Promise<void>;
 }
 
+/** 构造「ChatCompletionsMockOptions」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export interface ChatCompletionsMockOptions {
   thinking?: "toggle" | "ignored" | "rejected";
   tools?: boolean;
   omitDone?: boolean;
 }
 
+/** 构造「startChatCompletionsMockServer」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export async function startChatCompletionsMockServer(
   options: ChatCompletionsMockOptions = {},
 ): Promise<ChatCompletionsMockServer> {
   const requests: ChatCompletionsMockRequest[] = [];
-  const server = createServer(async (request, response) => {
+  const server = createServer(/** 构造「server」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (request, response) => {
     try {
       await handleRequest(request, response, requests, options);
     } catch (error) {
@@ -32,7 +37,8 @@ export async function startChatCompletionsMockServer(
       response.end(error instanceof Error ? error.message : String(error));
     }
   });
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
@@ -40,12 +46,16 @@ export async function startChatCompletionsMockServer(
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     requests,
-    close: () => new Promise<void>((resolve, reject) => {
-      server.close((error) => error ? reject(error) : resolve());
+    close: /** 构造「close」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => new Promise<void>(/** 构造「close」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(resolve, reject) => {
+      server.close(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error) => error ? reject(error) : resolve());
     }),
   };
 }
 
+/** 构造「handleRequest」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -56,7 +66,8 @@ async function handleRequest(
   requests.push({
     method: request.method ?? "",
     url: request.url ?? "",
-    headers: Object.fromEntries(Object.entries(request.headers).flatMap(([key, value]) =>
+    headers: Object.fromEntries(Object.entries(request.headers).flatMap(/** 构造「headers」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+([key, value]) =>
       typeof value === "string" ? [[key, value]] : [],
     )),
     body,
@@ -106,14 +117,16 @@ async function handleRequest(
 
   openSse(response);
   const messages = Array.isArray(body.messages) ? body.messages : [];
-  const hasToolResult = messages.some((item) =>
+  const hasToolResult = messages.some(/** 构造「hasToolResult」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) =>
     isRecord(item) && item.role === "tool",
   );
   const tools = Array.isArray(body.tools) ? body.tools : [];
   if (hasToolResult) {
     writeTextStream(response, body, options, "MK_TOOL_CONTINUATION_OK");
   } else if (tools.length > 0 && options.tools !== false) {
-    const names = tools.flatMap((tool) => {
+    const names = tools.flatMap(/** 构造「names」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(tool) => {
       const fn = isRecord(tool) ? recordValue(tool.function) : undefined;
       return typeof fn?.name === "string" ? [fn.name] : [];
     });
@@ -129,6 +142,7 @@ async function handleRequest(
   response.end();
 }
 
+/** 构造「writeTextStream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function writeTextStream(
   response: ServerResponse,
   body: Record<string, unknown>,
@@ -150,6 +164,7 @@ function writeTextStream(
   if (requestsUsage(body)) writeEvent(response, usageChunk());
 }
 
+/** 构造「writeProbeToolStream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function writeProbeToolStream(
   response: ServerResponse,
   body: Record<string, unknown>,
@@ -171,6 +186,7 @@ function writeProbeToolStream(
   writeFinishAndUsage(response, body, "tool_calls");
 }
 
+/** 构造「writeInterleavedToolStream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function writeInterleavedToolStream(
   response: ServerResponse,
   body: Record<string, unknown>,
@@ -191,7 +207,7 @@ function writeInterleavedToolStream(
       function: { name: "write_file", arguments: "{\"path\":\"notes/b.md\",\"content\":\"B\"}" },
     }],
   }));
-  // B is already complete while A continues; output order must still be 0 then 1.
+  // B 先完成而 A 仍在增量生成；最终输出顺序仍必须保持 0、1。
   writeEvent(response, chatChunk({
     tool_calls: [{
       index: 0,
@@ -201,6 +217,7 @@ function writeInterleavedToolStream(
   writeFinishAndUsage(response, body, "tool_calls");
 }
 
+/** 构造「writeFinishAndUsage」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function writeFinishAndUsage(
   response: ServerResponse,
   body: Record<string, unknown>,
@@ -214,6 +231,7 @@ function writeFinishAndUsage(
   if (requestsUsage(body)) writeEvent(response, usageChunk());
 }
 
+/** 构造「chatChunk」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function chatChunk(delta: Record<string, unknown>): Record<string, unknown> {
   return {
     id: "chatcmpl-mock",
@@ -222,6 +240,7 @@ function chatChunk(delta: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+/** 构造「usageChunk」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function usageChunk(): Record<string, unknown> {
   return {
     id: "chatcmpl-mock",
@@ -237,20 +256,24 @@ function usageChunk(): Record<string, unknown> {
   };
 }
 
+/** 构造「requestsUsage」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function requestsUsage(body: Record<string, unknown>): boolean {
   const streamOptions = recordValue(body.stream_options);
   return streamOptions?.include_usage === true;
 }
 
+/** 构造「openSse」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function openSse(response: ServerResponse): void {
   response.statusCode = 200;
   response.setHeader("content-type", "text/event-stream");
 }
 
+/** 构造「writeEvent」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function writeEvent(response: ServerResponse, value: Record<string, unknown>): void {
   response.write(`data: ${JSON.stringify(value)}\n\n`);
 }
 
+/** 构造「readJsonBody」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -259,10 +282,12 @@ async function readJsonBody(request: IncomingMessage): Promise<Record<string, un
   return parsed;
 }
 
+/** 构造「recordValue」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? value : undefined;
 }
 
+/** 构造「isRecord」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

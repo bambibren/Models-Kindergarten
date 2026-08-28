@@ -1,5 +1,6 @@
 import { META_KEY, isRecord } from "./common.js";
 
+/** 描述「SessionResumeTextCursor」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionResumeTextCursor {
   textLength: number;
   nextChunkIndex: number;
@@ -16,10 +17,12 @@ export interface SessionResumeMeta {
   thoughts: Record<string, SessionResumeTextCursor>;
 }
 
+/** 根据已校验输入构建「makeSessionResumeMeta」结果，不额外持有调用方的大对象。 */
 export function makeSessionResumeMeta(value: SessionResumeMeta): Record<string, unknown> {
   return { [META_KEY]: { sessionResume: structuredClone(value) } };
 }
 
+/** 读取「readSessionResumeMeta」所需数据，并遵守作用域、分页与容量边界。 */
 export function readSessionResumeMeta(value: unknown): SessionResumeMeta | undefined {
   if (!isRecord(value)) return undefined;
   const root = value[META_KEY];
@@ -34,6 +37,7 @@ export function readSessionResumeMeta(value: unknown): SessionResumeMeta | undef
   return { schemaVersion: 1, turnId: resume.turnId, messages, thoughts };
 }
 
+/** 读取「readCursors」所需数据，并遵守作用域、分页与容量边界。 */
 function readCursors(value: unknown): Record<string, SessionResumeTextCursor> | undefined {
   if (!isRecord(value)) return undefined;
   const cursors: Record<string, SessionResumeTextCursor> = {};
@@ -46,6 +50,7 @@ function readCursors(value: unknown): Record<string, SessionResumeTextCursor> | 
   return cursors;
 }
 
+/** 执行「nonNegativeInteger」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function nonNegativeInteger(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) >= 0;
 }

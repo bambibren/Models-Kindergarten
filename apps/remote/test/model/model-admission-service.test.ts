@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import type {
   ProviderCapabilitySnapshot,
   ResolvedModelStudentCandidate,
@@ -19,10 +20,14 @@ import { RemoteModelUrlPolicy } from "../../src/model/remote-model-url-policy.js
 import { ResponsesApiProvider } from "../../src/model/responses-api-provider.js";
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("ModelAdmissionService", () => {
-  it("OpenAI 固定预设由 Remote 解析官方地址，并以 preset/protocol 持久化", async () => {
+describe("ModelAdmissionService", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("OpenAI 固定预设由 Remote 解析官方地址，并以 preset/protocol 持久化", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const setup = await environment();
     const tested = await setup.service.test({
       presetId: "openai",
@@ -45,7 +50,8 @@ describe("ModelAdmissionService", () => {
     expect(connection).toMatchObject({ presetId: "openai", protocol: "openai_responses" });
   });
 
-  it("硅基流动固定预设走 Chat Completions 适配器且不能落成 Responses 快照", async () => {
+  it("硅基流动固定预设走 Chat Completions 适配器且不能落成 Responses 快照", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const setup = await environment();
     const tested = await setup.service.test({
       presetId: "siliconflow",
@@ -64,7 +70,8 @@ describe("ModelAdmissionService", () => {
     });
   });
 
-  it("按 test → install 两阶段入园，明文 Key 不落盘，能力来自真实 probe 快照", async () => {
+  it("按 test → install 两阶段入园，明文 Key 不落盘，能力来自真实 probe 快照", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const setup = await environment();
     const raw = candidate();
     const tested = await setup.service.test(raw);
@@ -113,7 +120,8 @@ describe("ModelAdmissionService", () => {
       .toBe(1_050_000);
   });
 
-  it("安装时单独保存用户选择的模型默认档位，不改写体检快照", async () => {
+  it("安装时单独保存用户选择的模型默认档位，不改写体检快照", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const setup = await environment();
     const tested = await setup.service.test(candidate());
     const installed = await setup.service.install({
@@ -129,8 +137,10 @@ describe("ModelAdmissionService", () => {
     expect(provider.reasoningCapability?.defaultProfile).toBe("balanced");
   });
 
-  it("拒绝体检未支持的默认推理档位", async () => {
-    const setup = await environment({ probe: async () => limitedResponsesCapabilitySnapshot() });
+  it("拒绝体检未支持的默认推理档位", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const setup = await environment({ probe: /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => limitedResponsesCapabilitySnapshot() });
     const tested = await setup.service.test(candidate());
     await expect(setup.service.install({
       testId: tested.testId,
@@ -139,9 +149,11 @@ describe("ModelAdmissionService", () => {
     expect(await setup.repository.listStudents()).toHaveLength(0);
   });
 
-  it("失败记录会清除瞬时 Key，并从上游错误中脱敏", async () => {
+  it("失败记录会清除瞬时 Key，并从上游错误中脱敏", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const setup = await environment({
-      probe: async (input) => { throw new Error(`upstream echoed Bearer ${input.apiKey}`); },
+      probe: /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (input) => { throw new Error(`upstream echoed Bearer ${input.apiKey}`); },
     });
     const raw = candidate();
     const tested = await setup.service.test(raw);
@@ -151,7 +163,8 @@ describe("ModelAdmissionService", () => {
     await expect(setup.service.install({ testId: tested.testId })).rejects.toMatchObject({ code: "MODEL_PROBE_EXPIRED" });
   });
 
-  it("服务重启后不能用无明文 Key 的旧 probe 安装，但已安装模型可从 Keychain 引用恢复", async () => {
+  it("服务重启后不能用无明文 Key 的旧 probe 安装，但已安装模型可从 Keychain 引用恢复", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const setup = await environment();
     const tested = await setup.service.test(candidate());
 
@@ -167,9 +180,11 @@ describe("ModelAdmissionService", () => {
     expect(afterInstallCatalog.requireProvider(installed.modelStudentId).student.name).toBe("大聪明");
   });
 
-  it("保护内置模型，并阻止删除仍被 Session 引用的用户模型", async () => {
+  it("保护内置模型，并阻止删除仍被 Session 引用的用户模型", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     let inUseId: string | undefined;
-    const setup = await environment({ modelInUse: (id) => id === inUseId });
+    const setup = await environment({ modelInUse: /** 构造「modelInUse」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(id) => id === inUseId });
     await expect(setup.service.remove("fixture-student")).rejects.toMatchObject({ code: "CONFLICT" });
 
     const tested = await setup.service.test(candidate());
@@ -187,7 +202,8 @@ describe("ModelAdmissionService", () => {
     expect(setup.secrets.values.size).toBe(0);
   });
 
-  it.each(["x", "xy", "xyz", "wxyz"])("1-4 字符 Key 的 credentialHint 不包含任何原文: %s", async (apiKey) => {
+  it.each(["x", "xy", "xyz", "wxyz"])("1-4 字符 Key 的 credentialHint 不包含任何原文: %s", /** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async (apiKey) => {
     const setup = await environment();
     const tested = await setup.service.test(candidate(apiKey));
     const installed = await setup.service.install({ testId: tested.testId });
@@ -197,7 +213,8 @@ describe("ModelAdmissionService", () => {
     expect(connection?.credentialHint).not.toContain(apiKey);
   });
 
-  it("原子 claim 阻止同一 testId 并发双安装", async () => {
+  it("原子 claim 阻止同一 testId 并发双安装", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const setup = await environment();
     const tested = await setup.service.test(candidate());
     const first = setup.service.install({ testId: tested.testId });
@@ -208,7 +225,56 @@ describe("ModelAdmissionService", () => {
     expect(setup.secrets.values.size).toBe(1);
   });
 
-  it("安装失败释放 claim；清理成功后同一 probe 可以重试", async () => {
+  it("模型连接体检达到并发上限后立即拒绝新请求，并在完成后归还名额", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    let started = 0;
+    let releaseProbes: (() => void) | undefined;
+    let announceCapacity: (() => void) | undefined;
+    const release = new Promise<void>(/** 为测试保存解除探针阻塞的回调，避免依赖不稳定的时间等待。 */
+(resolve) => { releaseProbes = resolve; });
+    const atCapacity = new Promise<void>(/** 当全部允许的探针都已启动时通知测试主流程。 */
+(resolve) => { announceCapacity = resolve; });
+    const setup = await environment({
+      probe: /** 阻塞已获准的探针，以稳定复现并发容量已满的窗口。 */
+async () => {
+        started += 1;
+        if (started === PRODUCT_CONFIG.capacity.maxConcurrentModelAdmissionTests) announceCapacity?.();
+        await release;
+        return capabilitySnapshot();
+      },
+    });
+    const running = Array.from(
+      { length: PRODUCT_CONFIG.capacity.maxConcurrentModelAdmissionTests },
+      /** 为每个并发名额创建不同模型，确保测试只命中并发限制。 */
+(_, index) => setup.service.test({ ...candidate(), model: `concurrent-${index}` }),
+    );
+    await atCapacity;
+
+    await expect(setup.service.test({ ...candidate(), model: "overflow" }))
+      .rejects.toMatchObject({ status: 503, code: "REMOTE_BUSY", retryable: true });
+    releaseProbes?.();
+    await expect(Promise.all(running)).resolves.toHaveLength(
+      PRODUCT_CONFIG.capacity.maxConcurrentModelAdmissionTests,
+    );
+
+    await expect(setup.service.test({ ...candidate(), model: "after-release" }))
+      .resolves.toMatchObject({ state: "succeeded" });
+  });
+
+  it("待安装 Candidate 达到容量后拒绝继续保留含密钥记录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const setup = await environment();
+    for (let index = 0; index < PRODUCT_CONFIG.capacity.maxRetainedModelCandidates; index += 1) {
+      await expect(setup.service.test({ ...candidate(), model: `retained-${index}` }))
+        .resolves.toMatchObject({ state: "succeeded" });
+    }
+
+    await expect(setup.service.test({ ...candidate(), model: "one-too-many" }))
+      .rejects.toMatchObject({ status: 503, code: "REMOTE_BUSY", retryable: true });
+  });
+
+  it("安装失败释放 claim；清理成功后同一 probe 可以重试", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const setup = await environment();
     const tested = await setup.service.test(candidate());
     setup.secrets.failWrite = true;
@@ -218,7 +284,8 @@ describe("ModelAdmissionService", () => {
     await expect(setup.service.install({ testId: tested.testId })).resolves.toMatchObject({ status: "ready" });
   });
 
-  it("安装与 Keychain 回滚同时失败时持久化 rollback_pending，启动时不会恢复为可用模型", async () => {
+  it("安装与 Keychain 回滚同时失败时持久化 rollback_pending，启动时不会恢复为可用模型", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const setup = await environment();
     const tested = await setup.service.test(candidate());
     setup.secrets.failWrite = true;
@@ -239,16 +306,19 @@ describe("ModelAdmissionService", () => {
     expect(await setup.repository.listStudents()).toHaveLength(0);
   });
 
-  it("崩溃停在 installing 且 Secret 不存在时，重启自动回滚并允许重新入园", async () => {
+  it("崩溃停在 installing 且 Secret 不存在时，重启自动回滚并允许重新入园", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-model-admission-installing-recovery-"));
     dirs.push(dir);
     const repository = new ModelAdmissionRepository(join(dir, "tests.json"), join(dir, "catalog.json"));
     const pair = persistedPair("crashed", "test-crashed", "2026-08-14T00:00:00.000Z");
     await repository.install(pair.connection, { ...pair.student, lifecycle: "installing" });
     const secrets = new MemorySecrets();
-    const prober = new FakeProber(async () => capabilitySnapshot());
+    const prober = new FakeProber(/** 构造「prober」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => capabilitySnapshot());
     const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
-    const policy = new RemoteModelUrlPolicy(async () => [{ address: "8.8.8.8" }]);
+    const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8" }]);
 
     expect(await serviceFor(repository, secrets, prober, catalog, policy).restoreInstalled()).toEqual([]);
     expect(await repository.listStudents()).toEqual([]);
@@ -258,7 +328,8 @@ describe("ModelAdmissionService", () => {
     await expect(restarted.install({ testId: tested.testId })).resolves.toMatchObject({ status: "ready" });
   });
 
-  it("启动 reconciliation 只允许一份同 endpoint/model 记录 ready，其余明确隔离", async () => {
+  it("启动 reconciliation 只允许一份同 endpoint/model 记录 ready，其余明确隔离", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-model-admission-reconcile-"));
     dirs.push(dir);
     const testsFile = join(dir, "tests.json");
@@ -273,25 +344,32 @@ describe("ModelAdmissionService", () => {
     secrets.values.set(first.connection.credentialRef.key, "secret-one");
     secrets.values.set(duplicate.connection.credentialRef.key, "secret-two");
     const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
-    const policy = new RemoteModelUrlPolicy(async () => [{ address: "8.8.8.8" }]);
-    const service = serviceFor(repository, secrets, new FakeProber(async () => capabilitySnapshot()), catalog, policy);
+    const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8" }]);
+    const service = serviceFor(repository, secrets, new FakeProber(/** 构造「service」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => capabilitySnapshot()), catalog, policy);
 
     const restored = await service.restoreInstalled();
     expect(restored).toHaveLength(2);
-    expect(restored.filter((item) => item.status === "ready")).toHaveLength(1);
-    expect(restored.filter((item) => item.status === "unavailable")).toEqual([
+    expect(restored.filter(/** 构造「toHaveLength」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.status === "ready")).toHaveLength(1);
+    expect(restored.filter(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.status === "unavailable")).toEqual([
       expect.objectContaining({ statusMessage: expect.stringContaining("重复入园") }),
     ]);
   });
 
-  it("凭据已删除但 JSON 删除失败时保留 deleting 日志，重启继续完成删除", async () => {
+  it("凭据已删除但 JSON 删除失败时保留 deleting 日志，重启继续完成删除", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-model-admission-delete-recovery-"));
     dirs.push(dir);
     const repository = new FailOnceRemoveRepository(join(dir, "tests.json"), join(dir, "catalog.json"));
     const secrets = new MemorySecrets();
-    const prober = new FakeProber(async () => capabilitySnapshot());
+    const prober = new FakeProber(/** 构造「prober」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => capabilitySnapshot());
     const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
-    const policy = new RemoteModelUrlPolicy(async () => [{ address: "8.8.8.8" }]);
+    const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8" }]);
     const service = serviceFor(repository, secrets, prober, catalog, policy);
     const tested = await service.test(candidate());
     const installed = await service.install({ testId: tested.testId });
@@ -314,16 +392,19 @@ class MemorySecrets implements WritableSecretStore {
   readonly values = new Map<string, string>();
   failWrite = false;
   failDelete = false;
-  async read(ref: SecretRef): Promise<string> {
+  /** 构造「read」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async read(ref: SecretRef): Promise<string> {
     const value = this.values.get(ref.key);
     if (!value) throw new Error("missing");
     return value;
   }
-  async write(ref: SecretRef, value: string): Promise<void> {
+  /** 构造「write」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async write(ref: SecretRef, value: string): Promise<void> {
     if (this.failWrite) throw new Error("keychain write failed");
     this.values.set(ref.key, value);
   }
-  async delete(ref: SecretRef): Promise<void> {
+  /** 构造「delete」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async delete(ref: SecretRef): Promise<void> {
     if (this.failDelete) throw new Error("keychain locked");
     this.values.delete(ref.key);
   }
@@ -331,8 +412,10 @@ class MemorySecrets implements WritableSecretStore {
 
 class FakeProber {
   seen?: ResponsesModelCandidateInput;
-  constructor(private readonly run: (input: ResponsesModelCandidateInput) => Promise<ProviderCapabilitySnapshot>) {}
-  async probe(input: ResponsesModelCandidateInput): Promise<ProviderCapabilitySnapshot> {
+  /** 构造「FakeProber」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+constructor(private readonly run: (input: ResponsesModelCandidateInput) => Promise<ProviderCapabilitySnapshot>) {}
+  /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async probe(input: ResponsesModelCandidateInput): Promise<ProviderCapabilitySnapshot> {
     this.seen = structuredClone(input);
     return this.run(input);
   }
@@ -340,12 +423,14 @@ class FakeProber {
 
 class FailOnceRemoveRepository extends ModelAdmissionRepository {
   failRemove = false;
-  override async removeStudent(modelStudentId: string, ownerId: string) {
+  /** 构造「removeStudent」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+override async removeStudent(modelStudentId: string, ownerId: string) {
     if (this.failRemove) throw new Error("injected catalog delete failure");
     return super.removeStudent(modelStudentId, ownerId);
   }
 }
 
+/** 构造「environment」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function environment(options: {
   probe?: (input: ResponsesModelCandidateInput) => Promise<ProviderCapabilitySnapshot>;
   modelInUse?: (id: string) => boolean;
@@ -356,13 +441,16 @@ async function environment(options: {
   const catalogFile = join(dir, "catalog.json");
   const repository = new ModelAdmissionRepository(testsFile, catalogFile);
   const secrets = new MemorySecrets();
-  const prober = new FakeProber(options.probe ?? (async () => capabilitySnapshot()));
+  const prober = new FakeProber(options.probe ?? (/** 构造「prober」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => capabilitySnapshot()));
   const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
-  const policy = new RemoteModelUrlPolicy(async () => [{ address: "8.8.8.8" }]);
+  const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8" }]);
   const service = serviceFor(repository, secrets, prober, catalog, policy, options.modelInUse);
   return { dir, testsFile, catalogFile, repository, secrets, prober, catalog, policy, service };
 }
 
+/** 构造「serviceFor」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function serviceFor(
   repository: ModelAdmissionRepository,
   secrets: MemorySecrets,
@@ -371,7 +459,8 @@ function serviceFor(
   policy: RemoteModelUrlPolicy,
   modelInUse?: (id: string) => boolean,
 ) {
-  const createResponses = (student: Parameters<ModelAdmissionAdapterRegistry["createProvider"]>[0], connection: Parameters<ModelAdmissionAdapterRegistry["createProvider"]>[1]) => new ResponsesApiProvider({
+  const createResponses = /** 构造「createResponses」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(student: Parameters<ModelAdmissionAdapterRegistry["createProvider"]>[0], connection: Parameters<ModelAdmissionAdapterRegistry["createProvider"]>[1]) => new ResponsesApiProvider({
     id: student.modelStudentId,
     name: student.displayName,
     sizeClass: student.sizeClass,
@@ -381,27 +470,32 @@ function serviceFor(
     provider: { kind: "openai-compatible", model: student.model, baseUrl: connection.baseUrl },
     generationDefaults: { reasoningProfile: student.generationDefaults.reasoningProfile },
   }, {
-    readBearerToken: () => secrets.read(connection.credentialRef),
+    readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => secrets.read(connection.credentialRef),
     reasoning: {
       capability: student.snapshot.reasoning.capability,
       efforts: responseEfforts(student.snapshot),
     },
-    endpointResolver: (url) => policy.resolve(url),
+    endpointResolver: /** 构造「endpointResolver」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(url) => policy.resolve(url),
   });
   const adapters = new ModelAdmissionAdapterRegistry([
     {
       protocol: "openai_responses",
       adapterRevision: "openai-responses-v1",
       probeVersion: 1,
-      probe: (candidate: ResolvedModelStudentCandidate) => prober.probe(candidate),
+      probe: /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(candidate: ResolvedModelStudentCandidate) => prober.probe(candidate),
       createProvider: createResponses,
     },
     {
       protocol: "openai_chat_completions",
       adapterRevision: "test-chat-v1",
       probeVersion: 1,
-      probe: async () => chatCapabilitySnapshot(),
-      createProvider: () => { throw new Error("unused test adapter"); },
+      probe: /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => chatCapabilitySnapshot(),
+      createProvider: /** 构造「createProvider」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => { throw new Error("unused test adapter"); },
     },
   ]);
   return new ModelAdmissionService(
@@ -415,6 +509,7 @@ function serviceFor(
   );
 }
 
+/** 构造「candidate」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function candidate(apiKey = "sk-test-super-secret"): ResponsesModelCandidateInput {
   return {
     displayName: "大聪明",
@@ -424,6 +519,7 @@ function candidate(apiKey = "sk-test-super-secret"): ResponsesModelCandidateInpu
   };
 }
 
+/** 构造「persistedPair」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function persistedPair(suffix: string, installationTestId: string, createdAt: string) {
   const connectionId = `connection-${suffix}`;
   const connection = {
@@ -458,6 +554,7 @@ function persistedPair(suffix: string, installationTestId: string, createdAt: st
   return { connection, student };
 }
 
+/** 构造「capabilitySnapshot」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function capabilitySnapshot(): ProviderCapabilitySnapshot {
   return {
     schemaVersion: 1,
@@ -492,11 +589,14 @@ function capabilitySnapshot(): ProviderCapabilitySnapshot {
   };
 }
 
+/** 构造「responseEfforts」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function responseEfforts(snapshot: ProviderCapabilitySnapshot) {
   return Object.fromEntries(Object.entries(snapshot.reasoning.nativeByProfile)
-    .flatMap(([profile, native]) => typeof native?.effort === "string" ? [[profile, native.effort]] : []));
+    .flatMap(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+([profile, native]) => typeof native?.effort === "string" ? [[profile, native.effort]] : []));
 }
 
+/** 构造「limitedResponsesCapabilitySnapshot」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function limitedResponsesCapabilitySnapshot(): ProviderCapabilitySnapshot {
   return {
     ...capabilitySnapshot(),
@@ -518,6 +618,7 @@ function limitedResponsesCapabilitySnapshot(): ProviderCapabilitySnapshot {
   };
 }
 
+/** 构造「chatCapabilitySnapshot」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function chatCapabilitySnapshot(): ProviderCapabilitySnapshot {
   return {
     ...capabilitySnapshot(),

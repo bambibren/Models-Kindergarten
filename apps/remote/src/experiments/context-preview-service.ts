@@ -12,16 +12,19 @@ import { ApiProblemError } from "../server/api-problem.js";
 
 /** 创建页预览与 prepare-run 共用这一条真实 Runtime/serializer 路径。 */
 export class ContextPreviewService {
-  constructor(private readonly resolver: RuntimeCapabilityResolver, ..._legacy: unknown[]) {}
+  /** 初始化「ContextPreviewService」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(private readonly resolver: RuntimeCapabilityResolver, ..._legacy: unknown[]) {}
 
-  async preview(raw: unknown, ownerId = "local-admin"): Promise<ContextPreviewResponseV2> {
+  /** 执行「preview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async preview(raw: unknown, ownerId = "local-admin"): Promise<ContextPreviewResponseV2> {
     let input;
     try { input = parseContextPreviewInputV2(raw); }
     catch (error) { throw invalid(publicMessage(error)); }
     return this.previewTest(input.promptText, input.test, ownerId);
   }
 
-  async previewTest(
+  /** 执行「previewTest」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async previewTest(
     promptText: string,
     test: ExperimentTestDraftV2,
     ownerId = "local-admin",
@@ -40,9 +43,12 @@ export class ContextPreviewService {
         message: `当前 ModelStudent 不支持 ${test.reasoningProfile} 推理档位`,
       });
     }
-    const usesTools = test.policy.builtinTools.some((item) => item.enabled)
+    const usesTools = test.policy.builtinTools.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled)
       || test.policy.skillInstallationIds.length > 0
-      || test.policy.mcps.some((item) => item.enabled && item.tools.some((tool) => tool.enabled));
+      || test.policy.mcps.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled && item.tools.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(tool) => tool.enabled));
     if (usesTools && !summary.supports.toolCalls) {
       diagnostics.push({
         code: "MODEL_TOOL_CALLS_UNSUPPORTED",
@@ -56,7 +62,8 @@ export class ContextPreviewService {
       capability: reasoningCapability,
       modelDefault: resolved.model.student.generationDefaults.reasoningProfile ?? reasoningCapability.defaultProfile,
       ...(test.reasoningProfile === "auto" ? {} : { sessionOverride: test.reasoningProfile }),
-      native: (profile) => resolved.model.nativeReasoning?.(profile) ?? {},
+      native: /** 执行「native」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(profile) => resolved.model.nativeReasoning?.(profile) ?? {},
     });
     const built = await resolved.context.buildObserved([], promptText, new AbortController().signal);
     const tools = structuredClone(resolved.tools.registry.definitions);
@@ -99,12 +106,15 @@ export class ContextPreviewService {
   }
 }
 
+/** 执行「sha256」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
+/** 执行「invalid」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function invalid(message: string) {
   return new ApiProblemError(400, "VALIDATION_FAILED", message, false);
 }
+/** 执行「publicMessage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function publicMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

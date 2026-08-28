@@ -49,12 +49,15 @@ const mcp: McpInstallationView = {
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
 
-describe("AgentPolicyFields", () => {
-  it("复用真实 Tool、Skill 和 MCP 控件，并可隐藏 History/Memory", () => {
+describe("AgentPolicyFields", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("复用真实 Tool、Skill 和 MCP 控件，并可隐藏 History/Memory", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const html = renderToStaticMarkup(<AgentPolicyFields
       builtinToolIds={["read_file", "web_search"]}
       mcps={[mcp]}
-      onChange={() => undefined}
+      onChange={/** 构造「onChange」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => undefined}
       showHistory={false}
       showMemory={false}
       skills={[skill]}
@@ -69,11 +72,13 @@ describe("AgentPolicyFields", () => {
     expect(html).not.toContain("Memory");
   });
 
-  it("在 Agent 编辑页显示 History 和只读 Memory 状态", () => {
+  it("在 Agent 编辑页显示 History 和只读 Memory 状态", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const html = renderToStaticMarkup(<AgentPolicyFields
       builtinToolIds={["read_file", "web_search"]}
       mcps={[]}
-      onChange={() => undefined}
+      onChange={/** 构造「onChange」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => undefined}
       skills={[skill]}
       value={policy}
     />);

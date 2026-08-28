@@ -18,9 +18,11 @@ import type { SkillRegistry } from "./skill-registry.js";
 import type { SkillInstallRecord } from "./skill-types.js";
 import { SkillSourceUrlPolicy, type ExplicitSkillSourceUrl } from "./skill-source-url.js";
 
+/** 描述「SkillInstallationService」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class SkillInstallationService {
   private readonly readyIds = new Set<string>();
-  constructor(
+  /** 初始化「SkillInstallationService」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly repository: SkillInstallationRepository,
     private readonly discovery: SkillDiscoveryPort,
     private readonly installer: SkillInstallerPort,
@@ -29,30 +31,58 @@ export class SkillInstallationService {
     private readonly sourcePolicy = new SkillSourceUrlPolicy(),
   ) {}
 
-  async importExisting(ownerId = "local-admin"): Promise<void> {
+  /** 执行「importExisting」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async importExisting(ownerId = "local-admin"): Promise<void> {
     await this.repository.interruptActiveJobs();
     const registered = this.registry.all();
-    const registeredNames = new Set(registered.map((skill) => skill.name));
+    const registeredNames = new Set(registered.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(skill) => skill.name));
     const persisted = await this.repository.listInstallations();
 
-    // 远端 Skill 目录若已从磁盘移除，对应安装记录与 Agent 绑定也必须失效。
-    for (const stale of persisted.filter((item) =>
+    const capacitySaturated = registered.length >= PRODUCT_CONFIG.capacity.maxInstalledSkills;
+    // 达到目录容量时，不把未加载的旧记录误判为删除；它们保留事实但退出 Runtime 能力。
+    for (const stale of persisted.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) =>
       item.ownerId === ownerId &&
       item.state !== "uninstalled" &&
       remoteSource(item.source) &&
       !registeredNames.has(item.skillName))) {
       await this.agents.removeSkillBindings(stale.skillInstallationId, ownerId);
+      if (capacitySaturated) {
+        await this.repository.putInstallation({
+          ...stale,
+          state: "capacity_blocked",
+          error: {
+            code: "CAPABILITY_STALE",
+            message: `Skill Registry 已达到 ${PRODUCT_CONFIG.capacity.maxInstalledSkills} 条容量上限`,
+            retryable: false,
+          },
+          updatedAt: new Date().toISOString(),
+        });
+        this.readyIds.delete(stale.skillInstallationId);
+        continue;
+      }
       await this.repository.removeInstallation(stale.skillInstallationId);
       this.readyIds.delete(stale.skillInstallationId);
     }
 
     const active = (await this.repository.listInstallations())
-      .filter((item) => item.ownerId === ownerId && item.state !== "uninstalled");
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.ownerId === ownerId && item.state !== "uninstalled");
     for (const skill of registered) {
-      const matches = active.filter((item) => item.skillName === skill.name);
+      const matches = active.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.skillName === skill.name);
       if (matches.length > 1) throw new Error(`Skill name 存在重复安装记录: ${skill.name}`);
       const existing = matches[0];
       if (existing) {
+        if (existing.state !== "ready") {
+          const { error: _error, ...restored } = existing;
+          await this.repository.putInstallation({
+            ...restored,
+            state: "ready",
+            updatedAt: new Date().toISOString(),
+          });
+        }
         this.readyIds.add(existing.skillInstallationId);
         continue;
       }
@@ -75,14 +105,19 @@ export class SkillInstallationService {
     }
   }
 
-  async list(ownerId = "local-admin"): Promise<SkillInstallation[]> {
+  /** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
+async list(ownerId = "local-admin"): Promise<SkillInstallation[]> {
     return (await this.repository.listInstallations())
-      .filter((item) => item.ownerId === ownerId && item.state !== "uninstalled")
-      .map((item) => ({ ...item, deletable: this.isDeletable(item) }))
-      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.ownerId === ownerId && item.state !== "uninstalled")
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => ({ ...item, deletable: this.isDeletable(item) }))
+      .toSorted(/** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
+(left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
-  async get(id: string, ownerId = "local-admin"): Promise<SkillInstallation> {
+  /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */
+async get(id: string, ownerId = "local-admin"): Promise<SkillInstallation> {
     const value = await this.repository.getInstallation(id);
     if (!value || value.ownerId !== ownerId || value.state === "uninstalled") {
       throw new ApiProblemError(404, "NOT_FOUND", "Skill Installation 不存在", false);
@@ -90,15 +125,21 @@ export class SkillInstallationService {
     return { ...value, deletable: this.isDeletable(value) };
   }
 
-  async readyInstallationIds(ownerId = "local-admin"): Promise<string[]> {
-    const ids = (await this.list(ownerId)).filter((item) => item.state === "ready").map((item) => item.skillInstallationId);
-    ids.forEach((id) => this.readyIds.add(id));
+  /** 读取「readyInstallationIds」所需数据，并遵守作用域、分页与容量边界。 */
+async readyInstallationIds(ownerId = "local-admin"): Promise<string[]> {
+    const ids = (await this.list(ownerId)).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.state === "ready").map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.skillInstallationId);
+    ids.forEach(/** 读取「readyInstallationIds」所需数据，并遵守作用域、分页与容量边界。 */
+(id) => this.readyIds.add(id));
     return ids;
   }
 
-  async uninstall(id: string, ownerId = "local-admin"): Promise<{ removedAgentBindings: string[] }> {
+  /** 执行「uninstall」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async uninstall(id: string, ownerId = "local-admin"): Promise<{ removedAgentBindings: string[] }> {
     const installation = await this.get(id, ownerId);
-    const installed = this.registry.all().find((item) => item.name === installation.skillName);
+    const installed = this.registry.all().find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.name === installation.skillName);
     if (installed ? installed.scope !== "user" : !remoteSource(installation.source)) {
       throw new ApiProblemError(409, "CONFLICT", "系统内置或项目 Skill 不可删除", false);
     }
@@ -110,23 +151,29 @@ export class SkillInstallationService {
     await this.registry.refresh();
     await this.repository.removeInstallation(installation.skillInstallationId);
     this.readyIds.delete(installation.skillInstallationId);
-    return { removedAgentBindings: agents.map((agent) => agent.agentId).toSorted() };
+    return { removedAgentBindings: agents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(agent) => agent.agentId).toSorted() };
   }
 
-  private isDeletable(installation: SkillInstallation): boolean {
-    const installed = this.registry.all().find((item) => item.name === installation.skillName);
+  /** 判断「isDeletable」对应条件，只返回判定结果且不修改输入状态。 */
+private isDeletable(installation: SkillInstallation): boolean {
+    const installed = this.registry.all().find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.name === installation.skillName);
     return installed ? installed.scope === "user" : remoteSource(installation.source);
   }
 
-  explicitSourceUrlCandidates(message: string): ExplicitSkillSourceUrl[] {
+  /** 执行「explicitSourceUrlCandidates」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+explicitSourceUrlCandidates(message: string): ExplicitSkillSourceUrl[] {
     return this.sourcePolicy.explicitCandidates(message);
   }
 
-  readyInstallationIdsSync(): string[] {
+  /** 读取「readyInstallationIdsSync」所需数据，并遵守作用域、分页与容量边界。 */
+readyInstallationIdsSync(): string[] {
     return [...this.readyIds].toSorted();
   }
 
-  async runtimeSkillNames(installationIds: string[], ownerId: string): Promise<string[]> {
+  /** 执行「runtimeSkillNames」主流程，传播取消与失败并在结束时清理临时资源。 */
+async runtimeSkillNames(installationIds: string[], ownerId: string): Promise<string[]> {
     const result: string[] = [];
     for (const id of installationIds) {
       const installation = await this.get(id, ownerId);
@@ -138,26 +185,32 @@ export class SkillInstallationService {
     return [...new Set(result)];
   }
 
-  async createManualJob(
+  /** 根据已校验输入构建「createManualJob」结果，不额外持有调用方的大对象。 */
+async createManualJob(
     sourceUrls: string[],
     bind: { bindToAgentOnComplete: boolean; agentId?: string },
     ownerId = "local-admin",
   ): Promise<SkillInstallJob> {
-    sourceUrls.forEach((url) => this.sourcePolicy.parse(url));
+    sourceUrls.forEach(/** 根据已校验输入构建「createManualJob」结果，不额外持有调用方的大对象。 */
+(url) => this.sourcePolicy.parse(url));
     const job = await this.createJob(sourceUrls, { kind: "manual" }, bind.bindToAgentOnComplete, ownerId);
-    void this.run(job.jobId, "ensure", bind.agentId).catch(() => undefined);
+    void this.run(job.jobId, "ensure", bind.agentId).catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
     return job;
   }
 
-  async ensureForTurn(
+  /** 校验并取得「ensureForTurn」所需对象；缺失或归属不符时立即抛出明确错误。 */
+async ensureForTurn(
     raw: EnsureAgentSkillsInput,
     scope: TurnScope,
     currentUserMessage: string,
   ): Promise<SkillInstallJob> {
     const input = parseEnsureInput(raw);
     const explicit = new Set(this.sourcePolicy.explicitUrls(currentUserMessage));
-    const canonicalUrls = input.sourceUrls.map((url) => this.sourcePolicy.parse(url).sourceUrl);
-    const unauthorized = canonicalUrls.find((url) => !explicit.has(url));
+    const canonicalUrls = input.sourceUrls.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(url) => this.sourcePolicy.parse(url).sourceUrl);
+    const unauthorized = canonicalUrls.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(url) => !explicit.has(url));
     if (unauthorized) {
       throw new ApiProblemError(400, "SKILL_SOURCE_NOT_USER_PROVIDED", `只能安装当前用户消息中明确给出的 Skill URL: ${unauthorized}`, false);
     }
@@ -170,26 +223,32 @@ export class SkillInstallationService {
     return this.run(job.jobId, input.mode, scope.agentId);
   }
 
-  async getJob(jobId: string, ownerId = "local-admin"): Promise<SkillInstallJob> {
+  /** 读取「getJob」所需数据，并遵守作用域、分页与容量边界。 */
+async getJob(jobId: string, ownerId = "local-admin"): Promise<SkillInstallJob> {
     const job = await this.repository.getJob(jobId);
     if (!job || job.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "Skill 安装任务不存在", false);
     return job;
   }
 
-  async retryJob(jobId: string, ownerId = "local-admin"): Promise<SkillInstallJob> {
+  /** 执行「retryJob」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async retryJob(jobId: string, ownerId = "local-admin"): Promise<SkillInstallJob> {
     const previous = await this.getJob(jobId, ownerId);
     if (previous.state !== "failed" && previous.state !== "interrupted") {
       throw new ApiProblemError(409, "CONFLICT", "只有失败或中断的 Skill 安装任务可以重试", false);
     }
-    const urls = previous.items.map((item) => item.source.kind === "approved_local" ? undefined : this.sourcePolicy.sourceUrl(item.source));
-    if (urls.some((item) => !item)) throw new ApiProblemError(409, "CONFLICT", "该任务来源不支持重试", false);
+    const urls = previous.items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.source.kind === "approved_local" ? undefined : this.sourcePolicy.sourceUrl(item.source));
+    if (urls.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => !item)) throw new ApiProblemError(409, "CONFLICT", "该任务来源不支持重试", false);
     const job = await this.createJob(urls as string[], previous.origin, previous.bindToAgentOnComplete, ownerId);
     const agentId = previous.origin.kind === "turn" ? previous.origin.agentId : undefined;
-    void this.run(job.jobId, "ensure", agentId).catch(() => undefined);
+    void this.run(job.jobId, "ensure", agentId).catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
     return job;
   }
 
-  private async createJob(
+  /** 根据已校验输入构建「createJob」结果，不额外持有调用方的大对象。 */
+private async createJob(
     sourceUrls: string[],
     origin: SkillInstallJob["origin"],
     bindToAgentOnComplete: boolean,
@@ -227,7 +286,8 @@ export class SkillInstallationService {
       ownerId,
       origin,
       state: "queued",
-      items: sources.map((source) => ({ itemId: randomUUID(), source, state: "queued" })),
+      items: sources.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(source) => ({ itemId: randomUUID(), source, state: "queued" })),
       bindToAgentOnComplete,
       createdAt: now,
       updatedAt: now,
@@ -236,7 +296,8 @@ export class SkillInstallationService {
     return job;
   }
 
-  private async run(jobId: string, mode: "ensure" | "update", agentId?: string): Promise<SkillInstallJob> {
+  /** 执行「run」主流程，传播取消与失败并在结束时清理临时资源。 */
+private async run(jobId: string, mode: "ensure" | "update", agentId?: string): Promise<SkillInstallJob> {
     let job = await this.getJob(jobId);
     job = { ...job, state: "running", updatedAt: new Date().toISOString() };
     await this.repository.putJob(job);
@@ -245,7 +306,8 @@ export class SkillInstallationService {
       for (const item of job.items) completed.push(await this.installItem(item, job.ownerId, mode));
       if (job.bindToAgentOnComplete) {
         if (!agentId) throw new Error("绑定 Skill 时缺少 agentId");
-        await this.agents.mergeReadySkills(agentId, completed.flatMap((item) => item.skillInstallationId ? [item.skillInstallationId] : []), job.ownerId);
+        await this.agents.mergeReadySkills(agentId, completed.flatMap(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(item) => item.skillInstallationId ? [item.skillInstallationId] : []), job.ownerId);
       }
       job = {
         ...job,
@@ -260,7 +322,8 @@ export class SkillInstallationService {
       job = {
         ...job,
         state: "failed",
-        items: [...completed, ...job.items.slice(completed.length).map((item, index) => index === 0 ? {
+        items: [...completed, ...job.items.slice(completed.length).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item, index) => index === 0 ? {
           ...item,
           state: "failed" as const,
           error: {
@@ -277,18 +340,32 @@ export class SkillInstallationService {
     }
   }
 
-  private async installItem(
+  /** 执行「installItem」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async installItem(
     item: SkillInstallJobItem,
     ownerId: string,
     mode: "ensure" | "update",
   ): Promise<SkillInstallJobItem> {
     if (item.source.kind === "approved_local") throw new Error("安装任务不接受本地派生来源");
     const source = item.source;
-    const existing = (await this.list(ownerId)).find((candidate) => {
+    const existing = (await this.list(ownerId)).find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => {
       return this.sourcePolicy.sameSource(candidate.source, source);
     });
     if (existing && mode === "ensure") {
       return { ...item, state: "ready", skillInstallationId: existing.skillInstallationId, disposition: "reused" };
+    }
+    if (!existing) {
+      const installedCount = (await this.list(ownerId)).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.state !== "uninstalled").length;
+      if (installedCount >= PRODUCT_CONFIG.capacity.maxInstalledSkills) {
+        throw new ApiProblemError(
+          409,
+          "CONFLICT",
+          `Skill Installation 已达到 ${PRODUCT_CONFIG.capacity.maxInstalledSkills} 条容量上限`,
+          false,
+        );
+      }
     }
     let installed: SkillInstallRecord;
     try {
@@ -349,6 +426,7 @@ export class SkillInstallationService {
   }
 }
 
+/** 描述「SkillInstallerPort」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SkillInstallerPort {
   install(
     request: import("./skill-types.js").SkillInstallRequest,
@@ -357,14 +435,17 @@ export interface SkillInstallerPort {
   uninstall(name: string): Promise<void>;
 }
 
+/** 校验并规范化「parseEnsureInput」输入，非法数据直接返回明确错误。 */
 function parseEnsureInput(value: EnsureAgentSkillsInput): EnsureAgentSkillsInput {
-  if (!value || !Array.isArray(value.sourceUrls) || !value.sourceUrls.every((item) => typeof item === "string") ||
+  if (!value || !Array.isArray(value.sourceUrls) || !value.sourceUrls.every(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => typeof item === "string") ||
     (value.mode !== "ensure" && value.mode !== "update")) {
     throw new ApiProblemError(400, "VALIDATION_FAILED", "ensure_agent_skills 参数无效", false);
   }
   return { sourceUrls: [...new Set(value.sourceUrls)], mode: value.mode };
 }
 
+/** 根据已校验输入构建「toPublicSource」结果，不额外持有调用方的大对象。 */
 function toPublicSource(skill: SkillInstallRecord): SkillSource {
   if (skill.source.kind === "git") {
     return {
@@ -381,27 +462,33 @@ function toPublicSource(skill: SkillInstallRecord): SkillSource {
   return { kind: "approved_local", sourceId: skill.name };
 }
 
+/** 执行「errorCode」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function errorCode(error: unknown): PublicErrorCode {
   return error instanceof ApiProblemError ? error.code : "SKILL_VALIDATION_FAILED";
 }
 
+/** 执行「publicMessage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function publicMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 判断「isGitHubFetchFailure」对应条件，只返回判定结果且不修改输入状态。 */
 function isGitHubFetchFailure(error: unknown): boolean {
   const message = publicMessage(error);
   return /could not resolve host|failed to connect|connection timed out|operation timed out|curl \d+|early eof|expected flush after ref listing|connection reset/i.test(message);
 }
 
+/** 判断「isResourceFetchFailure」对应条件，只返回判定结果且不修改输入状态。 */
 function isResourceFetchFailure(error: unknown): boolean {
   return /SKILL_RESOURCE_DOWNLOAD_FAILED/.test(publicMessage(error));
 }
 
+/** 执行「remoteSource」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function remoteSource(source: SkillSource): source is Exclude<SkillSource, { kind: "approved_local" }> {
   return source.kind === "github_tree" || source.kind === "resource_bundle";
 }
 
+/** 执行「githubConnectionProblem」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function githubConnectionProblem(repository: string): ApiProblemError {
   return new ApiProblemError(
     502,
@@ -411,6 +498,7 @@ function githubConnectionProblem(repository: string): ApiProblemError {
   );
 }
 
+/** 执行「resourceConnectionProblem」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function resourceConnectionProblem(url: string): ApiProblemError {
   return new ApiProblemError(
     502,

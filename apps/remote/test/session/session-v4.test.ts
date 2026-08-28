@@ -6,10 +6,14 @@ import { SessionRepository } from "../../src/repository/session-repository.js";
 import { createProviderOpaqueContinuation } from "../../src/model/provider-continuation.js";
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("SessionRepository V4", () => {
-  it("保存不可变身份并从普通列表隐藏 experiment Session", async () => {
+describe("SessionRepository V5", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保存不可变身份并从普通列表隐藏 experiment Session", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     const repository = new SessionRepository(dir, legacyDefaults);
     const chat = await repository.create({
@@ -20,20 +24,24 @@ describe("SessionRepository V4", () => {
       experimentRef: { experimentId: "experiment-1", variantId: "b" },
     });
 
-    expect(chat).toMatchObject({ schemaVersion: 4, purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
+    expect(chat).toMatchObject({ schemaVersion: 5, purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
     expect(experiment.experimentRef).toEqual({ experimentId: "experiment-1", variantId: "b" });
-    expect((await repository.list()).map((item) => item.sessionId)).toEqual([chat.id]);
-    expect((await repository.list(null, "experiment")).map((item) => item.sessionId)).toEqual([experiment.id]);
+    expect((await repository.list()).map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.sessionId)).toEqual([chat.id]);
+    expect((await repository.list(null, "experiment")).map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.sessionId)).toEqual([experiment.id]);
   });
 
-  it("experiment 缺少 experimentRef 时拒绝创建", async () => {
+  it("experiment 缺少 experimentRef 时拒绝创建", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const repository = new SessionRepository(await tempDir(), legacyDefaults);
     await expect(repository.create({
       cwd: "/workspace", ownerId: "local-admin", purpose: "experiment", modelStudentId: "student-1", agentId: "agent-1",
     })).rejects.toThrow("experimentRef");
   });
 
-  it("持久化 Session 推理覆盖，并用 auto 恢复 ModelStudent 默认", async () => {
+  it("持久化 Session 推理覆盖，并用 auto 恢复 ModelStudent 默认", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const repository = new SessionRepository(await tempDir(), legacyDefaults);
     const session = await repository.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
     expect((await repository.setReasoningOverride(session.id, "max")).reasoningOverride).toBe("max");
@@ -42,7 +50,8 @@ describe("SessionRepository V4", () => {
     expect((await repository.get(session.id)).reasoningOverride).toBeUndefined();
   });
 
-  it("Turn 保存 Agent、能力、Context 和 Provider 输入的不可变快照", async () => {
+  it("Turn 保存 Agent、能力、Context 和 Provider 输入的不可变快照", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const repository = new SessionRepository(await tempDir(), legacyDefaults);
     const session = await repository.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
     await repository.startTurn(session.id, "turn-1", {
@@ -62,10 +71,12 @@ describe("SessionRepository V4", () => {
     const turn = (await repository.get(session.id)).turns[0];
     expect(turn).toMatchObject({ state: { status: "completed" }, agentSnapshotHash: "hash-1", stopReason: "end_turn" });
     expect(turn?.resolvedReasoning?.native).toEqual({ think: true });
-    expect(turn?.modelRounds?.[0]?.providerInput.value).toBe("{}");
+    expect(turn?.modelRounds?.[0]).toMatchObject({ providerInputHash: expect.any(String), providerInputBytes: 2 });
+    expect(await repository.readProviderInput(session.id, "turn-1", 0)).toMatchObject({ value: "{}" });
   });
 
-  it("running Turn 的解析策略与 Model Round checkpoint 可在终态前读取", async () => {
+  it("running Turn 的解析策略与 Model Round checkpoint 可在终态前读取", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const repository = new SessionRepository(await tempDir(), legacyDefaults);
     const session = await repository.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
     await repository.startTurn(session.id, "turn-running", { promptEntryId: "message-running" });
@@ -105,7 +116,8 @@ describe("SessionRepository V4", () => {
     });
   });
 
-  it("允许在 Turn 终态后补齐已执行文件 Tool 的派生预览引用", async () => {
+  it("允许在 Turn 终态后补齐已执行文件 Tool 的派生预览引用", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const repository = new SessionRepository(await tempDir(), legacyDefaults);
     const session = await repository.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
     await repository.startTurn(session.id, "turn-file", { promptEntryId: "message-file" });
@@ -151,7 +163,8 @@ describe("SessionRepository V4", () => {
     expect((await repository.get(session.id)).sessionEntries).toContainEqual(entry);
   });
 
-  it("原子保存用户消息与 Turn，并在重启恢复时保留消息、收敛运行状态", async () => {
+  it("原子保存用户消息与 Turn，并在重启恢复时保留消息、收敛运行状态", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const repository = new SessionRepository(await tempDir(), legacyDefaults);
     const session = await repository.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
     await repository.startTurnWithPrompt(session.id, "turn-atomic", {
@@ -165,7 +178,8 @@ describe("SessionRepository V4", () => {
     expect(recovered.turns[0]).toMatchObject({ state: { status: "interrupted" }, error: { code: "TURN_INTERRUPTED", retryable: true } });
   });
 
-  it("修复旧版 running Turn 中只写入 Provider 快照、未写入 Session 的用户消息", async () => {
+  it("修复旧版 running Turn 中只写入 Provider 快照、未写入 Session 的用户消息", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const repository = new SessionRepository(await tempDir(), legacyDefaults);
     const session = await repository.create({ cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
     await repository.startTurn(session.id, "turn-legacy", { promptEntryId: "message-legacy" });
@@ -184,7 +198,8 @@ describe("SessionRepository V4", () => {
     expect(recovered.turns[0]?.entryIds).toContain("message:message-legacy");
   });
 
-  it("从 V3 显式迁移为 V4，并写回备份", async () => {
+  it("从 V3 显式迁移为 V5 分片，并保留旧文件备份", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     const file = join(dir, "sessions.json");
     await writeFile(file, JSON.stringify({
@@ -193,14 +208,15 @@ describe("SessionRepository V4", () => {
     }), "utf8");
     const repository = new SessionRepository(dir, legacyDefaults);
     expect(await repository.get("legacy")).toMatchObject({
-      schemaVersion: 4, ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1",
+      schemaVersion: 5, ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1",
     });
     await repository.persistMigrations();
-    expect(JSON.parse(await readFile(file, "utf8"))).toMatchObject({ version: 4 });
+    expect(JSON.parse(await readFile(join(dir, "sessions.index.json"), "utf8"))).toMatchObject({ version: 5 });
     expect(JSON.parse(await readFile(`${file}.v3.bak`, "utf8"))).toMatchObject({ version: 3 });
   });
 
-  it("旧 Session 首次迁移时也拒绝伪造的 Provider continuation", async () => {
+  it("旧 Session 首次迁移时也拒绝伪造的 Provider continuation", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     await writeFile(join(dir, "sessions.json"), JSON.stringify({
       version: 3,
@@ -232,7 +248,8 @@ describe("SessionRepository V4", () => {
       .rejects.toThrow("JSON 对象数组");
   });
 
-  it("把当前 Responses v1 continuation 绑定到 Session 学生后迁移，并在重启后保留 v2", async () => {
+  it("把当前 Responses v1 continuation 绑定到 Session 学生后迁移，并在重启后保留 v2", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     const file = join(dir, "sessions.json");
     await writeFile(file, JSON.stringify({
@@ -278,7 +295,8 @@ describe("SessionRepository V4", () => {
     expect(restarted.sessionEntries[0]).toEqual(entry);
   });
 
-  it("写入时拒绝其他 ModelStudent 的 continuation，即使模型名相同", async () => {
+  it("写入时拒绝其他 ModelStudent 的 continuation，即使模型名相同", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const repository = new SessionRepository(await tempDir(), legacyDefaults);
     const session = await repository.create({
       cwd: "/workspace", ownerId: "local-admin", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1",
@@ -304,6 +322,7 @@ describe("SessionRepository V4", () => {
 
 const legacyDefaults = { ownerId: "local-admin", modelStudentId: "student-1", agentId: "agent-1" };
 
+/** 构造「tempDir」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function tempDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "mk-session-v4-"));
   dirs.push(dir);

@@ -5,8 +5,10 @@ import type {
 } from "@kindergarten/contracts";
 import type { ProviderOpaqueContinuation } from "./provider-continuation.js";
 
+/** 描述「ModelProviderKind」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelProviderKind = "ollama" | "siliconflow" | "openai-compatible";
 
+/** 描述「ModelStudent」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelStudent {
   id: string;
   name: string;
@@ -25,6 +27,7 @@ export interface ModelStudent {
   };
 }
 
+/** 描述「ModelMessage」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
@@ -36,6 +39,15 @@ export interface ModelMessage {
   providerOpaqueContinuation?: ProviderOpaqueContinuation;
 }
 
+/** 模型下一轮上下文中用于关联一次工具调用的终态结果消息。 */
+export interface ToolResultMessage extends ModelMessage {
+  role: "tool";
+  content: string;
+  toolName: string;
+  toolCallId: string;
+}
+
+/** 描述「ModelInput」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelInput {
   systemPrompt: string;
   messages: ModelMessage[];
@@ -59,6 +71,7 @@ export interface ModelContextSerialization {
   value: string;
 }
 
+/** 描述「ModelToolCall」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelToolCall {
   id?: string;
   index?: number;
@@ -66,6 +79,7 @@ export interface ModelToolCall {
   arguments: Record<string, unknown>;
 }
 
+/** 描述「ModelToolDefinition」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelToolDefinition {
   type: "function";
   function: {
@@ -76,6 +90,7 @@ export interface ModelToolDefinition {
   };
 }
 
+/** 描述「ModelToolSchema」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelToolSchema extends Record<string, unknown> {
   type: "object";
   properties?: Record<string, unknown>;
@@ -95,17 +110,18 @@ export interface ModelUsage {
 }
 
 /**
- * Provider wire-level message ceiling. maxMessages counts the final outbound
- * message array; adapterReservedMessages covers messages the adapter adds
- * outside ModelInput.messages (for example the primary system instruction).
+ * Provider wire 层消息数上限。`maxMessages` 统计最终出站数组，
+ * `adapterReservedMessages` 预留 Adapter 在 `ModelInput.messages` 之外添加的消息，
+ * 例如首条 system instruction。
  */
 export interface ModelInputMessageLimits {
   maxMessages: number;
   adapterReservedMessages: number;
-  /** Initial history budget reserved for one assistant + one tool result. */
+  /** 初始历史预算预留一条 assistant 和一条 tool result，保证首轮工具回填仍可继续。 */
   initialToolRoundHeadroom: number;
 }
 
+/** 描述「ModelEvent」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
@@ -117,7 +133,7 @@ export type ModelEvent =
 /** Provider Adapter 不认识 ACP、WebSocket、React 或 Session Repository。 */
 export interface ModelProvider {
   readonly student: ModelStudent;
-  /** Optional because most protocols in V1 do not publish a small hard count. */
+  /** 可选：V1 的多数协议并未公布较小的硬消息数上限。 */
   readonly inputMessageLimits?: ModelInputMessageLimits;
   /** 真实 Provider 必须声明；测试 Fixture 可省略并由 Runtime 按 fixed balanced 处理。 */
   readonly reasoningCapability?: ModelReasoningCapability;
@@ -130,7 +146,7 @@ export interface ModelProvider {
   stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent>;
 }
 
-/** Maximum ModelInput.messages count after adapter-owned messages/headroom. */
+/** 扣除 Adapter 自有消息与预留空间后，计算 `ModelInput.messages` 的最大数量。 */
 export function modelInputMessageCapacity(
   provider: ModelProvider,
   reserveInitialToolRound = false,
@@ -143,7 +159,8 @@ export function modelInputMessageCapacity(
     limits.initialToolRoundHeadroom,
   ];
   if (
-    values.some((value) => !Number.isInteger(value) || value < 0)
+    values.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(value) => !Number.isInteger(value) || value < 0)
     || limits.maxMessages < 1
   ) {
     throw new Error(`ModelProvider ${provider.student.id} 的输入消息限制无效`);

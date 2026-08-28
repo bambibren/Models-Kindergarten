@@ -19,11 +19,13 @@ export class SessionAcpChannel {
   private readonly activeRequests = new Set<string>();
   private closed = false;
 
-  constructor(client?: acp.AgentContext, private readonly sessionId?: string) {
+  /** 初始化「SessionAcpChannel」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(client?: acp.AgentContext, private readonly sessionId?: string) {
     if (client) this.client = client;
   }
 
-  attach(client: acp.AgentContext): void {
+  /** 执行「attach」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+attach(client: acp.AgentContext): void {
     if (this.closed) return;
     this.client = client;
     this.markClientChanged();
@@ -32,7 +34,8 @@ export class SessionAcpChannel {
     this.waiters.clear();
   }
 
-  detach(client: acp.AgentContext): void {
+  /** 执行「detach」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+detach(client: acp.AgentContext): void {
     if (this.client === client) {
       this.client = undefined;
       this.markClientChanged();
@@ -49,7 +52,8 @@ export class SessionAcpChannel {
     console.warn("[acp-channel] resume started", JSON.stringify({ sessionId: this.sessionId, clientVersion: this.clientVersion }));
   }
 
-  async finishResume(client: acp.AgentContext): Promise<void> {
+  /** 先按序发送回放期间缓冲的实时更新，再退出 resume 模式，避免回放与新事件交叉乱序。 */
+async finishResume(client: acp.AgentContext): Promise<void> {
     if (this.closed) return;
     const buffered = this.buffered ?? [];
     for (let index = 0; index < buffered.length; index += 1) {
@@ -66,7 +70,8 @@ export class SessionAcpChannel {
     this.attach(client);
   }
 
-  async project(operation: Projection, label: string): Promise<void> {
+  /** 将一次 Runtime 投影交给当前 Client；resume 期间只缓冲当前有界窗口内的增量。 */
+async project(operation: Projection, label: string): Promise<void> {
     if (this.closed) return;
     if (this.buffered) {
       this.buffered.push({ operation, label });
@@ -82,7 +87,8 @@ export class SessionAcpChannel {
     }
   }
 
-  async request<T>(
+  /** 执行「request」主流程，传播取消与失败并在结束时清理临时资源。 */
+async request<T>(
     interactionId: string,
     signal: AbortSignal,
     operation: (client: acp.AgentContext) => Promise<T>,
@@ -98,7 +104,8 @@ export class SessionAcpChannel {
     }
   }
 
-  private async requestUntilResolved<T>(
+  /** 执行「requestUntilResolved」主流程，传播取消与失败并在结束时清理临时资源。 */
+private async requestUntilResolved<T>(
     interactionId: string,
     signal: AbortSignal,
     operation: (client: acp.AgentContext) => Promise<T>,
@@ -112,10 +119,13 @@ export class SessionAcpChannel {
       try {
         const outcome = await Promise.race([
           operation(current).then(
-            (value) => ({ kind: "result" as const, value }),
-            (error: unknown) => ({ kind: "error" as const, error }),
+            /** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+(value) => ({ kind: "result" as const, value }),
+            /** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+(error: unknown) => ({ kind: "error" as const, error }),
           ),
-          changed.promise.then(() => ({ kind: "changed" as const })),
+          changed.promise.then(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => ({ kind: "changed" as const })),
         ]);
         if (outcome.kind === "changed") {
           console.warn("[acp-channel] reverse request reissuing after client change", JSON.stringify({
@@ -145,7 +155,8 @@ export class SessionAcpChannel {
     }
   }
 
-  close(): void {
+  /** 释放或删除「close」对应资源，重复调用仍保持安全。 */
+close(): void {
     if (this.closed) return;
     this.closed = true;
     this.client = undefined;
@@ -157,22 +168,27 @@ export class SessionAcpChannel {
     this.waiters.clear();
   }
 
-  private waitForClient(signal: AbortSignal): Promise<acp.AgentContext> {
+  /** 执行「waitForClient」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private waitForClient(signal: AbortSignal): Promise<acp.AgentContext> {
     if (signal.aborted) return Promise.reject(abortError());
     if (this.client) return Promise.resolve(this.client);
     if (this.closed) return Promise.reject(new Error("Session ACP channel 已关闭"));
-    return new Promise((resolve, reject) => {
+    return new Promise(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
+(resolve, reject) => {
       const waiter = {
-        resolve: (client: acp.AgentContext) => {
+        resolve: /** 执行「resolve」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(client: acp.AgentContext) => {
           signal.removeEventListener("abort", abort);
           resolve(client);
         },
-        reject: (error: Error) => {
+        reject: /** 执行「reject」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(error: Error) => {
           signal.removeEventListener("abort", abort);
           reject(error);
         },
       };
-      const abort = () => {
+      const abort = /** 执行「abort」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => {
         this.waiters.delete(waiter);
         waiter.reject(abortError());
       };
@@ -181,17 +197,20 @@ export class SessionAcpChannel {
     });
   }
 
-  private waitForClientChange(version: number, signal: AbortSignal): {
+  /** 执行「waitForClientChange」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private waitForClientChange(version: number, signal: AbortSignal): {
     promise: Promise<void>;
     cancel: () => void;
   } {
     let waiter: (() => void) | undefined;
     let abort: (() => void) | undefined;
-    const cleanup = () => {
+    const cleanup = /** 释放或删除「cleanup」对应资源，重复调用仍保持安全。 */
+() => {
       if (waiter) this.changeWaiters.delete(waiter);
       if (abort) signal.removeEventListener("abort", abort);
     };
-    const promise = new Promise<void>((resolve, reject) => {
+    const promise = new Promise<void>(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
+(resolve, reject) => {
       if (signal.aborted) {
         reject(abortError());
         return;
@@ -200,11 +219,13 @@ export class SessionAcpChannel {
         resolve();
         return;
       }
-      waiter = () => {
+      waiter = /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => {
         cleanup();
         resolve();
       };
-      abort = () => {
+      abort = /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => {
         cleanup();
         reject(abortError());
       };
@@ -214,16 +235,19 @@ export class SessionAcpChannel {
     return { promise, cancel: cleanup };
   }
 
-  private markClientChanged(): void {
+  /** 执行「markClientChanged」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private markClientChanged(): void {
     this.clientVersion += 1;
     for (const waiter of [...this.changeWaiters]) waiter();
   }
 }
 
+/** 执行「abortError」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function abortError(): DOMException {
   return new DOMException("已取消", "AbortError");
 }
 
+/** 生成「errorFacts」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
 function errorFacts(error: unknown): { name: string; message: string } {
   return error instanceof Error
     ? { name: error.name, message: error.message }

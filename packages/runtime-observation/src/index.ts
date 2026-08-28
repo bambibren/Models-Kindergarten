@@ -1,4 +1,6 @@
+/** 描述「ObservationReasoningProfile」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ObservationReasoningProfile = "auto" | "fast" | "balanced" | "deep" | "max";
+/** 描述「ObservationConcreteReasoningProfile」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ObservationConcreteReasoningProfile = Exclude<ObservationReasoningProfile, "auto">;
 
 /** 与产品 contract 同形的自包含观察快照，避免观察包反向依赖领域包。 */
@@ -12,6 +14,7 @@ export interface RuntimeResolvedReasoningSnapshot {
   native: Record<string, string | number | boolean>;
 }
 
+/** 描述「RuntimeVariantSnapshot」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface RuntimeVariantSnapshot {
   studentId: string;
   studentName: string;
@@ -44,26 +47,35 @@ export interface RuntimeVariantSnapshot {
   };
 }
 
-export type ContextMessageSource =
+/** 标记一条模型输入由 MK 的哪个上下文生产者生成。 */
+export type ModelInputMessageSource =
   | "system"
   | "session_history"
   | "current_turn"
   | "tool_result"
-  | "memory"
-  | "retrieval"
-  | "summary"
   | "skill_catalog"
   | "mcp_resource_catalog"
   | "mcp_resource";
 
-export interface ContextMessageObservation {
+/** 评测与诊断使用的单条模型输入快照，不参与模型控制流。 */
+export interface ModelInputMessageTrace {
   role: "system" | "user" | "assistant" | "tool";
-  source: ContextMessageSource;
+  source: ModelInputMessageSource;
   sourceId?: string;
-  content: string;
+  /** 模型输入正文的 SHA-256；Trace 不复制真实正文。 */
+  contentHash: string;
+  /** 模型输入正文按 UTF-8 计算的字节数。 */
+  byteLength: number;
   estimatedTokens: number;
 }
 
+/** 大正文、参数和结果在观察链中只保留不可逆摘要与容量指标。 */
+export interface RuntimePayloadEvidence {
+  sha256: string;
+  bytes: number;
+}
+
+/** 描述「RuntimeObservationEvent」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type RuntimeObservationEvent =
   | {
       type: "capability_generation_changed";
@@ -89,7 +101,7 @@ export type RuntimeObservationEvent =
       startedAt: number;
       resolvedReasoning: RuntimeResolvedReasoningSnapshot;
       context: {
-        messages: ContextMessageObservation[];
+        messages: ModelInputMessageTrace[];
         truncatedSourceIds: string[];
       };
     }
@@ -115,8 +127,8 @@ export type RuntimeObservationEvent =
       completedAt: number;
       stopReason: "stop" | "length" | "cancelled";
       output: {
-        text: string;
-        thinking?: string;
+        text: RuntimePayloadEvidence;
+        thinking?: RuntimePayloadEvidence;
       };
     }
   | {
@@ -125,8 +137,8 @@ export type RuntimeObservationEvent =
       roundId: string;
       toolCallId: string;
       name: string;
-      arguments: unknown;
-      signature: string;
+      arguments: RuntimePayloadEvidence;
+      signatureHash: string;
       permission: "allow" | "ask" | "always_ask" | "deny";
       startedAt: number;
     }
@@ -145,7 +157,7 @@ export type RuntimeObservationEvent =
       status: "success" | "error" | "denied" | "duplicate_blocked";
       completedAt: number;
       error?: { category: string; message: string };
-      output?: unknown;
+      output?: RuntimePayloadEvidence;
     }
   | {
       type: "runtime_error";
@@ -168,5 +180,6 @@ export interface RuntimeObservationSink {
 }
 
 export const noopRuntimeObservationSink: RuntimeObservationSink = {
-  emit: () => undefined,
+  emit: /** 执行「emit」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => undefined,
 };

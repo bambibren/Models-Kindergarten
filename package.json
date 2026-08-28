@@ -14,7 +14,8 @@
     "dev:evaluation": "pnpm --parallel --filter @kindergarten/evaluation-service --filter @kindergarten/evaluation-web dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "audit:comments": "node scripts/documentation/audit-chinese-comments.mjs"
   },
   "devDependencies": {
     "typescript": "7.0.2",

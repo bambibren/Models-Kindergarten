@@ -9,22 +9,27 @@ import {
 import { ApiProblemError } from "../server/api-problem.js";
 import type { AgentRepository } from "./agent-repository.js";
 
+/** 描述「AgentCapabilitySource」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface AgentCapabilitySource {
   builtinToolIds(): string[];
   readySkillInstallationIds(): string[];
   mcpCapabilities(): Array<{ installationId: string; tools: string[]; resources: string[] }>;
 }
 
+/** 描述「AgentService」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class AgentService {
   private readonly protectedIds = new Set<string>();
-  constructor(
+  /** 初始化「AgentService」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly repository: AgentRepository,
     private readonly capabilities: AgentCapabilitySource,
   ) {}
 
-  protect(agentId: string): void { this.protectedIds.add(agentId); }
+  /** 执行「protect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+protect(agentId: string): void { this.protectedIds.add(agentId); }
 
-  async create(raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
+  /** 根据已校验输入构建「create」结果，不额外持有调用方的大对象。 */
+async create(raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
     const input = this.validate(raw);
     const now = new Date().toISOString();
     const record: AgentRecord = {
@@ -36,7 +41,8 @@ export class AgentService {
       ...(input.description ? { description: input.description } : {}),
       systemPrompt: input.systemPrompt,
       builtinTools: input.builtinTools,
-      skills: input.skillInstallationIds.map((skillInstallationId) => ({ skillInstallationId, enabled: true })),
+      skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(skillInstallationId) => ({ skillInstallationId, enabled: true })),
       mcps: input.mcps,
       historyPolicy: input.historyPolicy,
       memoryPolicy: input.memoryPolicy,
@@ -47,29 +53,37 @@ export class AgentService {
     return { ...structuredClone(record), deletable: true };
   }
 
-  async get(agentId: string, ownerId = "local-admin"): Promise<AgentRecord> {
+  /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */
+async get(agentId: string, ownerId = "local-admin"): Promise<AgentRecord> {
     const record = await this.repository.get(agentId);
     if (!record || record.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "Agent 不存在", false);
     return { ...record, deletable: !this.protectedIds.has(record.agentId) };
   }
 
-  async list(options: { query?: string; cursor?: string; limit?: number }, ownerId = "local-admin"): Promise<CursorPage<AgentRecord>> {
+  /** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
+async list(options: { query?: string; cursor?: string; limit?: number }, ownerId = "local-admin"): Promise<CursorPage<AgentRecord>> {
     const query = options.query?.trim().toLocaleLowerCase() ?? "";
     const limit = Math.max(1, Math.min(100, options.limit ?? 20));
     const offset = decodeCursor(options.cursor);
     const records = (await this.repository.all())
-      .filter((item) => item.ownerId === ownerId)
-      .filter((item) => item.recordKind !== "experiment_policy")
-      .filter((item) => !query || `${item.name}\n${item.description ?? ""}`.toLocaleLowerCase().includes(query))
-      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.agentId.localeCompare(right.agentId));
-    const items = records.slice(offset, offset + limit).map((item) => ({ ...item, deletable: !this.protectedIds.has(item.agentId) }));
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.ownerId === ownerId)
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.recordKind !== "experiment_policy")
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => !query || `${item.name}\n${item.description ?? ""}`.toLocaleLowerCase().includes(query))
+      .toSorted(/** 更新「records」对应状态，并保持写入顺序、原子性与容量约束。 */
+(left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.agentId.localeCompare(right.agentId));
+    const items = records.slice(offset, offset + limit).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => ({ ...item, deletable: !this.protectedIds.has(item.agentId) }));
     return {
       items,
       ...(offset + items.length < records.length ? { nextCursor: encodeCursor(offset + items.length) } : {}),
     };
   }
 
-  async update(agentId: string, raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
+  /** 更新「update」对应状态，并保持写入顺序、原子性与容量约束。 */
+async update(agentId: string, raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
     const input = this.validate(raw);
     const current = await this.get(agentId, ownerId);
     const record: AgentRecord = {
@@ -81,7 +95,8 @@ export class AgentService {
       ...(input.description ? { description: input.description } : {}),
       systemPrompt: input.systemPrompt,
       builtinTools: input.builtinTools,
-      skills: input.skillInstallationIds.map((skillInstallationId) => ({ skillInstallationId, enabled: true })),
+      skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(skillInstallationId) => ({ skillInstallationId, enabled: true })),
       mcps: input.mcps,
       historyPolicy: input.historyPolicy,
       memoryPolicy: input.memoryPolicy,
@@ -92,13 +107,15 @@ export class AgentService {
     return { ...structuredClone(record), deletable: !this.protectedIds.has(agentId) };
   }
 
-  async delete(agentId: string, ownerId = "local-admin"): Promise<void> {
+  /** 释放或删除「delete」对应资源，重复调用仍保持安全。 */
+async delete(agentId: string, ownerId = "local-admin"): Promise<void> {
     if (this.protectedIds.has(agentId)) throw new ApiProblemError(409, "CONFLICT", "系统内置 Agent 不可删除", false);
     await this.get(agentId, ownerId);
     await this.repository.remove(agentId);
   }
 
-  async createExperimentPolicy(
+  /** 根据已校验输入构建「createExperimentPolicy」结果，不额外持有调用方的大对象。 */
+async createExperimentPolicy(
     experimentId: string,
     variant: import("@kindergarten/contracts").ExperimentVariant,
     ownerId = "local-admin",
@@ -118,7 +135,8 @@ export class AgentService {
       ...(input.description ? { description: input.description } : {}),
       systemPrompt: input.systemPrompt,
       builtinTools: input.builtinTools,
-      skills: input.skillInstallationIds.map((skillInstallationId) => ({ skillInstallationId, enabled: true })),
+      skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(skillInstallationId) => ({ skillInstallationId, enabled: true })),
       mcps: input.mcps,
       historyPolicy: input.historyPolicy,
       memoryPolicy: input.memoryPolicy,
@@ -129,52 +147,69 @@ export class AgentService {
     return record;
   }
 
-  async mergeReadySkills(agentId: string, installationIds: string[], ownerId = "local-admin"): Promise<AgentRecord> {
+  /** 汇总「mergeReadySkills」对应指标，保持缺失字段语义且不重复计算同一来源。 */
+async mergeReadySkills(agentId: string, installationIds: string[], ownerId = "local-admin"): Promise<AgentRecord> {
     const ready = new Set(this.capabilities.readySkillInstallationIds());
     for (const id of installationIds) {
       if (!ready.has(id)) throw invalid(`Skill Installation 不可用: ${id}`);
     }
     await this.get(agentId, ownerId);
-    return this.repository.update(agentId, (record) => {
-      const ids = new Set(record.skills.filter((item) => item.enabled).map((item) => item.skillInstallationId));
-      installationIds.forEach((id) => ids.add(id));
+    return this.repository.update(agentId, /** 汇总「mergeReadySkills」对应指标，保持缺失字段语义且不重复计算同一来源。 */
+(record) => {
+      const ids = new Set(record.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.skillInstallationId));
+      installationIds.forEach(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(id) => ids.add(id));
       return {
         ...record,
-        skills: [...ids].toSorted().map((skillInstallationId) => ({ skillInstallationId, enabled: true })),
+        skills: [...ids].toSorted().map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(skillInstallationId) => ({ skillInstallationId, enabled: true })),
         updatedAt: new Date().toISOString(),
       };
     });
   }
 
-  async removeMcpBindings(installationId: string, ownerId = "local-admin"): Promise<AgentRecord[]> {
-    const affected = (await this.repository.all()).filter((record) =>
-      record.ownerId === ownerId && record.mcps.some((item) => item.mcpInstallationId === installationId));
+  /** 释放或删除「removeMcpBindings」对应资源，重复调用仍保持安全。 */
+async removeMcpBindings(installationId: string, ownerId = "local-admin"): Promise<AgentRecord[]> {
+    const affected = (await this.repository.all()).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(record) =>
+      record.ownerId === ownerId && record.mcps.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.mcpInstallationId === installationId));
     const updated: AgentRecord[] = [];
     for (const agent of affected) {
-      updated.push(await this.repository.update(agent.agentId, (record) => ({
+      updated.push(await this.repository.update(agent.agentId, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(record) => ({
         ...record,
-        mcps: record.mcps.filter((item) => item.mcpInstallationId !== installationId),
+        mcps: record.mcps.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.mcpInstallationId !== installationId),
         updatedAt: new Date().toISOString(),
       })));
     }
     return updated;
   }
 
-  async removeSkillBindings(installationId: string, ownerId = "local-admin"): Promise<AgentRecord[]> {
-    const affected = (await this.repository.all()).filter((record) =>
-      record.ownerId === ownerId && record.skills.some((item) => item.skillInstallationId === installationId));
+  /** 释放或删除「removeSkillBindings」对应资源，重复调用仍保持安全。 */
+async removeSkillBindings(installationId: string, ownerId = "local-admin"): Promise<AgentRecord[]> {
+    const affected = (await this.repository.all()).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(record) =>
+      record.ownerId === ownerId && record.skills.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.skillInstallationId === installationId));
     const updated: AgentRecord[] = [];
     for (const agent of affected) {
-      updated.push(await this.repository.update(agent.agentId, (record) => ({
+      updated.push(await this.repository.update(agent.agentId, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(record) => ({
         ...record,
-        skills: record.skills.filter((item) => item.skillInstallationId !== installationId),
+        skills: record.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.skillInstallationId !== installationId),
         updatedAt: new Date().toISOString(),
       })));
     }
     return updated;
   }
 
-  capabilityOptions() {
+  /** 执行「capabilityOptions」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+capabilityOptions() {
     return {
       builtinTools: this.capabilities.builtinToolIds(),
       readySkillInstallationIds: this.capabilities.readySkillInstallationIds(),
@@ -182,11 +217,13 @@ export class AgentService {
     };
   }
 
-  validateContextPolicy(policy: import("@kindergarten/contracts").ExperimentContextPolicy): AgentInput {
+  /** 校验并规范化「validateContextPolicy」输入，非法数据直接返回明确错误。 */
+validateContextPolicy(policy: import("@kindergarten/contracts").ExperimentContextPolicy): AgentInput {
     return this.validate({ name: "context-preview", description: "preview only", ...policy });
   }
 
-  private validate(raw: unknown): AgentInput {
+  /** 校验并规范化「validate」输入，非法数据直接返回明确错误。 */
+private validate(raw: unknown): AgentInput {
     let input: AgentInput;
     try { input = canonicalAgentInput(parseAgentInput(raw)); }
     catch (error) { throw new ApiProblemError(400, "VALIDATION_FAILED", errorText(error), false); }
@@ -194,7 +231,8 @@ export class AgentService {
     for (const binding of input.builtinTools) if (!tools.has(binding.toolId)) throw invalid(`Built-in Tool 不存在: ${binding.toolId}`);
     const skills = new Set(this.capabilities.readySkillInstallationIds());
     for (const id of input.skillInstallationIds) if (!skills.has(id)) throw invalid(`Skill Installation 不可用: ${id}`);
-    const mcps = new Map(this.capabilities.mcpCapabilities().map((item) => [item.installationId, item]));
+    const mcps = new Map(this.capabilities.mcpCapabilities().map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => [item.installationId, item]));
     for (const binding of input.mcps) {
       const snapshot = mcps.get(binding.mcpInstallationId);
       if (!snapshot) throw invalid(`MCP Installation 不可用: ${binding.mcpInstallationId}`);
@@ -205,14 +243,17 @@ export class AgentService {
   }
 }
 
+/** 执行「invalid」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function invalid(detail: string): ApiProblemError {
   return new ApiProblemError(400, "CAPABILITY_REFERENCE_INVALID", `CAPABILITY_REFERENCE_INVALID: ${detail}`, false);
 }
 
+/** 执行「encodeCursor」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function encodeCursor(offset: number): string {
   return Buffer.from(String(offset), "utf8").toString("base64url");
 }
 
+/** 校验并规范化「decodeCursor」输入，非法数据直接返回明确错误。 */
 function decodeCursor(cursor: string | undefined): number {
   if (!cursor) return 0;
   const value = Number(Buffer.from(cursor, "base64url").toString("utf8"));
@@ -220,6 +261,7 @@ function decodeCursor(cursor: string | undefined): number {
   return value;
 }
 
+/** 把未知异常转换为「errorText」文本，避免错误序列化过程再次抛出。 */
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

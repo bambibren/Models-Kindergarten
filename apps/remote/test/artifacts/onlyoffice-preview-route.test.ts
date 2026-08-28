@@ -12,10 +12,14 @@ import { ControlApi } from "../../src/server/control-api.js";
 import { FileSandbox } from "../../src/tools/sandbox.js";
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("ONLYOFFICE Artifact routes", () => {
-  it("只向 owner 签发播放配置，并允许 DocumentServer 用短时票据读取当前版本", async () => {
+describe("ONLYOFFICE Artifact routes", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("只向 owner 签发播放配置，并允许 DocumentServer 用短时票据读取当前版本", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-onlyoffice-route-"));
     dirs.push(dir);
     const workspaces = join(dir, "workspaces");
@@ -39,7 +43,8 @@ describe("ONLYOFFICE Artifact routes", () => {
     registerArtifactRoutes(api.router, service, new OnlyOfficePreviewService({
       artifactInternalBaseUrl: "http://host.docker.internal:7331/api/control/v1",
       ticketSigningSecret: "route-test-secret",
-      now: () => 1_700_000_000_000,
+      now: /** 构造「now」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => 1_700_000_000_000,
     }));
 
     const playbackResponse = await api.fetch(new Request(

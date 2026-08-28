@@ -1,7 +1,9 @@
 import type { PublicErrorCode } from "@kindergarten/contracts";
 
+/** 描述「ApiProblemError」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class ApiProblemError extends Error {
-  constructor(
+  /** 初始化「ApiProblemError」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     readonly status: number,
     readonly code: PublicErrorCode,
     message: string,
@@ -12,6 +14,7 @@ export class ApiProblemError extends Error {
   }
 }
 
+/** 执行「problemResponse」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function problemResponse(error: unknown, requestId: string, headers: HeadersInit = {}): Response {
   const problem = error instanceof ApiProblemError
     ? error
@@ -35,6 +38,7 @@ export function problemResponse(error: unknown, requestId: string, headers: Head
   });
 }
 
+/** 执行「titleFor」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function titleFor(status: number): string {
   if (status === 400) return "请求无效";
   if (status === 403) return "请求被拒绝";

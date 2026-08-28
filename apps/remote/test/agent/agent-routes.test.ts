@@ -8,15 +8,22 @@ import { AgentService } from "../../src/agent/agent-service.js";
 import { ControlApi } from "../../src/server/control-api.js";
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("Agent routes", () => {
-  it("提供 Agent create/get/list/update/delete，但没有归档或迁移", async () => {
+describe("Agent routes", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("提供 Agent create/get/list/update/delete，但没有归档或迁移", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-agent-routes-"));
     dirs.push(dir);
     const api = new ControlApi({ allowedOrigins: ["http://127.0.0.1:5174"] });
     const service = new AgentService(new AgentRepository(join(dir, "agents.json")), {
-      builtinToolIds: () => ["read_file"], readySkillInstallationIds: () => [], mcpCapabilities: () => [],
+      builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => ["read_file"], readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [], mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [],
     });
     registerAgentRoutes(api.router, service);
     const body = {
@@ -39,12 +46,16 @@ describe("Agent routes", () => {
     expect((await json(api, `/agents/${agentId}/archive`, "POST", {})).response.status).toBe(404);
   });
 
-  it("系统默认 Agent 不暴露删除能力且接口拒绝删除", async () => {
+  it("系统默认 Agent 不暴露删除能力且接口拒绝删除", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-agent-protected-"));
     dirs.push(dir);
     const api = new ControlApi({ allowedOrigins: ["http://127.0.0.1:5174"] });
     const service = new AgentService(new AgentRepository(join(dir, "agents.json")), {
-      builtinToolIds: () => [], readySkillInstallationIds: () => [], mcpCapabilities: () => [],
+      builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [], readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [], mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [],
     });
     registerAgentRoutes(api.router, service);
     const created = await service.create({
@@ -60,6 +71,7 @@ describe("Agent routes", () => {
   });
 });
 
+/** 构造「json」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function json(api: ControlApi, path: string, method: string, body?: unknown) {
   const response = await api.fetch(new Request(`http://127.0.0.1/api/control/v1${path}`, {
     method,

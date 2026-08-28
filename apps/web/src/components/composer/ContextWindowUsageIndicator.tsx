@@ -6,6 +6,7 @@ import {
   type ContextWindowUsageView,
 } from "../../chat/context-window-usage.js";
 
+/** 渲染「ContextWindowUsageIndicator」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ContextWindowUsageIndicator({ demo = false, value }: { demo?: boolean; value: ContextWindowUsageView }) {
   const [hovered, setHovered] = useState(false);
   const [pinned, setPinned] = useState(false);
@@ -13,26 +14,34 @@ export function ContextWindowUsageIndicator({ demo = false, value }: { demo?: bo
   const percent = formatContextPercent(value.percent);
   const open = hovered || pinned;
 
-  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => /** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => window.clearTimeout(closeTimer.current), []);
 
-  function show() {
+  /** 执行「show」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function show() {
     window.clearTimeout(closeTimer.current);
     setHovered(true);
   }
 
-  function hideSoon() {
+  /** 执行「hideSoon」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function hideSoon() {
     window.clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(() => setHovered(false), 120);
+    closeTimer.current = window.setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => setHovered(false), 120);
   }
 
-  function togglePinned() {
-    setPinned((current) => {
+  /** 根据已校验输入构建「togglePinned」结果，不额外持有调用方的大对象。 */
+function togglePinned() {
+    setPinned(/** 根据已校验输入构建「togglePinned」结果，不额外持有调用方的大对象。 */
+(current) => {
       if (current) setHovered(false);
       return !current;
     });
   }
 
-  return <Popover.Root onOpenChange={(next) => {
+  return <Popover.Root onOpenChange={/** 处理「onOpenChange」事件，校验归属后再推进状态且避免重复提交。 */
+(next) => {
     if (!next) {
       setHovered(false);
       setPinned(false);
@@ -45,7 +54,8 @@ export function ContextWindowUsageIndicator({ demo = false, value }: { demo?: bo
         aria-label={`上下文窗口已使用 ${percent}`}
         className={`context-window-trigger ${value.level}`}
         onClick={togglePinned}
-        onKeyDown={(event) => {
+        onKeyDown={/** 处理「onKeyDown」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           togglePinned();
@@ -73,7 +83,8 @@ export function ContextWindowUsageIndicator({ demo = false, value }: { demo?: bo
         align="end"
         className={`context-window-popover ${value.level}`}
         collisionPadding={12}
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        onOpenAutoFocus={/** 处理「onOpenAutoFocus」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => event.preventDefault()}
         onPointerEnter={show}
         onPointerLeave={hideSoon}
         side="top"

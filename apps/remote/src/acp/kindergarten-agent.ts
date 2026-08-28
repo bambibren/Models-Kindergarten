@@ -18,6 +18,7 @@ import {
   type TurnState,
   type ArtifactMention,
   type ContextWindowUsageState,
+  PRODUCT_CONFIG,
 } from "@kindergarten/contracts";
 import { AcpOutput } from "./acp-output.js";
 import type {
@@ -54,6 +55,7 @@ import type { ArtifactService } from "../artifacts/artifact-service.js";
 
 const REASONING_CONFIG_ID = "reasoning_profile";
 
+/** 执行「reasoningConfigOptions」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function reasoningConfigOptions(
   capability: ModelReasoningCapability | undefined,
   current: ConcreteReasoningProfile | undefined,
@@ -74,7 +76,8 @@ function reasoningConfigOptions(
     currentValue: current ?? "auto",
     options: [
       { value: "auto", name: `跟随模型默认 · ${labels[capability.defaultProfile]}` },
-      ...capability.supportedProfiles.map((profile) => ({ value: profile, name: labels[profile] })),
+      ...capability.supportedProfiles.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(profile) => ({ value: profile, name: labels[profile] })),
     ],
   }];
 }
@@ -87,7 +90,8 @@ export class KindergartenAgent {
   private readonly channels = new Map<string, SessionAcpChannel>();
   private readonly projections = new Map<string, TurnProjection>();
 
-  constructor(
+  /** 初始化「KindergartenAgent」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly sessions: SessionRepository,
     private readonly runtime: AgentRuntime,
     private readonly bindings: SessionBindingService,
@@ -96,33 +100,44 @@ export class KindergartenAgent {
     private readonly artifacts?: ArtifactService,
   ) {}
 
-  createApp(): acp.AgentApp {
+  /** 根据已校验输入构建「createApp」结果，不额外持有调用方的大对象。 */
+createApp(): acp.AgentApp {
     return acp
       .agent({ name: "model-kindergarten-remote" })
-      .onRequest(acp.methods.agent.initialize, ({ params }) => this.initialize(params))
-      .onRequest(acp.methods.agent.session.new, ({ params }) => this.newSession(params))
-      .onRequest(acp.methods.agent.session.list, ({ params }) => this.listSessions(params))
-      .onRequest(acp.methods.agent.session.load, ({ params, client }) =>
+      .onRequest(acp.methods.agent.initialize, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) => this.initialize(params))
+      .onRequest(acp.methods.agent.session.new, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) => this.newSession(params))
+      .onRequest(acp.methods.agent.session.list, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) => this.listSessions(params))
+      .onRequest(acp.methods.agent.session.load, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
+({ params, client }) =>
         this.loadSession(params, client),
       )
-      .onRequest(acp.methods.agent.session.resume, ({ params, client }) =>
+      .onRequest(acp.methods.agent.session.resume, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
+({ params, client }) =>
         this.resumeSession(params, client),
       )
-      .onRequest(acp.methods.agent.session.close, ({ params }) =>
+      .onRequest(acp.methods.agent.session.close, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) =>
         this.closeSession(params),
       )
-      .onRequest(acp.methods.agent.session.setConfigOption, ({ params }) =>
+      .onRequest(acp.methods.agent.session.setConfigOption, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
+({ params }) =>
         this.setSessionConfigOption(params),
       )
-      .onRequest(acp.methods.agent.session.prompt, ({ params, client, signal }) =>
+      .onRequest(acp.methods.agent.session.prompt, /** 处理「onNotification」事件，校验归属后再推进状态且避免重复提交。 */
+({ params, client, signal }) =>
         this.prompt(params, client, signal),
       )
-      .onNotification(acp.methods.agent.session.cancel, ({ params }) =>
+      .onNotification(acp.methods.agent.session.cancel, /** 根据已校验输入构建「createApp」结果，不额外持有调用方的大对象。 */
+({ params }) =>
         this.cancel(params.sessionId),
       );
   }
 
-  private initialize(params: acp.InitializeRequest): acp.InitializeResponse {
+  /** 执行「initialize」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private initialize(params: acp.InitializeRequest): acp.InitializeResponse {
     return {
       protocolVersion:
         params.protocolVersion === acp.PROTOCOL_VERSION
@@ -141,7 +156,8 @@ export class KindergartenAgent {
     };
   }
 
-  private async newSession(params: acp.NewSessionRequest): Promise<acp.NewSessionResponse> {
+  /** 执行「newSession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async newSession(params: acp.NewSessionRequest): Promise<acp.NewSessionResponse> {
     const session = await this.sessions.create(await this.bindings.resolve({
       cwd: params.cwd,
       ...(params.additionalDirectories === undefined ? {} : { additionalDirectories: params.additionalDirectories }),
@@ -154,15 +170,18 @@ export class KindergartenAgent {
     return { sessionId: session.id, configOptions: reasoningConfigOptions(this.reasoningCapability(session), session.reasoningOverride) };
   }
 
-  private async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
+  /** 读取「listSessions」所需数据，并遵守作用域、分页与容量边界。 */
+private async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
     return { sessions: await this.sessions.list(params.cwd) };
   }
 
-  private async loadSession(
+  /** 读取「loadSession」所需数据，并遵守作用域、分页与容量边界。 */
+private async loadSession(
     params: acp.LoadSessionRequest,
     client: acp.AgentContext,
   ): Promise<acp.LoadSessionResponse> {
-    const session = await this.requireSession(params.sessionId, params.cwd);
+    // ACP load 只回放最近一页；更早的历史由只读 Control API 分页加载。
+    const session = await this.requireSession(params.sessionId, params.cwd, PRODUCT_CONFIG.agent.historyPageTurns);
     const activeChannel = this.channels.get(session.id);
     activeChannel?.beginResume();
     const output = new AcpOutput(session.id, new SessionAcpChannel(client, session.id));
@@ -170,7 +189,8 @@ export class KindergartenAgent {
       for (const entry of sessionEntriesWithActiveProjection(session, this.projections.get(session.id))) {
         await replayEntry(output, entry);
       }
-      const activeTurn = session.turns.find((turn) => turn.state.status === "active");
+      const activeTurn = session.turns.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(turn) => turn.state.status === "active");
       if (activeTurn) await output.turnState(activeTurn.state);
     } finally {
       await activeChannel?.finishResume(client);
@@ -178,20 +198,24 @@ export class KindergartenAgent {
     return { configOptions: reasoningConfigOptions(this.reasoningCapability(session), session.reasoningOverride) };
   }
 
-  private async resumeSession(
+  /** 根据客户端 Turn 游标只补断线增量；未提供游标时保持零回放并重新挂接活动交互。 */
+private async resumeSession(
     params: acp.ResumeSessionRequest,
     client: acp.AgentContext,
   ): Promise<acp.ResumeSessionResponse> {
-    const session = await this.requireSession(params.sessionId, params.cwd);
+    // resume 仅关心仍在活动的最后一个 Turn，不承担历史加载。
+    const session = await this.requireSession(params.sessionId, params.cwd, 1);
     const activeChannel = this.channels.get(session.id);
     activeChannel?.beginResume();
     try {
       const cursor = readSessionResumeMeta(params._meta);
       if (cursor) {
-        const turn = session.turns.find((item) => item.turnId === cursor.turnId);
+        const turn = session.turns.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.turnId === cursor.turnId);
         if (!turn) throw new acp.RequestError(-32602, `恢复的 Turn 不存在: ${cursor.turnId}`);
         const entries = sessionEntriesWithActiveProjection(session, this.projections.get(session.id))
-          .filter((entry) => entry.turnId === cursor.turnId);
+          .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(entry) => entry.turnId === cursor.turnId);
         const output = new AcpOutput(session.id, new SessionAcpChannel(client, session.id));
         for (const entry of entries) await replayEntryDelta(output, entry, cursor, turn.state.status !== "active");
         await output.turnState(turn.state);
@@ -202,23 +226,26 @@ export class KindergartenAgent {
     return { configOptions: reasoningConfigOptions(this.reasoningCapability(session), session.reasoningOverride) };
   }
 
-  private async closeSession(params: acp.CloseSessionRequest): Promise<void> {
+  /** 释放或删除「closeSession」对应资源，重复调用仍保持安全。 */
+private async closeSession(params: acp.CloseSessionRequest): Promise<void> {
     this.cancel(params.sessionId);
     this.channels.get(params.sessionId)?.close();
   }
 
-  private async setSessionConfigOption(
+  /** 更新「setSessionConfigOption」对应状态，并保持写入顺序、原子性与容量约束。 */
+private async setSessionConfigOption(
     params: acp.SetSessionConfigOptionRequest,
   ): Promise<acp.SetSessionConfigOptionResponse> {
     if (params.configId !== REASONING_CONFIG_ID || typeof params.value !== "string" || !isReasoningProfile(params.value)) {
       throw new acp.RequestError(-32602, "不支持的 Session Config Option");
     }
     const value = params.value;
-    return this.serializeSessionState(params.sessionId, async () => {
+    return this.serializeSessionState(params.sessionId, /** 更新「setSessionConfigOption」对应状态，并保持写入顺序、原子性与容量约束。 */
+async () => {
       if (this.active.has(params.sessionId)) {
         throw new acp.RequestError(-32000, "回答生成期间不能修改思考强度");
       }
-      const current = await this.sessions.get(params.sessionId);
+      const current = await this.sessions.getRecent(params.sessionId, 0);
       const capability = this.reasoningCapability(current);
       if (!capability?.adjustable || (value !== "auto" && !capability.supportedProfiles.includes(value))) {
         throw new acp.RequestError(-32602, "当前 ModelStudent 不支持该思考强度");
@@ -231,7 +258,8 @@ export class KindergartenAgent {
     });
   }
 
-  private reasoningCapability(session: SessionRecord): ModelReasoningCapability | undefined {
+  /** 执行「reasoningCapability」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private reasoningCapability(session: SessionRecord): ModelReasoningCapability | undefined {
     const selected = this.models?.get(session.modelStudentId);
     if (selected) return selected.supports.reasoning;
     return session.modelStudentId === this.runtime.model.student.id
@@ -239,7 +267,8 @@ export class KindergartenAgent {
       : undefined;
   }
 
-  private async prompt(
+  /** 为 Session 创建唯一活动 Turn、固定运行作用域，并在所有终态清理 channel/projection/AbortController。 */
+private async prompt(
     params: acp.PromptRequest,
     client: acp.AgentContext,
     requestSignal: AbortSignal,
@@ -257,11 +286,15 @@ export class KindergartenAgent {
     let session: SessionRecord;
     let artifactMentions: ArtifactMention[] = [];
     try {
-      const reserved = await this.serializeSessionState(params.sessionId, async () => {
+      const reserved = await this.serializeSessionState(params.sessionId, /** 执行「reserved」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async () => {
         if (this.active.has(params.sessionId)) {
           throw new acp.RequestError(-32000, "这个会话已有一轮回答正在生成");
         }
-        const current = await this.sessions.get(params.sessionId);
+        const current = await this.sessions.getRecent(
+          params.sessionId,
+          PRODUCT_CONFIG.agent.historyRecentTurnsMax,
+        );
         if (current.purpose === "chat" && !await this.bindings.agentExists(current.agentId)) {
           throw new acp.RequestError(
             -32002,
@@ -269,7 +302,8 @@ export class KindergartenAgent {
             { code: "SESSION_AGENT_DELETED", retryable: false },
           );
         }
-        const requestedIds = promptMeta?.artifactMentions?.map((item) => item.artifactId) ?? [];
+        const requestedIds = promptMeta?.artifactMentions?.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.artifactId) ?? [];
         if (requestedIds.length > 0 && !this.artifacts) {
           throw new acp.RequestError(-32602, "当前 Remote 不支持 Artifact Mention");
         }
@@ -288,7 +322,8 @@ export class KindergartenAgent {
     }
 
     const channel = new SessionAcpChannel(client, session.id);
-    const detachClient = () => channel.detach(client);
+    const detachClient = /** 执行「detachClient」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => channel.detach(client);
     if (requestSignal.aborted) detachClient();
     else requestSignal.addEventListener("abort", detachClient, { once: true });
     this.channels.set(session.id, channel);
@@ -327,11 +362,13 @@ export class KindergartenAgent {
       }
     } catch (error) {
       if (turnStarted) {
-        await this.sessions.transitionTurn(session.id, turnId, "finalizing").catch(() => undefined);
+        await this.sessions.transitionTurn(session.id, turnId, "finalizing").catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
         await this.sessions.finishTurn(session.id, turnId, "failed", {
           entryIds: [entryIdentity(user)],
           error: { code: "TURN_START_FAILED", message: "该 Turn 启动失败", retryable: true },
-        }).catch(() => undefined);
+        }).catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
       }
       requestSignal.removeEventListener("abort", detachClient);
       channel.close();
@@ -403,7 +440,8 @@ export class KindergartenAgent {
               session.id,
               turnId,
               terminalStatus,
-              projection.streamingSessionEntries.flatMap((entry) => entry.type === "message" && entry.role === "assistant" ? [entry.text] : []),
+              projection.streamingSessionEntries.flatMap(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(entry) => entry.type === "message" && entry.role === "assistant" ? [entry.text] : []),
               failure,
             );
           } catch (experimentError) {
@@ -432,12 +470,14 @@ export class KindergartenAgent {
     return { stopReason: reason };
   }
 
-  private cancel(sessionId: string): void {
+  /** 判断「cancel」对应条件，只返回判定结果且不修改输入状态。 */
+private cancel(sessionId: string): void {
     this.pendingPrompts.get(sessionId)?.abort();
     this.active.get(sessionId)?.abort();
   }
 
-  private async contextWindowState(
+  /** 执行「contextWindowState」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async contextWindowState(
     session: SessionRecord,
     turnId: string,
     sessionEntries: SessionEntry[],
@@ -475,14 +515,14 @@ export class KindergartenAgent {
   }
 
   /**
-   * ACP handlers are asynchronous and may interleave even on one connection.
-   * Serialize only the short state transition that either reserves a Turn or
-   * changes its Session-scoped configuration; the model run remains concurrent
-   * across different Sessions.
+   * ACP Handler 是异步的，同一连接上的调用也可能交错。
+   * 这里只串行化“预占 Turn”或“修改 Session 配置”的短状态转换；不同 Session 的模型运行仍可并发。
    */
-  private async serializeSessionState<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+  /** 按 Session 串行执行 load/resume 状态操作，settle 后删除 Promise 链防止跨会话增长。 */
+private async serializeSessionState<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.sessionStateOperations.get(sessionId) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(operation);
+    const current = previous.catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined).then(operation);
     this.sessionStateOperations.set(sessionId, current);
     try {
       return await current;
@@ -493,13 +533,15 @@ export class KindergartenAgent {
     }
   }
 
-  private async requireSession(id: string, cwd: string): Promise<SessionRecord> {
-    const session = await this.sessions.get(id);
+  /** 校验并取得「requireSession」所需对象；缺失或归属不符时立即抛出明确错误。 */
+private async requireSession(id: string, cwd: string, maxTurns?: number): Promise<SessionRecord> {
+    const session = maxTurns === undefined ? await this.sessions.get(id) : await this.sessions.getRecent(id, maxTurns);
     if (session.cwd !== cwd) throw new Error("会话 cwd 与请求不一致");
     return session;
   }
 }
 
+/** 执行「effectiveReasoningCapability」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function effectiveReasoningCapability(model: import("../model/model-provider.js").ModelProvider): ModelReasoningCapability | undefined {
   if (!model.reasoningCapability) return undefined;
   const capability = structuredClone(model.reasoningCapability);
@@ -520,7 +562,8 @@ class TurnProjection implements RunObserver {
   private readonly roundFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["modelRounds"]> = [];
   private usageFacts: TurnTokenUsage | undefined;
 
-  constructor(
+  /** 初始化「TurnProjection」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly sessionId: string,
     private readonly turnId: string,
     private readonly promptEntry: SessionMessageEntry,
@@ -530,11 +573,14 @@ class TurnProjection implements RunObserver {
     private readonly signal: AbortSignal,
   ) {}
 
-  matchesTurn(turnId: string): boolean { return this.turnId === turnId; }
+  /** 判断「matchesTurn」对应条件，只返回判定结果且不修改输入状态。 */
+matchesTurn(turnId: string): boolean { return this.turnId === turnId; }
 
-  entriesSnapshot(): SessionEntry[] { return structuredClone(this.streamingSessionEntries); }
+  /** 生成「entriesSnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
+entriesSnapshot(): SessionEntry[] { return structuredClone(this.streamingSessionEntries); }
 
-  async context(summary: ContextSummary): Promise<void> {
+  /** 执行「context」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async context(summary: ContextSummary): Promise<void> {
     const entry: SessionContextSummaryEntry = {
       type: "context_summary",
       turnId: this.turnId,
@@ -546,7 +592,8 @@ class TurnProjection implements RunObserver {
     await this.output.contextSummary(summary);
   }
 
-  async phase(phase: TurnActivePhase): Promise<void> {
+  /** 执行「phase」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async phase(phase: TurnActivePhase): Promise<void> {
     console.warn("[turn-phase] request", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, phase }));
     const turn = await this.sessions.transitionTurn(this.sessionId, this.turnId, phase);
     console.warn("[turn-phase] persisted", JSON.stringify({
@@ -557,36 +604,46 @@ class TurnProjection implements RunObserver {
     await this.output.turnState(turn.state);
   }
 
-  async turnSnapshot(facts: RuntimeTurnSnapshot): Promise<void> {
+  /** 生成「turnSnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
+async turnSnapshot(facts: RuntimeTurnSnapshot): Promise<void> {
     this.runtimeFacts = structuredClone(facts);
     await this.sessions.checkpointTurn(this.sessionId, this.turnId, runtimeTurnFacts(facts));
   }
 
-  async capabilitySnapshot(generation: number, hash: string, snapshot: RuntimeCapabilitySnapshot): Promise<void> {
-    if (this.capabilityFacts.some((item) => item.generation === generation)) return;
+  /** 生成「capabilitySnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
+async capabilitySnapshot(generation: number, hash: string, snapshot: RuntimeCapabilitySnapshot): Promise<void> {
+    if (this.capabilityFacts.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.generation === generation)) return;
     this.capabilityFacts.push({ generation, hash, snapshot: structuredClone(snapshot) });
     await this.sessions.checkpointTurn(this.sessionId, this.turnId, {
       capabilitySnapshots: structuredClone(this.capabilityFacts),
     });
   }
 
-  async modelRoundStarted(facts: RuntimeModelRoundSnapshot): Promise<void> {
+  /** 执行「modelRoundStarted」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async modelRoundStarted(facts: RuntimeModelRoundSnapshot): Promise<void> {
     this.roundFacts.push(structuredClone(facts));
-    await this.sessions.checkpointTurn(this.sessionId, this.turnId, {
+    const persisted = await this.sessions.checkpointTurn(this.sessionId, this.turnId, {
       modelRounds: structuredClone(this.roundFacts),
     });
+    // Repository 已把完整 Provider Input 转移到 evidence sidecar；投影内存也立即改持轻量引用。
+    this.roundFacts.splice(0, this.roundFacts.length, ...structuredClone(persisted.modelRounds ?? []));
   }
 
-  async modelRoundCompleted(round: number, completedAt: string): Promise<void> {
-    const current = this.roundFacts.find((item) => item.roundIndex === round);
+  /** 执行「modelRoundCompleted」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async modelRoundCompleted(round: number, completedAt: string): Promise<void> {
+    const current = this.roundFacts.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.roundIndex === round);
     if (!current) return;
     current.completedAt = completedAt;
-    await this.sessions.checkpointTurn(this.sessionId, this.turnId, {
+    const persisted = await this.sessions.checkpointTurn(this.sessionId, this.turnId, {
       modelRounds: structuredClone(this.roundFacts),
     });
+    this.roundFacts.splice(0, this.roundFacts.length, ...structuredClone(persisted.modelRounds ?? []));
   }
 
-  async usage(modelUsage: TurnModelUsage): Promise<void> {
+  /** 执行「usage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async usage(modelUsage: TurnModelUsage): Promise<void> {
     const usage: TurnTokenUsage = {
       schemaVersion: 1,
       turnId: this.turnId,
@@ -617,7 +674,8 @@ class TurnProjection implements RunObserver {
     await this.output.tokenUsage(usage);
   }
 
-  async contextWindowUsage(state: ContextWindowUsageState): Promise<void> {
+  /** 执行「contextWindowUsage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async contextWindowUsage(state: ContextWindowUsageState): Promise<void> {
     const entry: SessionContextWindowUsageEntry = {
       type: "context_window_usage",
       turnId: this.turnId,
@@ -628,7 +686,8 @@ class TurnProjection implements RunObserver {
     await this.output.contextWindowUsage(state);
   }
 
-  executionFacts(): Partial<import("../repository/session-types.js").TurnExecutionRecord> {
+  /** 生成「executionFacts」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
+executionFacts(): Partial<import("../repository/session-types.js").TurnExecutionRecord> {
     return {
       ...(this.runtimeFacts ? runtimeTurnFacts(this.runtimeFacts) : {}),
       capabilitySnapshots: structuredClone(this.capabilityFacts),
@@ -637,7 +696,8 @@ class TurnProjection implements RunObserver {
     };
   }
 
-  async text(round: number, value: string): Promise<void> {
+  /** 执行「text」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async text(round: number, value: string): Promise<void> {
     const entry = this.ensureMessage(round);
     entry.text += value;
     const index = this.messageChunks.get(round) ?? 0;
@@ -649,7 +709,8 @@ class TurnProjection implements RunObserver {
     });
   }
 
-  async thought(round: number, value: string): Promise<void> {
+  /** 执行「thought」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async thought(round: number, value: string): Promise<void> {
     const entry = this.ensureThought(round);
     entry.text += value;
     const index = this.thoughtChunks.get(round) ?? 0;
@@ -661,7 +722,8 @@ class TurnProjection implements RunObserver {
     });
   }
 
-  async roundComplete(round: number): Promise<void> {
+  /** 执行「roundComplete」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async roundComplete(round: number): Promise<void> {
     if (this.closedRounds.has(round)) return;
     this.closedRounds.add(round);
     // 最终 chunk 只是投影；先保存本轮完整内容，断线或进程中断后仍可回放。
@@ -686,31 +748,36 @@ class TurnProjection implements RunObserver {
     }
   }
 
-  async providerContinuation(
+  /** 执行「providerContinuation」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async providerContinuation(
     round: number,
     continuation: ProviderOpaqueContinuation,
     calls: import("../model/model-provider.js").ModelToolCall[],
   ): Promise<void> {
     const visibleEntryIds = [this.messages.get(round), this.thoughts.get(round)]
-      .flatMap((entry) => entry ? [entry.messageId] : []);
+      .flatMap(/** 执行「visibleEntryIds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(entry) => entry ? [entry.messageId] : []);
     this.streamingSessionEntries.push({
       type: "provider_continuation",
       turnId: this.turnId,
       roundIndex: round,
       continuation: withProviderContinuationCorrelation(continuation, {
         messageIds: visibleEntryIds,
-        toolCallIds: calls.flatMap((call) => call.id ? [call.id] : []),
+        toolCallIds: calls.flatMap(/** 根据已校验输入构建「toolCallIds」结果，不额外持有调用方的大对象。 */
+(call) => call.id ? [call.id] : []),
       }),
       createdAt: new Date().toISOString(),
     });
   }
 
-  async finalizeOpenRounds(): Promise<void> {
+  /** 执行「finalizeOpenRounds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async finalizeOpenRounds(): Promise<void> {
     const rounds = new Set([...this.messages.keys(), ...this.thoughts.keys()]);
     for (const round of rounds) await this.roundComplete(round);
   }
 
-  async toolStart(call: PreparedToolCall): Promise<void> {
+  /** 根据已校验输入构建「toolStart」结果，不额外持有调用方的大对象。 */
+async toolStart(call: PreparedToolCall): Promise<void> {
     console.warn("[tool] start", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, permission: call.permission }));
     const entry: SessionToolCallEntry = {
       type: "tool_call",
@@ -738,14 +805,16 @@ class TurnProjection implements RunObserver {
     });
   }
 
-  async toolFinish(
+  /** 根据已校验输入构建「toolFinish」结果，不额外持有调用方的大对象。 */
+async toolFinish(
     call: PreparedToolCall,
     status: acp.ToolCallStatus,
     result: ToolOutcome,
   ): Promise<void> {
     console.warn("[tool] finish", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, status, outcomeStatus: result.status }));
     const entry = this.streamingSessionEntries.find(
-      (item): item is SessionToolCallEntry =>
+      /** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item): item is SessionToolCallEntry =>
         item.type === "tool_call" && item.toolCallId === call.id,
     );
     const content = "content" in result ? result.content : [];
@@ -768,7 +837,8 @@ class TurnProjection implements RunObserver {
     });
   }
 
-  async requestPermission(call: PreparedToolCall): Promise<boolean> {
+  /** 执行「requestPermission」主流程，传播取消与失败并在结束时清理临时资源。 */
+async requestPermission(call: PreparedToolCall): Promise<boolean> {
     const interaction: TurnPendingPermissionInteraction = {
       schemaVersion: 1,
       interactionId: makeTurnInteractionId("permission", call.id),
@@ -779,7 +849,8 @@ class TurnProjection implements RunObserver {
         name: call.name,
         kind: call.kind,
         rawInput: structuredClone(call.arguments),
-        locations: call.locations.map((location) => ({
+        locations: call.locations.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(location) => ({
           path: location.path,
           ...(location.line === null || location.line === undefined ? {} : { line: location.line }),
         })),
@@ -800,7 +871,8 @@ class TurnProjection implements RunObserver {
       requestedAt: interaction.requestedAt,
     }));
     try {
-      const response = await this.channel.request<acp.RequestPermissionResponse>(interaction.interactionId, this.signal, (client) => client.request(
+      const response = await this.channel.request<acp.RequestPermissionResponse>(interaction.interactionId, this.signal, /** 执行「response」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(client) => client.request(
         acp.methods.client.session.requestPermission, {
           sessionId: this.sessionId,
           toolCall: {
@@ -828,7 +900,8 @@ class TurnProjection implements RunObserver {
     }
   }
 
-  async askUser(question: string, toolCallId: string): Promise<string> {
+  /** 执行「askUser」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async askUser(question: string, toolCallId: string): Promise<string> {
     const interaction: TurnPendingElicitationInteraction = {
       schemaVersion: 1,
       interactionId: makeTurnInteractionId("elicitation", toolCallId),
@@ -851,7 +924,8 @@ class TurnProjection implements RunObserver {
     };
     await this.beginInteraction(interaction);
     try {
-      const response = await this.channel.request<acp.CreateElicitationResponse>(interaction.interactionId, this.signal, (client) => client.request(
+      const response = await this.channel.request<acp.CreateElicitationResponse>(interaction.interactionId, this.signal, /** 执行「response」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(client) => client.request(
         acp.methods.client.elicitation.create, {
           sessionId: this.sessionId,
           toolCallId: interaction.toolCallId,
@@ -874,7 +948,8 @@ class TurnProjection implements RunObserver {
     }
   }
 
-  private async beginInteraction(interaction: TurnPendingInteraction): Promise<void> {
+  /** 执行「beginInteraction」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async beginInteraction(interaction: TurnPendingInteraction): Promise<void> {
     const turn = await this.sessions.addTurnInteraction(this.sessionId, this.turnId, interaction);
     console.warn("[turn-interaction] persisted", JSON.stringify({
       sessionId: this.sessionId,
@@ -886,7 +961,8 @@ class TurnProjection implements RunObserver {
     await this.output.turnState(turn.state);
   }
 
-  private async finishInteraction(interactionId: string): Promise<void> {
+  /** 执行「finishInteraction」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async finishInteraction(interactionId: string): Promise<void> {
     const turn = await this.sessions.removeTurnInteraction(this.sessionId, this.turnId, interactionId);
     console.warn("[turn-interaction] resolved", JSON.stringify({
       sessionId: this.sessionId,
@@ -897,7 +973,8 @@ class TurnProjection implements RunObserver {
     await this.output.turnState(turn.state);
   }
 
-  private ensureMessage(round: number): SessionMessageEntry {
+  /** 校验并取得「ensureMessage」所需对象；缺失或归属不符时立即抛出明确错误。 */
+private ensureMessage(round: number): SessionMessageEntry {
     const existing = this.messages.get(round);
     if (existing) return existing;
     const entry = makeMessage("assistant", "", this.turnId, randomUUID());
@@ -906,7 +983,8 @@ class TurnProjection implements RunObserver {
     return entry;
   }
 
-  private ensureThought(round: number): SessionThoughtEntry {
+  /** 校验并取得「ensureThought」所需对象；缺失或归属不符时立即抛出明确错误。 */
+private ensureThought(round: number): SessionThoughtEntry {
     const existing = this.thoughts.get(round);
     if (existing) return existing;
     const entry: SessionThoughtEntry = {
@@ -922,6 +1000,7 @@ class TurnProjection implements RunObserver {
   }
 }
 
+/** 执行「runtimeTurnFacts」主流程，传播取消与失败并在结束时清理临时资源。 */
 function runtimeTurnFacts(
   facts: RuntimeTurnSnapshot,
 ): Partial<import("../repository/session-types.js").TurnExecutionRecord> {
@@ -936,12 +1015,14 @@ function runtimeTurnFacts(
   };
 }
 
+/** 生成「turnFailureFacts」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
 function turnFailureFacts(failure: unknown): { code: string; message: string; retryable: boolean } {
   return failure instanceof RunFailure
     ? { code: failure.code, message: failure.message, retryable: failure.retryable }
     : { code: "INTERNAL_ERROR", message: "该 Turn 执行失败", retryable: true };
 }
 
+/** 执行「replayEntry」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void> {
   if (entry.type === "provider_continuation") return;
   if (entry.type === "message") {
@@ -980,13 +1061,15 @@ async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void
   }
 }
 
+/** 生成「sessionEntriesWithActiveProjection」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
 function sessionEntriesWithActiveProjection(
   session: SessionRecord,
   projection: TurnProjection | undefined,
 ): SessionEntry[] {
   const entries = structuredClone(session.sessionEntries);
   if (!projection) return entries;
-  const indexes = new Map(entries.map((entry, index) => [entryIdentity(entry), index]));
+  const indexes = new Map(entries.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(entry, index) => [entryIdentity(entry), index]));
   for (const entry of projection.entriesSnapshot()) {
     const id = entryIdentity(entry);
     const index = indexes.get(id);
@@ -1000,6 +1083,7 @@ function sessionEntriesWithActiveProjection(
   return entries;
 }
 
+/** 执行「replayEntryDelta」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async function replayEntryDelta(
   output: AcpOutput,
   entry: SessionEntry,
@@ -1039,6 +1123,7 @@ async function replayEntryDelta(
   await replayEntry(output, entry);
 }
 
+/** 根据已校验输入构建「tokenComponents」结果，不额外持有调用方的大对象。 */
 function tokenComponents(entries: SessionEntry[]): TokenUsageComponent[] {
   const components: TokenUsageComponent[] = [];
   for (const entry of entries) {
@@ -1073,10 +1158,12 @@ function tokenComponents(entries: SessionEntry[]): TokenUsageComponent[] {
   return components;
 }
 
+/** 执行「estimateTokens」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function estimateTokens(value: string): number {
   return value.length === 0 ? 0 : Math.max(1, Math.ceil(value.length / 4));
 }
 
+/** 把输入安全序列化为「safeJson」结果，失败时返回受控降级文本而不泄漏原始对象。 */
 function safeJson(value: unknown): string {
   try {
     return JSON.stringify(value) ?? "";
@@ -1092,7 +1179,8 @@ function turnStateLogFacts(state: TurnState) {
         status: state.status,
         phase: state.phase,
         waitingFor: state.waitingFor,
-        pendingInteractions: state.pendingInteractions.map((interaction) => ({
+        pendingInteractions: state.pendingInteractions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(interaction) => ({
           interactionId: interaction.interactionId,
           kind: interaction.kind,
           toolCallId: interaction.kind === "permission" ? interaction.toolCall.toolCallId : interaction.toolCallId,
@@ -1102,9 +1190,11 @@ function turnStateLogFacts(state: TurnState) {
     : { status: state.status };
 }
 
+/** 把「promptText」归一为当前边界需要的文本视图，不暴露无关内部结构。 */
 function promptText(content: acp.ContentBlock[]): string {
   return content
-    .flatMap((item) => {
+    .flatMap(/** 执行「join」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => {
       if (item.type === "text") return [item.text];
       if (item.type === "resource_link") {
         return [`[资源链接] ${item.title ?? item.name}: ${item.uri}`];
@@ -1115,6 +1205,7 @@ function promptText(content: acp.ContentBlock[]): string {
     .trim();
 }
 
+/** 根据已校验输入构建「makeMessage」结果，不额外持有调用方的大对象。 */
 function makeMessage(
   role: SessionMessageEntry["role"],
   text: string,
@@ -1133,6 +1224,7 @@ function makeMessage(
   };
 }
 
+/** 执行「promptWithArtifacts」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function promptWithArtifacts(text: string, mentions: ArtifactMention[]): string {
   if (mentions.length === 0) return text;
   return [
@@ -1144,6 +1236,7 @@ function promptWithArtifacts(text: string, mentions: ArtifactMention[]): string 
   ].join("\n");
 }
 
+/** 由规范字段生成稳定的「entryIdentity」标识，供索引精确定位且不保留原始大对象。 */
 function entryIdentity(entry: SessionEntry): string {
   if (entry.type === "message" || entry.type === "thought") return `${entry.type}:${entry.messageId}`;
   if (entry.type === "tool_call") return `tool:${entry.toolCallId}`;
@@ -1151,6 +1244,7 @@ function entryIdentity(entry: SessionEntry): string {
   return `${entry.type}:${entry.turnId}`;
 }
 
+/** 判断「isRecord」对应条件，只返回判定结果且不修改输入状态。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

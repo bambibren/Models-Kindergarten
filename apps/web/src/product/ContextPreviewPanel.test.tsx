@@ -30,9 +30,12 @@ const value: ContextPreviewResponseV2 = {
   history: { configuredPolicy: { mode: "recent_turns", maxTurns: 6 }, actualHistoryTurns: 0 },
 };
 
-describe("ContextPreviewPanel", () => {
-  it("只读展示完整非历史上下文、推理、历史数量说明与 Provider 输入", () => {
-    const html = renderToStaticMarkup(<ContextPreviewPanel value={value} onRefresh={() => undefined} />);
+describe("ContextPreviewPanel", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("只读展示完整非历史上下文、推理、历史数量说明与 Provider 输入", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    const html = renderToStaticMarkup(<ContextPreviewPanel value={value} onRefresh={/** 构造「onRefresh」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => undefined} />);
 
     expect(html).toContain("最终系统指令");
     expect(html).toContain("固定响应协议与 Skill 使用协议");

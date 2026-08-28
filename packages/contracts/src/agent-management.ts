@@ -1,31 +1,37 @@
 import { isRecord, optionalString, requiredString } from "./common.js";
 import { PRODUCT_CONFIG } from "./product-config.js";
 
+/** 描述「ToolPermission」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ToolPermission = "allow" | "ask" | "deny";
 
+/** 描述「BuiltinToolBinding」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface BuiltinToolBinding {
   toolId: string;
   enabled: boolean;
   permission: ToolPermission;
 }
 
+/** 描述「SkillBinding」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SkillBinding {
   skillInstallationId: string;
   enabled: boolean;
 }
 
+/** 描述「McpToolBinding」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface McpToolBinding {
   remoteName: string;
   enabled: boolean;
   permission: ToolPermission;
 }
 
+/** 描述「McpResourceBinding」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface McpResourceBinding {
   uri: string;
   enabled: boolean;
   preload: boolean;
 }
 
+/** 描述「McpBinding」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface McpBinding {
   mcpInstallationId: string;
   enabled: boolean;
@@ -33,10 +39,12 @@ export interface McpBinding {
   resources: McpResourceBinding[];
 }
 
+/** 描述「HistoryPolicy」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type HistoryPolicy =
   | { mode: "none" }
   | { mode: "recent_turns"; maxTurns: number };
 
+/** 描述「AgentInput」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface AgentInput {
   name: string;
   description?: string;
@@ -48,6 +56,7 @@ export interface AgentInput {
   memoryPolicy: { mode: "off" };
 }
 
+/** 描述「AgentRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface AgentRecord extends Omit<AgentInput, "skillInstallationIds"> {
   schemaVersion: 1;
   agentId: string;
@@ -59,13 +68,14 @@ export interface AgentRecord extends Omit<AgentInput, "skillInstallationIds"> {
   deletable?: boolean;
 }
 
+/** 校验并规范化「parseAgentInput」输入，非法数据直接返回明确错误。 */
 export function parseAgentInput(value: unknown): AgentInput {
   if (!isRecord(value)) throw new Error("AgentInput 必须是对象");
   if (!Array.isArray(value.builtinTools)) throw new Error("builtinTools 必须是数组");
   if (!Array.isArray(value.skillInstallationIds)) throw new Error("skillInstallationIds 必须是数组");
   if (!Array.isArray(value.mcps)) throw new Error("mcps 必须是数组");
   const description = optionalString(value, "description", { max: PRODUCT_CONFIG.agent.descriptionMaxCharacters });
-  return canonicalAgentInput({
+  const parsed = canonicalAgentInput({
     name: requiredString(value, "name", { max: PRODUCT_CONFIG.agent.nameMaxCharacters }),
     ...(description ? { description } : {}),
     systemPrompt: requiredString(value, "systemPrompt", {
@@ -73,7 +83,8 @@ export function parseAgentInput(value: unknown): AgentInput {
       preserveWhitespace: true,
     }),
     builtinTools: value.builtinTools.map(parseBuiltinToolBinding),
-    skillInstallationIds: value.skillInstallationIds.map((id) => {
+    skillInstallationIds: value.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(id) => {
       if (typeof id !== "string" || id.trim().length === 0) throw new Error("skillInstallationIds 包含无效 ID");
       return id.trim();
     }),
@@ -81,8 +92,27 @@ export function parseAgentInput(value: unknown): AgentInput {
     historyPolicy: parseHistoryPolicy(value.historyPolicy),
     memoryPolicy: parseMemoryPolicy(value.memoryPolicy),
   });
+  const enabledBuiltinTools = parsed.builtinTools.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled).length;
+  const enabledMcpTools = parsed.mcps
+    .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled)
+    .reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
+(total, item) => total + item.tools.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(tool) => tool.enabled).length, 0);
+  if (parsed.skillInstallationIds.length > PRODUCT_CONFIG.capacity.maxAgentSkills) {
+    throw new Error(`Agent 绑定 Skill 超过 ${PRODUCT_CONFIG.capacity.maxAgentSkills} 个上限`);
+  }
+  if (parsed.mcps.length > PRODUCT_CONFIG.capacity.maxAgentMcps) {
+    throw new Error(`Agent 绑定 MCP Installation 超过 ${PRODUCT_CONFIG.capacity.maxAgentMcps} 个上限`);
+  }
+  if (enabledBuiltinTools + enabledMcpTools > PRODUCT_CONFIG.capacity.maxAgentBoundTools) {
+    throw new Error(`Agent 启用 Tool 超过 ${PRODUCT_CONFIG.capacity.maxAgentBoundTools} 个上限`);
+  }
+  return parsed;
 }
 
+/** 判断「canonicalAgentInput」对应条件，只返回判定结果且不修改输入状态。 */
 export function canonicalAgentInput(input: AgentInput): AgentInput {
   const builtin = new Map<string, BuiltinToolBinding>();
   for (const item of input.builtinTools) {
@@ -92,8 +122,10 @@ export function canonicalAgentInput(input: AgentInput): AgentInput {
     }
     builtin.set(item.toolId, item);
   }
-  const mcps = input.mcps.toSorted((a, b) => a.mcpInstallationId.localeCompare(b.mcpInstallationId));
-  if (new Set(mcps.map((item) => item.mcpInstallationId)).size !== mcps.length) {
+  const mcps = input.mcps.toSorted(/** 执行「mcps」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(a, b) => a.mcpInstallationId.localeCompare(b.mcpInstallationId));
+  if (new Set(mcps.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.mcpInstallationId)).size !== mcps.length) {
     throw new Error("mcps 包含重复 Installation");
   }
   const { description: _description, ...base } = input;
@@ -103,12 +135,14 @@ export function canonicalAgentInput(input: AgentInput): AgentInput {
     name: input.name.trim(),
     ...(description ? { description } : {}),
     systemPrompt: input.systemPrompt,
-    builtinTools: [...builtin.values()].toSorted((a, b) => a.toolId.localeCompare(b.toolId)),
+    builtinTools: [...builtin.values()].toSorted(/** 执行「builtinTools」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(a, b) => a.toolId.localeCompare(b.toolId)),
     skillInstallationIds: [...new Set(input.skillInstallationIds)].toSorted(),
     mcps,
   };
 }
 
+/** 校验并规范化「parseBuiltinToolBinding」输入，非法数据直接返回明确错误。 */
 function parseBuiltinToolBinding(value: unknown): BuiltinToolBinding {
   if (!isRecord(value)) throw new Error("builtinTools 条目必须是对象");
   if (typeof value.enabled !== "boolean") throw new Error("builtinTools.enabled 必须是布尔值");
@@ -119,6 +153,7 @@ function parseBuiltinToolBinding(value: unknown): BuiltinToolBinding {
   };
 }
 
+/** 校验并规范化「parseMcpBinding」输入，非法数据直接返回明确错误。 */
 function parseMcpBinding(value: unknown): McpBinding {
   if (!isRecord(value) || typeof value.enabled !== "boolean") throw new Error("MCP binding 格式无效");
   if (!Array.isArray(value.tools) || !Array.isArray(value.resources)) throw new Error("MCP capability binding 必须是数组");
@@ -127,7 +162,8 @@ function parseMcpBinding(value: unknown): McpBinding {
       max: PRODUCT_CONFIG.agent.mcpInstallationIdMaxCharacters,
     }),
     enabled: value.enabled,
-    tools: value.tools.map((item) => {
+    tools: value.tools.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => {
       if (!isRecord(item) || typeof item.enabled !== "boolean") throw new Error("MCP tool binding 格式无效");
       return {
         remoteName: requiredString(item, "remoteName", {
@@ -137,7 +173,8 @@ function parseMcpBinding(value: unknown): McpBinding {
         permission: parsePermission(item.permission),
       };
     }),
-    resources: value.resources.map((item) => {
+    resources: value.resources.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => {
       if (!isRecord(item) || typeof item.enabled !== "boolean" || typeof item.preload !== "boolean") {
         throw new Error("MCP resource binding 格式无效");
       }
@@ -150,11 +187,13 @@ function parseMcpBinding(value: unknown): McpBinding {
   };
 }
 
+/** 校验并规范化「parsePermission」输入，非法数据直接返回明确错误。 */
 function parsePermission(value: unknown): ToolPermission {
   if (value === "allow" || value === "ask" || value === "deny") return value;
   throw new Error("permission 必须是 allow、ask 或 deny");
 }
 
+/** 校验并规范化「parseHistoryPolicy」输入，非法数据直接返回明确错误。 */
 function parseHistoryPolicy(value: unknown): HistoryPolicy {
   if (!isRecord(value)) throw new Error("historyPolicy 必须是对象");
   if (value.mode === "none") return { mode: "none" };
@@ -165,6 +204,7 @@ function parseHistoryPolicy(value: unknown): HistoryPolicy {
   throw new Error("historyPolicy 格式无效");
 }
 
+/** 校验并规范化「parseMemoryPolicy」输入，非法数据直接返回明确错误。 */
 function parseMemoryPolicy(value: unknown): { mode: "off" } {
   if (isRecord(value) && value.mode === "off") return { mode: "off" };
   throw new Error("memoryPolicy 首版只能为 off");

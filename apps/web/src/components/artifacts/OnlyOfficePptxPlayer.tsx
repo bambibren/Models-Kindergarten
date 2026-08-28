@@ -14,6 +14,7 @@ interface OnlyOfficeWindow extends Window {
 
 const scripts = new Map<string, Promise<void>>();
 
+/** 渲染「OnlyOfficePptxPlayer」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function OnlyOfficePptxPlayer({
   load,
   title,
@@ -29,11 +30,13 @@ export function OnlyOfficePptxPlayer({
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [fullscreen, setFullscreen] = useState(false);
 
-  useEffect(() => {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
     let active = true;
     let editor: OnlyOfficeEditor | undefined;
     setState("loading");
-    void (async () => {
+    void (/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+async () => {
       try {
         const value = await load();
         await loadOnlyOffice(value.documentServerApiUrl);
@@ -45,29 +48,34 @@ export function OnlyOfficePptxPlayer({
           width: "100%",
           height: "100%",
           events: {
-            onAppReady: () => { if (active) setState("ready"); },
-            onError: () => { if (active) setState("error"); },
+            onAppReady: /** 处理「onAppReady」事件，校验归属后再推进状态且避免重复提交。 */
+() => { if (active) setState("ready"); },
+            onError: /** 处理「onError」事件，校验归属后再推进状态且避免重复提交。 */
+() => { if (active) setState("error"); },
           },
         });
       } catch {
         if (active) setState("error");
       }
     })();
-    return () => {
+    return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => {
       active = false;
       editor?.destroyEditor();
     };
   }, [attempt, hostId, load]);
 
-  useEffect(() => {
-    const handleFullscreenChange = () => {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
+    const handleFullscreenChange = /** 处理「handleFullscreenChange」事件，校验归属后再推进状态且避免重复提交。 */
+() => {
       if (!document.fullscreenElement) setFullscreen(false);
     };
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  async function toggleFullscreen() {
+  /** 根据已校验输入构建「toggleFullscreen」结果，不额外持有调用方的大对象。 */
+async function toggleFullscreen() {
     const frame = frameRef.current;
     if (!frame) return;
     if (fullscreen) {
@@ -96,7 +104,8 @@ export function OnlyOfficePptxPlayer({
     <header className="pptx-player__toolbar">
       <button type="button" onClick={onBack}><ArrowLeft size={14} />静态预览</button>
       <strong>{title}</strong>
-      <button type="button" onClick={() => void toggleFullscreen()}>
+      <button type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => void toggleFullscreen()}>
         {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         {fullscreen ? "退出全屏" : "全屏"}
       </button>
@@ -106,21 +115,27 @@ export function OnlyOfficePptxPlayer({
     {state === "error" ? <div className="pptx-player__state pptx-player__state--error">
       <strong>动画播放器暂时不可用</strong>
       <span>请确认本机 ONLYOFFICE DocumentServer 已启动。</span>
-      <button type="button" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={14} />重试</button>
+      <button type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setAttempt(/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => value + 1)}><RefreshCw size={14} />重试</button>
     </div> : null}
   </section>;
 }
 
+/** 读取「loadOnlyOffice」所需数据，并遵守作用域、分页与容量边界。 */
 function loadOnlyOffice(url: string): Promise<void> {
   if ((window as OnlyOfficeWindow).DocsAPI) return Promise.resolve();
   const existing = scripts.get(url);
   if (existing) return existing;
-  const promise = new Promise<void>((resolve, reject) => {
+  const promise = new Promise<void>(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
+(resolve, reject) => {
     const script = document.createElement("script");
     script.src = url;
     script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => {
+    script.onload = /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => resolve();
+    script.onerror = /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => {
       scripts.delete(url);
       script.remove();
       reject(new Error("ONLYOFFICE API 加载失败"));

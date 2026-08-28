@@ -13,10 +13,14 @@ import type { TurnScope } from "../../src/runtime/turn-scope.js";
 import { FileSandbox } from "../../src/tools/sandbox.js";
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("PPTX Artifact chain", () => {
-  it("构建、发布、下载和 Mention 物化保持同一 PPTX 字节", async () => {
+describe("PPTX Artifact chain", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("构建、发布、下载和 Mention 物化保持同一 PPTX 字节", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const root = await mkdtemp(join(tmpdir(), "mk-pptx-artifact-"));
     dirs.push(root);
     const workspaces = join(root, "workspaces");
@@ -25,7 +29,8 @@ describe("PPTX Artifact chain", () => {
     await files.writeText("deck/generate.cjs", "// PptxGenJS source");
     const pptxBytes = validPptx();
     const runner: PptxProcessRunner = {
-      run: async (input) => {
+      run: /** 构造「run」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (input) => {
         await writeFile(input.outputPath, pptxBytes);
         return { exitCode: 0, signal: null, stdout: "", stderr: "", truncated: false };
       },
@@ -85,17 +90,21 @@ describe("PPTX Artifact chain", () => {
     }, "fallback"), context());
     expect(reused.rawOutput).toMatchObject({ reusedBlob: true, targetPath: "inputs/reused.pptx" });
     expect((await readFile(join(workspaces, "session-b", "inputs/reused.pptx"))).equals(pptxBytes)).toBe(true);
-    expect((await files.walkFiles()).map((item) => item.path).toSorted()).toEqual([
+    expect((await files.walkFiles()).map(/** 构造「toSorted」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.path).toSorted()).toEqual([
       "deck/final.pptx",
       "deck/generate.cjs",
     ]);
   });
 });
 
+/** 构造「context」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function context() {
-  return { signal: new AbortController().signal, askUser: async () => "" };
+  return { signal: new AbortController().signal, askUser: /** 构造「askUser」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => "" };
 }
 
+/** 构造「scope」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function scope(sessionId: string, turnId: string): TurnScope {
   return {
     schemaVersion: 1,
@@ -109,6 +118,7 @@ function scope(sessionId: string, turnId: string): TurnScope {
   };
 }
 
+/** 构造「validPptx」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function validPptx(): Buffer {
   return createZip([
     { path: "[Content_Types].xml", bytes: Buffer.from("<Types/>") },

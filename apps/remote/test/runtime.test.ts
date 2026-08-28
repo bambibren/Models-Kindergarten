@@ -26,13 +26,17 @@ import { ToolCallLedger, ToolRuntime } from "../src/tools/tool-runtime.js";
 import { WebAccess } from "../src/tools/web-access.js";
 
 const dirs: string[] = [];
-afterEach(async () => {
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => {
   vi.unstubAllGlobals();
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true })));
 });
 
-describe("V1.6 Agent Runtime", () => {
-  it("成功工具被重复提议时每次都真实执行，不复用之前结果", async () => {
+describe("V1.6 Agent Runtime", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("成功工具被重复提议时每次都真实执行，不复用之前结果", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const provider = new RepeatingProvider("write_file", {
       path: "repeat.txt",
@@ -55,7 +59,8 @@ describe("V1.6 Agent Runtime", () => {
     });
     expect(result.usage.rounds).toHaveLength(4);
     expect(observer.permissionCount).toBe(3);
-    expect(observer.outcomes.map((item) => item.status)).toEqual([
+    expect(observer.outcomes.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.status)).toEqual([
       "success",
       "success",
       "success",
@@ -63,16 +68,19 @@ describe("V1.6 Agent Runtime", () => {
     expect(await readFile(join(sandbox.root, "repeat.txt"), "utf8")).toBe("只写一次");
     expect(observer.textOutput).toContain("模型已完成重复调用");
     expect(observer.contextSummaries).toHaveLength(1);
-    expect(observer.contextSummaries[0]?.items.map((item) => item.kind)).toEqual([
+    expect(observer.contextSummaries[0]?.items.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.kind)).toEqual([
       "system_instruction",
       "available_tools",
     ]);
-    expect(observer.contextSummaries[0]?.items.every((item) => item.raw?.provider === "ollama"))
+    expect(observer.contextSummaries[0]?.items.every(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.raw?.provider === "ollama"))
       .toBe(true);
     expect(JSON.stringify(observer.contextSummaries[0])).not.toContain("重复写入");
   });
 
-  it("权限拒绝后相同写入再次调用仍独立请求授权", async () => {
+  it("权限拒绝后相同写入再次调用仍独立请求授权", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const provider = new RepeatingProvider("write_file", {
       path: "denied.txt",
@@ -89,7 +97,8 @@ describe("V1.6 Agent Runtime", () => {
 
     expect(result.reason).toBe("stop");
     expect(observer.permissionCount).toBe(3);
-    expect(observer.outcomes.map((item) => item.status)).toEqual([
+    expect(observer.outcomes.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.status)).toEqual([
       "denied",
       "denied",
       "denied",
@@ -98,7 +107,8 @@ describe("V1.6 Agent Runtime", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("同一 SessionEntry 源分别投影历史工具结果和当前用户消息", async () => {
+  it("同一 SessionEntry 源分别投影历史工具结果和当前用户消息", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const entries: SessionEntry[] = [
       message("user", "请读取文件", "m1"),
       {
@@ -127,13 +137,16 @@ describe("V1.6 Agent Runtime", () => {
     ]);
   });
 
-  it("Tool 清单使用 web_fetch 且完全没有 Plan 能力", async () => {
+  it("Tool 清单使用 web_fetch 且完全没有 Plan 能力", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const registry = new ToolRegistry(await makeSandbox());
-    const names = registry.definitions.map((item) => item.function.name);
+    const names = registry.definitions.map(/** 构造「names」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.function.name);
     expect(names).toEqual([
       "list_files",
       "read_file",
       "write_file",
+      "edit_file",
       "web_search",
       "web_fetch",
       "ask_user",
@@ -141,9 +154,11 @@ describe("V1.6 Agent Runtime", () => {
     expect(names).not.toContain("update_plan");
   });
 
-  it("写文件权限原样遵守 Agent 配置，命令工具即使绑定也不暴露", async () => {
+  it("写文件权限原样遵守 Agent 配置，命令工具即使绑定也不暴露", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
-    const write = (permission: "allow" | "ask" | "deny") => new ToolRegistry(
+    const write = /** 构造「write」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(permission: "allow" | "ask" | "deny") => new ToolRegistry(
       sandbox,
       undefined,
       undefined,
@@ -160,14 +175,16 @@ describe("V1.6 Agent Runtime", () => {
         arguments: { path: "index.html", content: "ok" },
       }, "fallback").permission).toBe(permission);
     }
-    expect(() => write("ask").prepare({
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => write("ask").prepare({
       id: "command",
       name: "run_command",
       arguments: { command: "pwd" },
     }, "fallback")).toThrow("当前 Agent 未启用 Built-in Tool: run_command");
   });
 
-  it("普通参数错误展开真实 Schema，不猜测或改写模型参数", async () => {
+  it("普通参数错误展开真实 Schema，不猜测或改写模型参数", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const registry = new ToolRegistry(await makeSandbox());
     const prepared = prepareToolCall(registry, {
       name: "read_file",
@@ -199,7 +216,8 @@ describe("V1.6 Agent Runtime", () => {
     expect(raw.argument_correction).toBeUndefined();
   });
 
-  it("无效参数的去重键不受对象字段顺序影响", async () => {
+  it("无效参数的去重键不受对象字段顺序影响", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const registry = new ToolRegistry(await makeSandbox());
     const first = prepareToolCall(registry, {
       name: "read_file",
@@ -213,7 +231,8 @@ describe("V1.6 Agent Runtime", () => {
     expect(first.dedupeKey).toBe(second.dedupeKey);
   });
 
-  it.runIf(process.platform === "darwin")("保留的终端沙箱实现仍限制在 Workspace 内", async () => {
+  it.runIf(process.platform === "darwin")("保留的终端沙箱实现仍限制在 Workspace 内", /** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => {
     const sandbox = await makeSandbox();
     const processSandbox = new ProcessSandbox(sandbox);
     const signal = new AbortController().signal;
@@ -233,15 +252,18 @@ describe("V1.6 Agent Runtime", () => {
     expect(outside.stderr).toContain("operation not permitted");
   });
 
-  it("web_fetch 在发起请求前拒绝私有网络", async () => {
+  it("web_fetch 在发起请求前拒绝私有网络", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     await expect(new WebAccess().fetch(
       "http://127.0.0.1:11434/api/tags",
       new AbortController().signal,
     )).rejects.toThrow("私有网络");
   });
 
-  it("web_fetch 响应过大时返回真实的资源限制错误", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("oversized", {
+  it("web_fetch 响应过大时返回真实的资源限制错误", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response("oversized", {
       headers: { "content-length": String(PRODUCT_CONFIG.tools.web.maxFetchBytes + 1) },
     })));
 
@@ -256,7 +278,8 @@ describe("V1.6 Agent Runtime", () => {
     });
   });
 
-  it("Provider 失败在 Runner 边界转换成保留原因的 RunFailure", async () => {
+  it("Provider 失败在 Runner 边界转换成保留原因的 RunFailure", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const runtime = AgentRuntime.fromRegistry(new FailedProvider(), new ToolRegistry(sandbox));
     await expect(runtime.run(
@@ -266,7 +289,8 @@ describe("V1.6 Agent Runtime", () => {
     )).rejects.toMatchObject({ name: "RunFailure", message: "Ollama 不可用" });
   });
 
-  it("系统提示明确每轮必须返回工具调用或非空最终正文", async () => {
+  it("系统提示明确每轮必须返回工具调用或非空最终正文", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const provider = new CapturingReasoningProvider();
     const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
@@ -284,6 +308,9 @@ describe("V1.6 Agent Runtime", () => {
     expect(provider.lastInput?.systemPrompt).toContain("【文件产物交付契约】");
     expect(provider.lastInput?.systemPrompt).toContain("写入 Workspace 只是中间步骤");
     expect(provider.lastInput?.systemPrompt).toContain("只有成功发布得到的 Artifact 才能预览");
+    expect(provider.lastInput?.systemPrompt).toContain("优先使用 edit_file 按行替换");
+    expect(provider.lastInput?.systemPrompt).toContain("不得为小范围修改用 write_file 重新输出完整文件");
+    expect(provider.lastInput?.systemPrompt).toContain("先用 read_file 读取当前内容");
     expect(provider.lastInput?.systemPrompt).toContain("不得结束本轮");
     expect(provider.lastInput?.systemPrompt).toContain("同一会话中继续修改同一个 Artifact");
     expect(provider.lastInput?.systemPrompt).toContain("跨会话修改");
@@ -295,7 +322,8 @@ describe("V1.6 Agent Runtime", () => {
     expect(provider.lastInput?.systemPrompt).toContain("当前 JSON Schema");
   });
 
-  it("thinking-only 直接失败且不发起额外模型请求", async () => {
+  it("thinking-only 直接失败且不发起额外模型请求", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const provider = new ScriptedResponseProvider([
       [
@@ -318,7 +346,8 @@ describe("V1.6 Agent Runtime", () => {
     expect(provider.inputs).toHaveLength(1);
   });
 
-  it("完全空响应直接失败且不发起额外模型请求", async () => {
+  it("完全空响应直接失败且不发起额外模型请求", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const provider = new ScriptedResponseProvider([
       [{ type: "finish", reason: "stop" }],
@@ -338,7 +367,8 @@ describe("V1.6 Agent Runtime", () => {
     expect(provider.inputs).toHaveLength(1);
   });
 
-  it("被截断的正文不能被误判为完成", async () => {
+  it("被截断的正文不能被误判为完成", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const provider = new ScriptedResponseProvider([
       [
@@ -360,7 +390,8 @@ describe("V1.6 Agent Runtime", () => {
     expect(provider.inputs).toHaveLength(1);
   });
 
-  it("非空拒绝正文仍是可展示的正常最终答复", async () => {
+  it("非空拒绝正文仍是可展示的正常最终答复", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const provider = new ScriptedResponseProvider([
       [
@@ -382,7 +413,8 @@ describe("V1.6 Agent Runtime", () => {
     expect(provider.inputs).toHaveLength(1);
   });
 
-  it("没有 Agent resolver 时按 auto 跟随 ModelStudent 能力默认值", async () => {
+  it("没有 Agent resolver 时按 auto 跟随 ModelStudent 能力默认值", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const provider = new CapturingReasoningProvider();
     const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
@@ -399,7 +431,8 @@ describe("V1.6 Agent Runtime", () => {
     });
   });
 
-  it("Provider cancelled 后丢弃已累积 Tool Call，不产生任何工具副作用", async () => {
+  it("Provider cancelled 后丢弃已累积 Tool Call，不产生任何工具副作用", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const observer = new TestObserver(true);
     const runtime = AgentRuntime.fromRegistry(new CancelledToolProvider(), new ToolRegistry(sandbox));
@@ -417,7 +450,8 @@ describe("V1.6 Agent Runtime", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("小模型跨三个模型轮提交字段顺序不同但同值的错误参数后结束 Turn", async () => {
+  it("小模型跨三个模型轮提交字段顺序不同但同值的错误参数后结束 Turn", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const observer = new TestObserver(true);
     const runner = new AgentRunner(
@@ -439,10 +473,12 @@ describe("V1.6 Agent Runtime", () => {
       retryable: false,
     });
     expect(observer.outcomes).toHaveLength(3);
-    expect(observer.outcomes.every((item) => item.error?.code === "invalid_arguments")).toBe(true);
+    expect(observer.outcomes.every(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.error?.code === "invalid_arguments")).toBe(true);
   });
 
-  it("大模型收到相同参数错误提示但不启用重复调用终止节点", async () => {
+  it("大模型收到相同参数错误提示但不启用重复调用终止节点", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const sandbox = await makeSandbox();
     const observer = new TestObserver(true);
     const runner = new AgentRunner(
@@ -463,7 +499,8 @@ describe("V1.6 Agent Runtime", () => {
     expect(result.reason).toBe("stop");
     expect(result.usage.modelRequests).toBe(4);
     expect(observer.outcomes).toHaveLength(3);
-    expect(observer.outcomes.every((item) => item.error?.code === "invalid_arguments")).toBe(true);
+    expect(observer.outcomes.every(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.error?.code === "invalid_arguments")).toBe(true);
     expect(observer.textOutput).toContain("已停止尝试错误参数");
   });
 });
@@ -472,7 +509,8 @@ class InvalidArgumentsProvider implements ModelProvider {
   readonly student: ModelStudent;
   private round = 0;
 
-  constructor(
+  /** 构造「InvalidArgumentsProvider」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+constructor(
     sizeClass: "small" | "large",
     private readonly invalidRounds = Number.POSITIVE_INFINITY,
   ) {
@@ -485,11 +523,13 @@ class InvalidArgumentsProvider implements ModelProvider {
     };
   }
 
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
 
-  async *stream(): AsyncIterable<ModelEvent> {
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(): AsyncIterable<ModelEvent> {
     this.round += 1;
     if (this.round > this.invalidRounds) {
       yield { type: "text_delta", text: "已停止尝试错误参数" };
@@ -517,10 +557,12 @@ class CancelledToolProvider implements ModelProvider {
     provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
     generationDefaults: {},
   };
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
-  async *stream(): AsyncIterable<ModelEvent> {
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(): AsyncIterable<ModelEvent> {
     yield {
       type: "tool_calls",
       calls: [{
@@ -550,13 +592,16 @@ class CapturingReasoningProvider implements ModelProvider {
     defaultProfile: "deep",
   };
   lastInput?: ModelInput;
-  nativeReasoning(profile: "balanced" | "deep") {
+  /** 构造「nativeReasoning」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+nativeReasoning(profile: "balanced" | "deep") {
     return { effort: profile === "deep" ? "high" : "medium" };
   }
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
-  async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     this.lastInput = structuredClone(input);
     yield { type: "text_delta", text: "已完成" };
     yield { type: "finish", reason: "stop" };
@@ -573,13 +618,16 @@ class ScriptedResponseProvider implements ModelProvider {
   };
   readonly inputs: ModelInput[] = [];
 
-  constructor(private readonly rounds: ModelEvent[][]) {}
+  /** 构造「ScriptedResponseProvider」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+constructor(private readonly rounds: ModelEvent[][]) {}
 
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
 
-  async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     this.inputs.push(structuredClone(input));
     const events = this.rounds[this.inputs.length - 1] ?? [];
     for (const event of events) yield structuredClone(event);
@@ -594,10 +642,12 @@ class FailedProvider implements ModelProvider {
     provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
     generationDefaults: {},
   };
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
-  async *stream(): AsyncIterable<ModelEvent> {
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(): AsyncIterable<ModelEvent> {
     throw new ModelProviderError("dependency_unavailable", "Ollama 不可用", true);
   }
 }
@@ -611,18 +661,21 @@ class RepeatingProvider implements ModelProvider {
     generationDefaults: {},
   };
 
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
 
-  constructor(
+  /** 构造「RepeatingProvider」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+constructor(
     private readonly name: string,
     private readonly argumentsValue: Record<string, unknown>,
   ) {}
 
   private rounds = 0;
 
-  async *stream(_input: ModelInput): AsyncIterable<ModelEvent> {
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(_input: ModelInput): AsyncIterable<ModelEvent> {
     this.rounds += 1;
     if (this.rounds > 3) {
       yield { type: "text_delta", text: "模型已完成重复调用" };
@@ -639,6 +692,7 @@ class RepeatingProvider implements ModelProvider {
   }
 }
 
+/** 构造「serializeTestContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function serializeTestContext(
   student: ModelStudent,
   fragment: ModelContextFragment,
@@ -665,22 +719,32 @@ class TestObserver implements RunObserver {
   permissionCount = 0;
   toolStartCount = 0;
 
-  constructor(private readonly permission: boolean) {}
-  async context(summary: ContextSummary): Promise<void> { this.contextSummaries.push(summary); }
-  async text(_round: number, value: string): Promise<void> { this.textOutput += value; }
-  async thought(): Promise<void> {}
-  async roundComplete(): Promise<void> {}
-  async toolStart(_call: PreparedToolCall): Promise<void> { this.toolStartCount += 1; }
-  async toolFinish(_call: PreparedToolCall, _status: "pending" | "in_progress" | "completed" | "failed", outcome: ToolOutcome): Promise<void> {
+  /** 构造「TestObserver」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+constructor(private readonly permission: boolean) {}
+  /** 构造「context」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async context(summary: ContextSummary): Promise<void> { this.contextSummaries.push(summary); }
+  /** 构造「text」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async text(_round: number, value: string): Promise<void> { this.textOutput += value; }
+  /** 构造「thought」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async thought(): Promise<void> {}
+  /** 构造「roundComplete」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async roundComplete(): Promise<void> {}
+  /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async toolStart(_call: PreparedToolCall): Promise<void> { this.toolStartCount += 1; }
+  /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async toolFinish(_call: PreparedToolCall, _status: "pending" | "in_progress" | "completed" | "failed", outcome: ToolOutcome): Promise<void> {
     this.outcomes.push(outcome);
   }
-  async requestPermission(): Promise<boolean> {
+  /** 构造「requestPermission」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async requestPermission(): Promise<boolean> {
     this.permissionCount += 1;
     return this.permission;
   }
-  async askUser(): Promise<string> { return "answer"; }
+  /** 构造「askUser」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async askUser(): Promise<string> { return "answer"; }
 }
 
+/** 构造「makeSandbox」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function makeSandbox(): Promise<FileSandbox> {
   const root = await mkdtemp(join(tmpdir(), "kindergarten-v15-"));
   dirs.push(root);
@@ -689,6 +753,7 @@ async function makeSandbox(): Promise<FileSandbox> {
   return sandbox;
 }
 
+/** 构造「message」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function message(role: "user" | "assistant", text: string, messageId: string): SessionEntry {
   return {
     type: "message",

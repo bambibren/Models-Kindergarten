@@ -58,10 +58,12 @@ const PRESETS: readonly PresetDefinition[] = [
   },
 ] as const;
 
+/** 描述「ModelProviderPresetRegistry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class ModelProviderPresetRegistry {
   private readonly ready = new Map<ReadyModelProviderPresetId, PresetDefinition>();
 
-  constructor(private readonly adapters: ModelAdmissionAdapterRegistry) {
+  /** 初始化「ModelProviderPresetRegistry」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(private readonly adapters: ModelAdmissionAdapterRegistry) {
     for (const preset of PRESETS) {
       if (preset.availability !== "ready") continue;
       const protocol = preset.protocol as ReadyProviderProtocol;
@@ -75,11 +77,14 @@ export class ModelProviderPresetRegistry {
     }
   }
 
-  views(): ModelProviderPresetView[] {
-    return [...this.ready.values()].map((item) => structuredClone(item));
+  /** 执行「views」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+views(): ModelProviderPresetView[] {
+    return [...this.ready.values()].map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => structuredClone(item));
   }
 
-  resolve(input: ModelStudentCandidateInput): ResolvedModelStudentCandidate {
+  /** 执行「resolve」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+resolve(input: ModelStudentCandidateInput): ResolvedModelStudentCandidate {
     const preset = this.ready.get(input.presetId);
     if (!preset) throw new Error(`模型预设当前不可用: ${input.presetId}`);
     const baseUrl = preset.baseUrl.mode === "fixed"

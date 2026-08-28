@@ -2,8 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ContentRenderer, messageUrlTransform, rewriteInternalMarkdownLinks } from "./ContentRenderer.js";
 
-describe("ContentRenderer internal links", () => {
-  it("把 Artifact Markdown 链接转换为可点击的安全 fragment", () => {
+describe("ContentRenderer internal links", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("把 Artifact Markdown 链接转换为可点击的安全 fragment", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const html = renderToStaticMarkup(<ContentRenderer content={[{
       type: "text",
       text: "[预览页面](artifact://artifact_12345678)",
@@ -14,14 +16,16 @@ describe("ContentRenderer internal links", () => {
     expect(html).not.toContain("Blocked URL");
   });
 
-  it("不放行无效内部 ID，也不改变普通 HTTPS 链接", () => {
+  it("不放行无效内部 ID，也不改变普通 HTTPS 链接", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const node = { type: "element", tagName: "a", properties: {}, children: [] } as never;
     expect(messageUrlTransform("artifact://bad", "href", node)).not.toContain("mk-artifact");
     expect(messageUrlTransform("https://example.com", "href", node)).toBe("https://example.com");
     expect(rewriteInternalMarkdownLinks("artifact://bad")).toBe("artifact://bad");
   });
 
-  it("不把 Workspace 文件引用渲染成可点击预览", () => {
+  it("不把 Workspace 文件引用渲染成可点击预览", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const html = renderToStaticMarkup(<ContentRenderer content={[{
       type: "resource_link",
       name: "draft.html",

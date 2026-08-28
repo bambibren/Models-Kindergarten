@@ -2,9 +2,17 @@ import type { ArtifactPreviewResponse } from "@kindergarten/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { PublishedPreview } from "./PublishedArtifactPanel.js";
+import { shouldUseStaticPptxPreview } from "../components/artifacts/PptxPreview.js";
 
-describe("PublishedPreview", () => {
-  it("PPTX Artifact 进入浏览器预览组件而不是仅下载兜底", () => {
+describe("PublishedPreview", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("浏览器 PPTX 静态预览严格限制为 32 MiB", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    expect(shouldUseStaticPptxPreview(32 * 1024 * 1024)).toBe(true);
+    expect(shouldUseStaticPptxPreview(32 * 1024 * 1024 + 1)).toBe(false);
+  });
+  it("PPTX Artifact 进入浏览器预览组件而不是仅下载兜底", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const value: ArtifactPreviewResponse = {
       artifact: {
         schemaVersion: 1,

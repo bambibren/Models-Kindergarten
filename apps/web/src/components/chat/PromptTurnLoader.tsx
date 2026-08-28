@@ -6,6 +6,7 @@ export function PromptTurnLoader({ turn }: { turn: ActivePromptTurnState }) {
   return <div className="prompt-turn-loader"><Loader variant="dots" size="sm" label={phaseLabel(turn)} /></div>;
 }
 
+/** 执行「phaseLabel」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function phaseLabel(turn: ActivePromptTurnState): string {
   if (turn.waitingFor.permission > 0) return "等待你授权工具";
   if (turn.waitingFor.input > 0) return "等待你回答问题";

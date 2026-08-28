@@ -12,12 +12,14 @@ export async function validateSkillDirectory(
 ): Promise<SkillDefinition> {
   const rootReal = await realpath(root);
   const files = await collectFiles(rootReal);
-  const skillFile = files.find((item) => item.relativePath === "SKILL.md");
+  const skillFile = files.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.relativePath === "SKILL.md");
   if (!skillFile) throw new Error("Skill 根目录缺少 SKILL.md");
   const raw = await readFile(skillFile.path, "utf8");
   const { manifest, instructions } = parseSkillMarkdown(raw);
   const hash = createHash("sha256");
-  for (const file of files.toSorted((left, right) => left.relativePath.localeCompare(right.relativePath))) {
+  for (const file of files.toSorted(/** 校验并规范化「validateSkillDirectory」输入，非法数据直接返回明确错误。 */
+(left, right) => left.relativePath.localeCompare(right.relativePath))) {
     hash.update(file.relativePath).update("\0").update(await readFile(file.path)).update("\0");
   }
   return {
@@ -31,6 +33,7 @@ export async function validateSkillDirectory(
   };
 }
 
+/** 校验并规范化「parseSkillMarkdown」输入，非法数据直接返回明确错误。 */
 export function parseSkillMarkdown(value: string): {
   manifest: SkillManifest;
   instructions: string;
@@ -62,6 +65,7 @@ export function parseSkillMarkdown(value: string): {
   return { manifest, instructions };
 }
 
+/** 校验并规范化「assertSkillResource」输入，非法数据直接返回明确错误。 */
 export async function assertSkillResource(root: string, input: string): Promise<string> {
   if (!input || input.includes("\\")) throw new Error("Skill 资源路径无效");
   const target = resolve(root, input);
@@ -80,10 +84,12 @@ interface CollectedFile {
   relativePath: string;
 }
 
+/** 执行「collectFiles」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async function collectFiles(root: string): Promise<CollectedFile[]> {
   const results: CollectedFile[] = [];
   let total = 0;
-  async function walk(directory: string): Promise<void> {
+  /** 执行「walk」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async function walk(directory: string): Promise<void> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = resolve(directory, entry.name);
       const info = await lstat(path);
@@ -116,19 +122,23 @@ export function assertSafeSkillName(value: string): void {
   }
 }
 
+/** 校验并取得「requiredString」所需对象；缺失或归属不符时立即抛出明确错误。 */
 function requiredString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} 必须是非空字符串`);
   return value.trim();
 }
 
+/** 执行「optionalString」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function optionalString(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
   return requiredString(value, label);
 }
 
+/** 执行「metadata」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function metadata(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Skill metadata 必须是对象");
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => {
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+([key, item]) => {
     if (typeof item !== "string") throw new Error(`Skill metadata.${key} 必须是字符串`);
     return [key, item];
   }));

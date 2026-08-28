@@ -17,8 +17,10 @@ import {
   type ModelStudentSummary,
 } from "./index.js";
 
-describe("management contracts", () => {
-  it("严格解析并规范化 Agent 能力引用", () => {
+describe("management contracts", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("严格解析并规范化 Agent 能力引用", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const input = parseAgentInput({
       name: "  代码助手  ",
       systemPrompt: "  先检查再修改。  ",
@@ -42,10 +44,12 @@ describe("management contracts", () => {
     expect(canonicalAgentInput(input).skillInstallationIds).toEqual(["skill-a", "skill-b"]);
     expect(canonicalAgentInput(input).builtinTools).toHaveLength(1);
     expect(input).not.toHaveProperty("defaultReasoningProfile");
-    expect(() => parseAgentInput({ ...input, memoryPolicy: { mode: "on" } })).toThrow("memoryPolicy");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseAgentInput({ ...input, memoryPolicy: { mode: "on" } })).toThrow("memoryPolicy");
   });
 
-  it("只接受无认证的 Streamable HTTP MCP 候选", () => {
+  it("只接受无认证的 Streamable HTTP MCP 候选", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(parseMcpCandidateInput({
       name: "文档 MCP",
       transport: "streamable_http",
@@ -53,7 +57,8 @@ describe("management contracts", () => {
       auth: { kind: "none" },
     }).url).toBe("https://mcp.example.test/api");
 
-    expect(() => parseMcpCandidateInput({
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseMcpCandidateInput({
       name: "小说 MCP",
       transport: "streamable_http",
       url: "https://mcp.example.test/api",
@@ -61,7 +66,8 @@ describe("management contracts", () => {
     })).toThrow("MCP_AUTH_NOT_SUPPORTED");
   });
 
-  it("读取 namespaced SessionBinding/Experiment meta，并忽略未知字段", () => {
+  it("读取 namespaced SessionBinding/Experiment meta，并忽略未知字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const binding = { schemaVersion: 1 as const, modelStudentId: "student-1", agentId: "agent-1" };
     const sessionMeta = makeSessionBindingMeta(binding);
     (sessionMeta.modelKindergarten as Record<string, unknown>).future = { version: 9 };
@@ -76,7 +82,8 @@ describe("management contracts", () => {
     });
   });
 
-  it("实验固定为 2～3 个 lane，且 fresh 至少两个策略不同", () => {
+  it("实验固定为 2～3 个 lane，且 fresh 至少两个策略不同", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const policy = {
       systemPrompt: "保持简洁",
       builtinTools: [],
@@ -97,11 +104,14 @@ describe("management contracts", () => {
       ],
     });
     expect(draft.variants).toHaveLength(2);
-    expect(() => parseExperimentDraftInput({ ...draft, variants: [draft.variants[0]] })).toThrow("2 到 3");
-    expect(() => parseExperimentDraftInput({ ...draft, variants: [draft.variants[0], { ...draft.variants[0], variantId: "b", label: "B" }] })).toThrow("策略差异");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseExperimentDraftInput({ ...draft, variants: [draft.variants[0]] })).toThrow("2 到 3");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseExperimentDraftInput({ ...draft, variants: [draft.variants[0], { ...draft.variants[0], variantId: "b", label: "B" }] })).toThrow("策略差异");
   });
 
-  it("V2 每个 Test 独立选择模型和推理，且拒绝历史复用字段", () => {
+  it("V2 每个 Test 独立选择模型和推理，且拒绝历史复用字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const policy = {
       systemPrompt: "保持简洁",
       builtinTools: [],
@@ -110,7 +120,8 @@ describe("management contracts", () => {
       historyPolicy: { mode: "recent_turns" as const, maxTurns: 6 },
       memoryPolicy: { mode: "off" as const },
     };
-    const tests = ["A", "B"].map((label, index) => ({
+    const tests = ["A", "B"].map(/** 构造「tests」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(label, index) => ({
       testId: `test-${label.toLowerCase()}`,
       label,
       sourceAgent: { agentId: "agent-1", name: "助手", updatedAt: "2026-08-18T12:00:00.000Z" },
@@ -127,21 +138,26 @@ describe("management contracts", () => {
       worksheetModelStudentId: "student-1",
       tests,
     });
-    expect(value.tests.map((item) => [item.modelStudentId, item.reasoningProfile])).toEqual([
+    expect(value.tests.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => [item.modelStudentId, item.reasoningProfile])).toEqual([
       ["student-1", "auto"], ["student-2", "deep"],
     ]);
-    expect(() => parseExperimentDraftV2({ ...value, mode: "history_turn" })).toThrow("未知字段");
-    expect(() => parseExperimentDraftV2({ ...value, tests: [{ ...tests[0], mode: "reuse_snapshot" }, tests[1]] })).toThrow("未知字段");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseExperimentDraftV2({ ...value, mode: "history_turn" })).toThrow("未知字段");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => parseExperimentDraftV2({ ...value, tests: [{ ...tests[0], mode: "reuse_snapshot" }, tests[1]] })).toThrow("未知字段");
   });
 
-  it("mk-file URI 只接受 opaque ID，不接受路径、host 或 query", () => {
+  it("mk-file URI 只接受 opaque ID，不接受路径、host 或 query", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(parseFileReferenceUri("mk-file://file_8bca70a9")).toBe("file_8bca70a9");
     expect(parseFileReferenceUri("mk-file://folder/file.txt")).toBeUndefined();
     expect(parseFileReferenceUri("mk-file://file_8bca70a9?path=secret")).toBeUndefined();
     expect(parseFileReferenceUri("file:///tmp/secret.txt")).toBeUndefined();
   });
 
-  it("ModelStudent 摘要公开手动配置的上下文上限，未知时保持字段缺省", () => {
+  it("ModelStudent 摘要公开手动配置的上下文上限，未知时保持字段缺省", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const known = {
       schemaVersion: 1,
       modelStudentId: "student-known",
@@ -176,7 +192,8 @@ describe("management contracts", () => {
   });
 });
 
-describe("four-dimension score contracts", () => {
+describe("four-dimension score contracts", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
   const metrics: ExecutionMetricsSnapshot[] = [
     {
       evaluationRecordId: "eval-a",
@@ -214,14 +231,16 @@ describe("four-dimension score contracts", () => {
     },
   ];
 
-  it("按 runtime_execution_v1 计算并封顶失败 lane", () => {
+  it("按 runtime_execution_v1 计算并封顶失败 lane", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const scores = calculateExecutionScores(metrics);
     expect(scores[0]).toMatchObject({ variantId: "a", score: 100 });
     expect(scores[1]?.score).toBeLessThanOrEqual(59);
     expect(scores[1]?.components.permissionSafety).toBe(0);
   });
 
-  it("三类人工标注完成后计算可解释分数", () => {
+  it("三类人工标注完成后计算可解释分数", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const scores = scoreManualDimensions({
       variantIds: ["a", "b"],
       understanding: {
@@ -259,5 +278,24 @@ describe("four-dimension score contracts", () => {
     expect(scores.byVariant.b?.understanding).toBe(50);
     expect(scores.byVariant.a?.planning).toBe(75);
     expect(scores.byVariant.a?.output).toBe(100);
+  });
+
+  it("输出覆盖评分不会按回答字符数分配权重数组，并正确处理重叠区间", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    const answer = `${"甲".repeat(200_000)} ${"乙".repeat(200_000)}`;
+    const scores = scoreManualDimensions({
+      variantIds: ["a"],
+      understanding: { requirements: [], marks: [] },
+      planning: { marks: [] },
+      output: {
+        answers: [{ variantId: "a", text: answer }],
+        marks: [
+          { variantId: "a", answerSectionId: "partial", start: 0, end: 300_001, verdict: "partial", quotedTextHash: "p" },
+          { variantId: "a", answerSectionId: "full", start: 100_000, end: 200_000, verdict: "effective", quotedTextHash: "f" },
+        ],
+      },
+    });
+
+    expect(scores.byVariant.a?.output).toBe(50);
   });
 });

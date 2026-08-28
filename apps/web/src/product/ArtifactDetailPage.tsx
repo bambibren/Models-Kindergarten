@@ -6,11 +6,14 @@ import { ErrorState, LoadingState } from "./LoadState.js";
 import { PublishedPreview } from "./PublishedArtifactPanel.js";
 import { useResource } from "./use-resource.js";
 
+/** 渲染「ArtifactDetailPage」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ArtifactDetailPage({ artifactId }: { artifactId: string }) {
-  const load = useCallback(() => controlApi.artifactPreview(artifactId), [artifactId]);
+  const load = useCallback(/** 缓存「load」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => controlApi.artifactPreview(artifactId), [artifactId]);
   const { state, retry } = useResource(load);
   const [busy, setBusy] = useState(false);
-  async function toggle() {
+  /** 根据已校验输入构建「toggle」结果，不额外持有调用方的大对象。 */
+async function toggle() {
     if (state.phase !== "ready" && state.phase !== "empty") return;
     setBusy(true);
     try { await controlApi.setArtifactState(artifactId, state.data.artifact.state === "active" ? "archive" : "restore"); retry(); }
@@ -21,7 +24,8 @@ export function ArtifactDetailPage({ artifactId }: { artifactId: string }) {
     {state.phase === "loading" ? <LoadingState label="正在读取 Artifact" /> : state.phase === "error" ? <ErrorState {...state} retry={retry} /> : <>
       <header><div><FileBox size={19} /><span><h1>{state.data.artifact.displayName}</h1><small>v{state.data.artifact.version ?? 1} · {state.data.artifact.artifactId} · {state.data.artifact.kind}</small></span></div><div>
         <a href={controlApi.artifactContentUrl(artifactId)}><Download size={14} />下载</a>
-        <button disabled={busy} type="button" onClick={() => void toggle()}>{state.data.artifact.state === "active" ? <Archive size={14} /> : <RotateCcw size={14} />}{state.data.artifact.state === "active" ? "归档" : "恢复"}</button>
+        <button disabled={busy} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => void toggle()}>{state.data.artifact.state === "active" ? <Archive size={14} /> : <RotateCcw size={14} />}{state.data.artifact.state === "active" ? "归档" : "恢复"}</button>
       </div></header>
       <dl><div><dt>版本</dt><dd>v{state.data.artifact.version ?? 1}</dd></div><div><dt>可回滚</dt><dd>{Math.max(0, (state.data.artifact.revisions?.length ?? 1) - 1)} 步</dd></div><div><dt>来源 Session</dt><dd>{state.data.artifact.sourceSessionId}</dd></div><div><dt>来源 Turn</dt><dd>{state.data.artifact.sourceTurnId}</dd></div><div><dt>MIME</dt><dd>{state.data.artifact.primary.mimeType}</dd></div><div><dt>SHA-256</dt><dd>{state.data.artifact.primary.sha256}</dd></div></dl>
       <div className="product-artifact-preview"><PublishedPreview value={state.data} /></div>

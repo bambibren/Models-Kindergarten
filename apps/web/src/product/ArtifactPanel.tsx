@@ -7,6 +7,7 @@ import { PptxPreview } from "../components/artifacts/PptxPreview.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { useResource } from "./use-resource.js";
 
+/** 渲染「ArtifactPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ArtifactPanel({
   fileReferenceId,
   onClose,
@@ -16,9 +17,11 @@ export function ArtifactPanel({
   onClose: () => void;
   onFileLoaded?: (file: FileReference) => void;
 }) {
-  const load = useCallback(() => controlApi.filePreview(fileReferenceId), [fileReferenceId]);
+  const load = useCallback(/** 缓存「load」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => controlApi.filePreview(fileReferenceId), [fileReferenceId]);
   const { state, retry } = useResource(load);
-  useEffect(() => {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
     if (state.phase === "ready" || state.phase === "empty") onFileLoaded?.(state.data.file);
   }, [onFileLoaded, state]);
 
@@ -34,11 +37,16 @@ export function ArtifactPanel({
   </aside>;
 }
 
+/** 渲染「Preview」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function Preview({ value }: { value: Awaited<ReturnType<typeof controlApi.filePreview>> }) {
   if (value.content.kind === "static_html") return <HtmlPreviewFrame csp={value.content.csp} html={value.content.html} title={value.file.displayName} />;
   if (value.content.kind === "markdown" || value.content.kind === "text") return <pre className="artifact-text">{value.content.kind === "markdown" ? value.content.markdown : value.content.text}</pre>;
   if (value.content.kind === "image") return <img alt={value.file.displayName} src={controlApi.contentUrl(value.file.fileReferenceId)} />;
   if (value.content.kind === "pdf") return <iframe src={controlApi.contentUrl(value.file.fileReferenceId)} title={value.file.displayName} />;
-  if (value.content.kind === "pptx") return <PptxPreview contentUrl={controlApi.contentUrl(value.file.fileReferenceId)} title={value.file.displayName} />;
+  if (value.content.kind === "pptx") return <PptxPreview
+    byteLength={value.file.byteLength}
+    contentUrl={controlApi.contentUrl(value.file.fileReferenceId)}
+    title={value.file.displayName}
+  />;
   return <div className="product-state"><FileText size={20} /><strong>暂不支持安全预览</strong><p>该类型未开放下载端点；请让 Agent 转换为 Markdown、静态 HTML、图片或 PDF。</p></div>;
 }

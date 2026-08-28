@@ -5,6 +5,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_MAX_BUFFER = 16 * 1024 * 1024;
 const TERMINATION_GRACE_MS = 250;
 
+/** 描述「GitCommandOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface GitCommandOptions {
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
@@ -12,6 +13,7 @@ export interface GitCommandOptions {
   maxBuffer?: number;
 }
 
+/** 描述「ProcessTreeTermination」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ProcessTreeTermination =
   | { kind: "taskkill"; command: "taskkill"; args: string[] }
   | { kind: "process_group"; pid: number };
@@ -24,7 +26,8 @@ export function runGitCommand(
   args: string[],
   options: GitCommandOptions,
 ): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolveCommand, rejectCommand) => {
+  return new Promise(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
+(resolveCommand, rejectCommand) => {
     const detached = process.platform !== "win32";
     const child = spawn("git", args, {
       detached,
@@ -41,11 +44,14 @@ export function runGitCommand(
     let settled = false;
     let forceTimer: NodeJS.Timeout | undefined;
 
-    const terminate = () => {
+    const terminate = /** 执行「terminate」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => {
       signalProcessTree(child.pid, "SIGTERM");
-      forceTimer = setTimeout(() => signalProcessTree(child.pid, "SIGKILL"), TERMINATION_GRACE_MS);
+      forceTimer = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => signalProcessTree(child.pid, "SIGKILL"), TERMINATION_GRACE_MS);
     };
-    const collect = (target: Buffer[], chunk: Buffer) => {
+    const collect = /** 执行「collect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(target: Buffer[], chunk: Buffer) => {
       target.push(chunk);
       outputBytes += chunk.byteLength;
       if (outputBytes > maxBuffer && !overflowed) {
@@ -53,22 +59,27 @@ export function runGitCommand(
         terminate();
       }
     };
-    child.stdout.on("data", (chunk: Buffer) => collect(stdout, chunk));
-    child.stderr.on("data", (chunk: Buffer) => collect(stderr, chunk));
+    child.stdout.on("data", /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(chunk: Buffer) => collect(stdout, chunk));
+    child.stderr.on("data", /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(chunk: Buffer) => collect(stderr, chunk));
 
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => {
       timedOut = true;
       terminate();
     }, options.timeoutMs);
 
-    child.on("error", (error) => {
+    child.on("error", /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       if (forceTimer) clearTimeout(forceTimer);
       rejectCommand(error);
     });
-    child.on("close", (code, signal) => {
+    child.on("close", /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
@@ -92,6 +103,7 @@ export function runGitCommand(
   });
 }
 
+/** 根据已校验输入构建「buildGitEnvironment」结果，不额外持有调用方的大对象。 */
 export function buildGitEnvironment(
   base: NodeJS.ProcessEnv,
   detectedProxy?: string,
@@ -109,6 +121,7 @@ export function buildGitEnvironment(
   return env;
 }
 
+/** 执行「resolveGitEnvironment」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export async function resolveGitEnvironment(): Promise<NodeJS.ProcessEnv> {
   if (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy) {
     return buildGitEnvironment(process.env);
@@ -127,6 +140,7 @@ export async function resolveGitEnvironment(): Promise<NodeJS.ProcessEnv> {
   }
 }
 
+/** 校验并规范化「parseMacOSHttpsProxy」输入，非法数据直接返回明确错误。 */
 export function parseMacOSHttpsProxy(value: string): string | undefined {
   const fields = new Map<string, string>();
   for (const line of value.split(/\r?\n/)) {
@@ -140,12 +154,14 @@ export function parseMacOSHttpsProxy(value: string): string | undefined {
   return `http://${host}:${port}`;
 }
 
+/** 执行「processTreeTermination」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function processTreeTermination(platform: NodeJS.Platform, pid: number): ProcessTreeTermination {
   return platform === "win32"
     ? { kind: "taskkill", command: "taskkill", args: ["/PID", String(pid), "/T", "/F"] }
     : { kind: "process_group", pid: -pid };
 }
 
+/** 执行「signalProcessTree」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function signalProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {
   if (!pid) return;
   const termination = processTreeTermination(process.platform, pid);
@@ -154,7 +170,8 @@ function signalProcessTree(pid: number | undefined, signal: NodeJS.Signals): voi
       stdio: "ignore",
       windowsHide: true,
     });
-    killer.on("error", () => undefined);
+    killer.on("error", /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => undefined);
     killer.unref();
     return;
   }

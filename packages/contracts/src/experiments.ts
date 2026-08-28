@@ -4,6 +4,7 @@ import { isRecord, requiredString, stableJson } from "./common.js";
 import type { ReasoningProfile, ResolvedReasoningSnapshot } from "./reasoning.js";
 import { parseReasoningProfile } from "./reasoning.js";
 
+/** 描述「ExperimentContextPolicy」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentContextPolicy {
   systemPrompt: string;
   builtinTools: BuiltinToolBinding[];
@@ -13,6 +14,7 @@ export interface ExperimentContextPolicy {
   memoryPolicy: { mode: "off" };
 }
 
+/** 描述「ExperimentVariant」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentVariant {
   variantId: string;
   label: "A" | "B" | "C";
@@ -20,6 +22,7 @@ export interface ExperimentVariant {
   policy: ExperimentContextPolicy;
 }
 
+/** 描述「ExperimentDraftInput」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentDraftInput {
   name: string;
   mode: "fresh_prompt" | "history_turn";
@@ -31,9 +34,12 @@ export interface ExperimentDraftInput {
   variants: ExperimentVariant[];
 }
 
+/** 描述「ExperimentStatus」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ExperimentStatus = "draft" | "ready" | "running" | "completed" | "partially_failed" | "failed" | "cancelled";
+/** 描述「ExperimentRunStatus」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ExperimentRunStatus = "pending" | "session_created" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
 
+/** 描述「ExperimentRun」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentRun {
   runId: string;
   variantId: string;
@@ -51,6 +57,7 @@ export interface ExperimentRun {
   completedAt?: string;
 }
 
+/** 描述「ExperimentRunRuntimeFacts」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentRunRuntimeFacts {
   agentSnapshotHash?: string;
   capabilityGenerations: number;
@@ -71,6 +78,7 @@ export interface ExperimentRunRuntimeFacts {
   stopReason?: string;
 }
 
+/** 描述「ContextPreviewInput」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextPreviewInput {
   modelStudentId: string;
   promptText: string;
@@ -78,6 +86,7 @@ export interface ContextPreviewInput {
   sourceTurnId?: string;
 }
 
+/** 描述「ContextPreviewResponse」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextPreviewResponse {
   schemaVersion: 1;
   agentSnapshotHash: string;
@@ -110,12 +119,14 @@ export interface LegacyExperimentRecordV1 {
 /** @deprecated 新代码应显式使用 LegacyExperimentRecordV1 或 AnyExperimentRecord。 */
 export type ExperimentRecord = LegacyExperimentRecordV1;
 
+/** 描述「ExperimentSourceAgentRefV2」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentSourceAgentRefV2 {
   agentId: string;
   name: string;
   updatedAt: string;
 }
 
+/** 描述「ExperimentTestDraftV2」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentTestDraftV2 {
   testId: string;
   label: "A" | "B" | "C";
@@ -125,6 +136,7 @@ export interface ExperimentTestDraftV2 {
   policy: ExperimentContextPolicy;
 }
 
+/** 描述「ExperimentDraftV2」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentDraftV2 {
   schemaVersion: 2;
   name: string;
@@ -135,6 +147,7 @@ export interface ExperimentDraftV2 {
   tests: ExperimentTestDraftV2[];
 }
 
+/** 描述「ExperimentTestSnapshotV2」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentTestSnapshotV2 {
   snapshotId: string;
   testId: string;
@@ -168,6 +181,7 @@ export interface ExperimentTestSnapshotV2 {
   frozenAt: string;
 }
 
+/** 描述「ExperimentRunV2」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentRunV2 {
   runId: string;
   testId: string;
@@ -185,6 +199,7 @@ export interface ExperimentRunV2 {
   interventions?: ExperimentInterventionFact[];
 }
 
+/** 描述「ExperimentInterventionFact」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentInterventionFact {
   interactionId: string;
   kind: "permission" | "elicitation";
@@ -194,6 +209,7 @@ export interface ExperimentInterventionFact {
   resolvedAt: string;
 }
 
+/** 描述「ExperimentRecordV2」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentRecordV2 {
   schemaVersion: 2;
   experimentId: string;
@@ -214,20 +230,24 @@ export interface ExperimentRecordV2 {
   updatedAt: string;
 }
 
+/** 描述「AnyExperimentRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type AnyExperimentRecord = LegacyExperimentRecordV1 | ExperimentRecordV2;
 
+/** 描述「ContextPreviewInputV2」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextPreviewInputV2 {
   schemaVersion: 2;
   promptText: string;
   test: ExperimentTestDraftV2;
 }
 
+/** 描述「ContextPreviewDiagnostic」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextPreviewDiagnostic {
   code: string;
   message: string;
   path?: string;
 }
 
+/** 描述「ContextPreviewResponseV2」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextPreviewResponseV2 {
   schemaVersion: 2;
   runnable: boolean;
@@ -253,6 +273,7 @@ export interface ContextPreviewResponseV2 {
   };
 }
 
+/** 描述「AnnotationVerdict」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type AnnotationVerdict = "effective" | "partial" | "none";
 
 /**
@@ -290,17 +311,20 @@ export interface ExperimentAnnotationWorksheet {
   };
 }
 
+/** 描述「UnderstandingAnnotationFacts」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface UnderstandingAnnotationFacts {
   requirements: Array<{ requirementId: string; label: string; weight: number }>;
   marks: Array<{ variantId: string; requirementId: string; verdict: "met" | "missed" }>;
   completedAt?: string;
 }
 
+/** 描述「PlanningAnnotationFacts」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PlanningAnnotationFacts {
   marks: Array<{ variantId: string; stepId: string; verdict: AnnotationVerdict }>;
   completedAt?: string;
 }
 
+/** 描述「OutputAnnotationFacts」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface OutputAnnotationFacts {
   marks: Array<{
     variantId: string;
@@ -313,6 +337,7 @@ export interface OutputAnnotationFacts {
   completedAt?: string;
 }
 
+/** 描述「ExecutionMetricsSnapshot」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExecutionMetricsSnapshot {
   evaluationRecordId: string;
   variantId: string;
@@ -331,6 +356,7 @@ export interface ExecutionMetricsSnapshot {
   totalOutputTokens: number;
 }
 
+/** 描述「ExecutionComponentScores」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExecutionComponentScores {
   completion: number;
   toolReliability: number;
@@ -340,6 +366,7 @@ export interface ExecutionComponentScores {
   responsiveness: number;
 }
 
+/** 描述「ExecutionScoreResult」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExecutionScoreResult {
   variantId: string;
   score: number;
@@ -347,11 +374,13 @@ export interface ExecutionScoreResult {
   components: ExecutionComponentScores;
 }
 
+/** 描述「ManualDimensionScores」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ManualDimensionScores {
   complete: boolean;
   byVariant: Record<string, { understanding?: number; planning?: number; output?: number }>;
 }
 
+/** 描述「VariantFourDimensionScore」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface VariantFourDimensionScore {
   variantId: string;
   dimensionScores: { understanding?: number; planning?: number; output?: number; execution: number };
@@ -359,6 +388,7 @@ export interface VariantFourDimensionScore {
   totalScore?: number;
 }
 
+/** 描述「ExperimentScorecard」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentScorecard {
   schemaVersion: 1;
   scorecardId: string;
@@ -387,6 +417,7 @@ export interface ExperimentScorecard {
   updatedAt: string;
 }
 
+/** 校验并规范化「parseExperimentDraftInput」输入，非法数据直接返回明确错误。 */
 export function parseExperimentDraftInput(value: unknown): ExperimentDraftInput {
   if (!isRecord(value)) throw new Error("Experiment draft 必须是对象");
   if (value.mode !== "fresh_prompt" && value.mode !== "history_turn") throw new Error("Experiment mode 无效");
@@ -394,11 +425,15 @@ export function parseExperimentDraftInput(value: unknown): ExperimentDraftInput 
     throw new Error("Experiment 必须有 2 到 3 个 lane");
   }
   const variants = value.variants.map(parseVariant);
-  if (new Set(variants.map((item) => item.variantId)).size !== variants.length) throw new Error("variantId 必须唯一");
-  if (new Set(variants.map((item) => item.label)).size !== variants.length) throw new Error("variant label 必须唯一");
+  if (new Set(variants.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.variantId)).size !== variants.length) throw new Error("variantId 必须唯一");
+  if (new Set(variants.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.label)).size !== variants.length) throw new Error("variant label 必须唯一");
   if (value.mode === "fresh_prompt") {
-    if (variants.some((item) => item.mode !== "rerun")) throw new Error("fresh 实验的 lane 必须 rerun");
-    if (new Set(variants.map((item) => stableJson(item.policy))).size < 2) throw new Error("fresh 实验至少需要两个策略差异");
+    if (variants.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.mode !== "rerun")) throw new Error("fresh 实验的 lane 必须 rerun");
+    if (new Set(variants.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => stableJson(item.policy))).size < 2) throw new Error("fresh 实验至少需要两个策略差异");
   }
   const sourceTurnId = typeof value.sourceTurnId === "string" && value.sourceTurnId.length > 0 ? value.sourceTurnId : undefined;
   if (value.mode === "history_turn" && (!sourceTurnId || variants[0]?.mode !== "reuse_snapshot")) {
@@ -416,6 +451,7 @@ export function parseExperimentDraftInput(value: unknown): ExperimentDraftInput 
   };
 }
 
+/** 校验并规范化「parseExperimentDraftV2」输入，非法数据直接返回明确错误。 */
 export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
   if (!isRecord(value)) throw new Error("Experiment V2 draft 必须是对象");
   assertOnlyKeys(value, ["schemaVersion", "name", "promptText", "sourceRef", "toolUseWasExpected", "worksheetModelStudentId", "tests"], "Experiment V2 draft");
@@ -424,10 +460,13 @@ export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
     throw new Error("Experiment V2 必须有 2 到 3 个 Test");
   }
   const tests = value.tests.map(parseExperimentTestDraftV2);
-  if (new Set(tests.map((item) => item.testId)).size !== tests.length) throw new Error("testId 必须唯一");
-  if (new Set(tests.map((item) => item.label)).size !== tests.length) throw new Error("Test label 必须唯一");
+  if (new Set(tests.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.testId)).size !== tests.length) throw new Error("testId 必须唯一");
+  if (new Set(tests.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.label)).size !== tests.length) throw new Error("Test label 必须唯一");
   const expectedLabels = tests.length === 2 ? ["A", "B"] : ["A", "B", "C"];
-  if (tests.some((item, index) => item.label !== expectedLabels[index])) throw new Error("Test 必须按 A、B、C 排列");
+  if (tests.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item, index) => item.label !== expectedLabels[index])) throw new Error("Test 必须按 A、B、C 排列");
   let sourceRef: ExperimentDraftV2["sourceRef"];
   if (value.sourceRef !== undefined) {
     if (!isRecord(value.sourceRef)) throw new Error("sourceRef 格式无效");
@@ -446,6 +485,7 @@ export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
   };
 }
 
+/** 校验并规范化「parseContextPreviewInputV2」输入，非法数据直接返回明确错误。 */
 export function parseContextPreviewInputV2(value: unknown): ContextPreviewInputV2 {
   if (!isRecord(value)) throw new Error("Context Preview V2 输入必须是对象");
   assertOnlyKeys(value, ["schemaVersion", "promptText", "test"], "Context Preview V2");
@@ -457,6 +497,7 @@ export function parseContextPreviewInputV2(value: unknown): ContextPreviewInputV
   };
 }
 
+/** 校验并规范化「parseExperimentTestDraftV2」输入，非法数据直接返回明确错误。 */
 function parseExperimentTestDraftV2(value: unknown): ExperimentTestDraftV2 {
   if (!isRecord(value)) throw new Error("Experiment Test 必须是对象");
   assertOnlyKeys(value, ["testId", "label", "sourceAgent", "modelStudentId", "reasoningProfile", "policy"], "Experiment Test");
@@ -486,10 +527,14 @@ function parseExperimentTestDraftV2(value: unknown): ExperimentTestDraftV2 {
   };
 }
 
+/** 执行「calculateExecutionScores」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function calculateExecutionScores(metrics: ExecutionMetricsSnapshot[]): ExecutionScoreResult[] {
-  const ttftValues = metrics.flatMap((item) => item.firstTokenLatencyMs === undefined ? [] : [item.firstTokenLatencyMs]);
-  const durations = metrics.map((item) => item.totalDurationMs);
-  return metrics.map((item) => {
+  const ttftValues = metrics.flatMap(/** 执行「ttftValues」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => item.firstTokenLatencyMs === undefined ? [] : [item.firstTokenLatencyMs]);
+  const durations = metrics.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.totalDurationMs);
+  return metrics.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => {
     const totalTools = item.toolSuccessCount + item.toolFailureCount;
     const toolReliability = item.toolCallCount === 0 && !item.toolUseWasExpected
       ? 25
@@ -504,7 +549,8 @@ export function calculateExecutionScores(metrics: ExecutionMetricsSnapshot[]): E
       noRepeatedCalls: item.hasRepeatedToolCall ? 0 : 5,
       responsiveness: round2(ttft + duration),
     };
-    const raw = Math.round(Object.values(components).reduce((sum, score) => sum + score, 0));
+    const raw = Math.round(Object.values(components).reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
+(sum, score) => sum + score, 0));
     return {
       variantId: item.variantId,
       score: item.normallyCompleted ? raw : Math.min(raw, 59),
@@ -514,45 +560,56 @@ export function calculateExecutionScores(metrics: ExecutionMetricsSnapshot[]): E
   });
 }
 
+/** 执行「scoreManualDimensions」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function scoreManualDimensions(input: {
   variantIds: string[];
   understanding: UnderstandingAnnotationFacts;
   planning: PlanningAnnotationFacts;
   output: OutputAnnotationFacts & { answers: Array<{ variantId: string; text: string }> };
 }): ManualDimensionScores {
-  const byVariant = Object.fromEntries(input.variantIds.map((id) => [id, {}])) as ManualDimensionScores["byVariant"];
+  const byVariant = Object.fromEntries(input.variantIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(id) => [id, {}])) as ManualDimensionScores["byVariant"];
   let complete = Boolean(input.understanding.completedAt && input.planning.completedAt && input.output.completedAt);
   for (const variantId of input.variantIds) {
-    const understandingMarks = input.understanding.marks.filter((mark) => mark.variantId === variantId);
-    const marksByRequirement = new Map(understandingMarks.map((mark) => [mark.requirementId, mark.verdict]));
-    const totalWeight = input.understanding.requirements.reduce((sum, requirement) => sum + requirement.weight, 0);
+    const understandingMarks = input.understanding.marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mark) => mark.variantId === variantId);
+    const marksByRequirement = new Map(understandingMarks.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(mark) => [mark.requirementId, mark.verdict]));
+    const totalWeight = input.understanding.requirements.reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
+(sum, requirement) => sum + requirement.weight, 0);
     const understoodWeight = input.understanding.requirements.reduce(
-      (sum, requirement) => sum + (marksByRequirement.get(requirement.requirementId) === "met" ? requirement.weight : 0),
+      /** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
+(sum, requirement) => sum + (marksByRequirement.get(requirement.requirementId) === "met" ? requirement.weight : 0),
       0,
     );
     if (totalWeight <= 0 || marksByRequirement.size !== input.understanding.requirements.length) complete = false;
     byVariant[variantId]!.understanding = totalWeight <= 0 ? 0 : Math.round(100 * understoodWeight / totalWeight);
 
-    const planMarks = input.planning.marks.filter((mark) => mark.variantId === variantId);
+    const planMarks = input.planning.marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mark) => mark.variantId === variantId);
     if (planMarks.length === 0) complete = false;
     byVariant[variantId]!.planning = planMarks.length === 0 ? 0 : Math.round(
-      100 * planMarks.reduce((sum, mark) => sum + verdictWeight(mark.verdict), 0) / planMarks.length,
+      100 * planMarks.reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
+(sum, mark) => sum + verdictWeight(mark.verdict), 0) / planMarks.length,
     );
 
-    const answer = input.output.answers.find((item) => item.variantId === variantId)?.text;
+    const answer = input.output.answers.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.variantId === variantId)?.text;
     if (answer === undefined || answer.replace(/\s/gu, "").length === 0) {
       complete = false;
       byVariant[variantId]!.output = 0;
     } else {
       byVariant[variantId]!.output = scoreOutputCoverage(
         answer,
-        input.output.marks.filter((mark) => mark.variantId === variantId),
+        input.output.marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(mark) => mark.variantId === variantId),
       );
     }
   }
   return { complete, byVariant };
 }
 
+/** 校验并规范化「parseVariant」输入，非法数据直接返回明确错误。 */
 function parseVariant(value: unknown): ExperimentVariant {
   if (!isRecord(value)) throw new Error("Experiment variant 必须是对象");
   if (value.label !== "A" && value.label !== "B" && value.label !== "C") throw new Error("variant label 必须为 A/B/C");
@@ -574,6 +631,7 @@ function parseVariant(value: unknown): ExperimentVariant {
   };
 }
 
+/** 执行「lowerIsBetter」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function lowerIsBetter(value: number, comparable: number[]): number {
   if (comparable.length <= 1) return 1;
   const min = Math.min(...comparable);
@@ -581,33 +639,56 @@ function lowerIsBetter(value: number, comparable: number[]): number {
   return min === max ? 1 : 1 - (value - min) / (max - min);
 }
 
+/** 执行「verdictWeight」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function verdictWeight(verdict: AnnotationVerdict): number {
   return verdict === "effective" ? 1 : verdict === "partial" ? 0.5 : 0;
 }
 
+/** 执行「scoreOutputCoverage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function scoreOutputCoverage(text: string, marks: OutputAnnotationFacts["marks"]): number {
-  const weights = Array.from({ length: text.length }, () => 0);
-  for (const mark of marks) {
+  const intervals = marks.flatMap(/** 执行「intervals」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(mark) => {
     const start = Math.max(0, Math.min(text.length, Math.trunc(mark.start)));
     const end = Math.max(start, Math.min(text.length, Math.trunc(mark.end)));
     const weight = verdictWeight(mark.verdict);
-    for (let index = start; index < end; index += 1) weights[index] = Math.max(weights[index] ?? 0, weight);
-  }
+    return start < end && weight > 0 ? [{ start, end, weight }] : [];
+  });
+  const starts = intervals.toSorted(/** 执行「starts」主流程，传播取消与失败并在结束时清理临时资源。 */
+(left, right) => left.start - right.start);
+  const ends = intervals.toSorted(/** 执行「ends」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(left, right) => left.end - right.end);
+  let startIndex = 0;
+  let endIndex = 0;
+  let fullWeight = 0;
+  let partialWeight = 0;
   let total = 0;
   let earned = 0;
   for (let index = 0; index < text.length; index += 1) {
+    while ((ends[endIndex]?.end ?? Number.POSITIVE_INFINITY) <= index) {
+      if (ends[endIndex]?.weight === 1) fullWeight -= 1;
+      else partialWeight -= 1;
+      endIndex += 1;
+    }
+    while ((starts[startIndex]?.start ?? Number.POSITIVE_INFINITY) <= index) {
+      if (starts[startIndex]?.weight === 1) fullWeight += 1;
+      else partialWeight += 1;
+      startIndex += 1;
+    }
     if (/\s/u.test(text[index] ?? "")) continue;
     total += 1;
-    earned += weights[index] ?? 0;
+    earned += fullWeight > 0 ? 1 : partialWeight > 0 ? 0.5 : 0;
   }
   return total === 0 ? 0 : Math.round(100 * earned / total);
 }
 
+/** 执行「round2」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/** 校验并规范化「assertOnlyKeys」输入，非法数据直接返回明确错误。 */
 function assertOnlyKeys(value: Record<string, unknown>, allowed: string[], label: string): void {
-  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  const unknown = Object.keys(value).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(key) => !allowed.includes(key));
   if (unknown.length > 0) throw new Error(`${label} 包含未知字段: ${unknown.join(", ")}`);
 }

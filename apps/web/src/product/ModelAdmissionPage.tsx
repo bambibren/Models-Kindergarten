@@ -46,6 +46,7 @@ import {
   type ModelAdmissionViewState,
 } from "./model-admission-state.js";
 
+/** 渲染「ModelAdmissionPage」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ModelAdmissionPage() {
   const [state, setState] = useState<ModelAdmissionViewState>(createModelAdmissionState);
   const [presets, setPresets] = useState<ModelProviderPresetView[]>([]);
@@ -53,10 +54,12 @@ export function ModelAdmissionPage() {
   const alive = useRef(true);
   const secret = useRef("");
   const preset = useMemo(
-    () => selectedModelProviderPreset(presets, state.draft.presetId),
+    /** 缓存「preset」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => selectedModelProviderPreset(presets, state.draft.presetId),
     [presets, state.draft.presetId],
   );
-  const validation = useMemo(() => validateModelAdmissionDraft(state.draft, preset), [state.draft, preset]);
+  const validation = useMemo(/** 缓存「validation」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => validateModelAdmissionDraft(state.draft, preset), [state.draft, preset]);
   const contextWindowError = validateOptionalContextWindowTokens(state.draft.contextWindowTokens);
   const errors = visibleModelAdmissionErrors(state.draft, {
     ...validation.errors,
@@ -67,33 +70,43 @@ export function ModelAdmissionPage() {
     && Boolean(state.test.snapshot)
     && state.defaultReasoningProfile !== undefined;
 
-  useEffect(() => {
-    void controlApi.modelProviderPresets().then(({ items }) => {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
+    void controlApi.modelProviderPresets().then(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+({ items }) => {
       if (!alive.current) return;
       setPresets(items);
-      setState((current) => initializeModelAdmissionPresets(current, items));
-    }, (error) => {
+      setState(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(current) => initializeModelAdmissionPresets(current, items));
+    }, /** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+(error) => {
       if (!alive.current) return;
-      setState((current) => ({ ...current, phase: "failed", error: errorMessage(error) }));
+      setState(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(current) => ({ ...current, phase: "failed", error: errorMessage(error) }));
     });
-    return () => {
+    return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => {
       alive.current = false;
       secret.current = "";
     };
   }, []);
 
-  function changeConnection(patch: Parameters<typeof updateModelAdmissionConnection>[1]) {
+  /** 执行「changeConnection」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function changeConnection(patch: Parameters<typeof updateModelAdmissionConnection>[1]) {
     if (patch.apiKey !== undefined) secret.current = patch.apiKey;
-    setState((current) => updateModelAdmissionConnection(current, patch));
+    setState(/** 执行「changeConnection」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(current) => updateModelAdmissionConnection(current, patch));
   }
 
-  function changePreset(next: ModelProviderPresetView) {
+  /** 执行「changePreset」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function changePreset(next: ModelProviderPresetView) {
     secret.current = "";
     setShowKey(false);
-    setState((current) => selectModelAdmissionPreset(current, next));
+    setState(/** 执行「changePreset」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(current) => selectModelAdmissionPreset(current, next));
   }
 
-  async function testConnection(event?: FormEvent) {
+  /** 执行「testConnection」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async function testConnection(event?: FormEvent) {
     event?.preventDefault();
     const checked = validateModelAdmissionDraft(state.draft, preset);
     if (!checked.valid || busy || !preset) return;
@@ -105,7 +118,8 @@ export function ModelAdmissionPage() {
       }, preset));
       if (!alive.current) return;
       if (result.state !== "succeeded" || !result.snapshot) {
-        setState((current) => ({
+        setState(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(current) => ({
           phase: "failed",
           draft: current.draft,
           fieldErrors: {},
@@ -114,10 +128,12 @@ export function ModelAdmissionPage() {
         }));
         return;
       }
-      setState((current) => acceptSuccessfulModelStudentTest(current, result));
+      setState(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(current) => acceptSuccessfulModelStudentTest(current, result));
     } catch (error) {
       if (!alive.current) return;
-      setState((current) => ({
+      setState(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(current) => ({
         phase: "failed",
         draft: current.draft,
         fieldErrors: controlFieldErrors(error),
@@ -126,9 +142,11 @@ export function ModelAdmissionPage() {
     }
   }
 
-  async function install() {
+  /** 执行「install」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async function install() {
     if (!hasVerifiedTest || !state.test || busy || contextWindowError) return;
-    setState((current) => {
+    setState(/** 执行「install」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(current) => {
       const { error: _error, ...next } = current;
       return { ...next, phase: "installing" };
     });
@@ -137,14 +155,16 @@ export function ModelAdmissionPage() {
       secret.current = "";
       setShowKey(false);
       if (!alive.current) return;
-      setState((current) => ({
+      setState(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(current) => ({
         ...current,
         draft: { ...current.draft, apiKey: "" },
       }));
       location.href = modelStudentHomeUrl(student.modelStudentId);
     } catch (error) {
       if (!alive.current) return;
-      setState((current) => ({
+      setState(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(current) => ({
         ...current,
         phase: "failed",
         fieldErrors: controlFieldErrors(error),
@@ -162,18 +182,21 @@ export function ModelAdmissionPage() {
       </header>
 
       <div className="product-mcp-layout product-admission-layout">
-        <form className="product-form product-admission-form" noValidate onSubmit={(event) => void testConnection(event)}>
+        <form className="product-form product-admission-form" noValidate onSubmit={/** 处理「onSubmit」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => void testConnection(event)}>
           <section>
             <header><Network size={16} /><div><strong>接入方式</strong><small>不同协议由各自 Adapter 验证和运行</small></div></header>
             <div className="product-admission-presets" role="radiogroup" aria-label="模型接入方式">
-              {presets.map((item) => <button
+              {presets.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => <button
                 aria-checked={item.presetId === state.draft.presetId}
                 className={item.presetId === state.draft.presetId ? "selected" : ""}
                 disabled={busy}
                 key={item.presetId}
                 role="radio"
                 type="button"
-                onClick={() => changePreset(item)}
+                onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => changePreset(item)}
               ><span><strong>{item.displayName}</strong><small>{item.description}</small></span>{item.presetId === state.draft.presetId && <Check size={14} />}</button>)}
               {state.phase === "loading" && <span className="product-admission-presets-loading">正在读取可用接入方式…</span>}
             </div>
@@ -190,7 +213,9 @@ export function ModelAdmissionPage() {
                 maxLength={80}
                 placeholder="例如：大聪明"
                 value={state.draft.displayName}
-                onChange={(event) => setState((current) => updateModelAdmissionDisplayName(current, event.target.value))}
+                onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => setState(/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(current) => updateModelAdmissionDisplayName(current, event.target.value))}
               />
             </AdmissionField>
           </section>
@@ -208,7 +233,8 @@ export function ModelAdmissionPage() {
                 maxLength={2_048}
                 placeholder="https://api.example.com/v1"
                 value={state.draft.baseUrl}
-                onChange={(event) => changeConnection({ baseUrl: event.target.value })}
+                onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => changeConnection({ baseUrl: event.target.value })}
               /></div>
             </AdmissionField>}
             <AdmissionField label="模型 ID" error={errors.model} help="使用服务商要求的原始模型 ID；MK 不会根据名称猜测能力。" inputId="model-provider-id">
@@ -220,7 +246,8 @@ export function ModelAdmissionPage() {
                 maxLength={200}
                 placeholder="服务商提供的模型 ID"
                 value={state.draft.model}
-                onChange={(event) => changeConnection({ model: event.target.value })}
+                onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => changeConnection({ model: event.target.value })}
               /></div>
             </AdmissionField>
             <AdmissionField label="上下文窗口（tokens，可选）" error={errors.contextWindowTokens} help="留空表示不填写；MK 不会探测、预填或推断这个数值。" inputId="model-context-window-tokens">
@@ -236,7 +263,9 @@ export function ModelAdmissionPage() {
                 step={1}
                 type="number"
                 value={state.draft.contextWindowTokens}
-                onChange={(event) => setState((current) => updateModelAdmissionContextWindowTokens(current, event.target.value))}
+                onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => setState(/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(current) => updateModelAdmissionContextWindowTokens(current, event.target.value))}
               /></div>
             </AdmissionField>
             <AdmissionField label={preset?.auth.apiKeyLabel ?? "API Key"} error={errors.apiKey} help="凭据格式由服务商决定；MK 不根据前缀判断服务商或能力。" inputId="model-api-key">
@@ -251,17 +280,22 @@ export function ModelAdmissionPage() {
                 spellCheck={false}
                 type={showKey ? "text" : "password"}
                 value={state.draft.apiKey}
-                onChange={(event) => changeConnection({ apiKey: event.target.value })}
-              /><button aria-label={showKey ? "隐藏 API Key" : "显示 API Key"} disabled={busy} type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>
+                onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => changeConnection({ apiKey: event.target.value })}
+              /><button aria-label={showKey ? "隐藏 API Key" : "显示 API Key"} disabled={busy} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setShowKey(/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => !value)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>
             </AdmissionField>
             <div className="product-admission-caution"><ShieldCheck size={15} /><p>点击体检会产生少量真实模型调用，可能消耗服务商额度。API Key 与探测内容只会发送到当前选择的服务；使用自定义地址时，请确认该地址可信。</p></div>
           </section>
 
           <footer>
             <span className={state.phase === "failed" ? "failed" : ""}>{actionMessage(state)}</span>
-            {hasVerifiedTest && state.phase !== "installing" && <button disabled={busy} type="button" onClick={() => void testConnection()}><RefreshCw size={14} />重新体检</button>}
+            {hasVerifiedTest && state.phase !== "installing" && <button disabled={busy} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => void testConnection()}><RefreshCw size={14} />重新体检</button>}
             {hasVerifiedTest || state.phase === "installing"
-              ? <button disabled={busy || Boolean(contextWindowError)} type="button" onClick={() => void install()}><Check size={14} />{state.phase === "installing" ? "正在入园" : state.phase === "failed" ? "重试入园" : "确认入园"}</button>
+              ? <button disabled={busy || Boolean(contextWindowError)} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => void install()}><Check size={14} />{state.phase === "installing" ? "正在入园" : state.phase === "failed" ? "重试入园" : "确认入园"}</button>
               : <button disabled={busy || !validation.valid} type="submit"><Activity size={14} />{state.phase === "testing" ? "正在体检" : "测试连接与能力"}</button>}
           </footer>
         </form>
@@ -274,7 +308,9 @@ export function ModelAdmissionPage() {
           {(state.phase === "verified" || state.phase === "installing" || (state.phase === "failed" && hasVerifiedTest)) && state.test?.snapshot && <AdmissionResult
             busy={busy}
             defaultReasoningProfile={state.defaultReasoningProfile ?? state.test.snapshot.reasoning.capability.defaultProfile}
-            onDefaultReasoningProfileChange={(profile) => setState((current) => updateModelAdmissionDefaultReasoningProfile(current, profile))}
+            onDefaultReasoningProfileChange={/** 处理「onDefaultReasoningProfileChange」事件，校验归属后再推进状态且避免重复提交。 */
+(profile) => setState(/** 处理「onDefaultReasoningProfileChange」事件，校验归属后再推进状态且避免重复提交。 */
+(current) => updateModelAdmissionDefaultReasoningProfile(current, profile))}
             snapshot={state.test.snapshot}
           />}
           <div className="product-admission-security"><ShieldCheck size={14} /><p>API Key 不会进入 URL、浏览器存储、聊天记录或公开模型信息。确认入园后，网页不能再次读取明文。</p></div>
@@ -284,23 +320,28 @@ export function ModelAdmissionPage() {
   </main>;
 }
 
+/** 渲染「AdmissionField」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function AdmissionField({ children, error, help, inputId, label }: { children: React.ReactNode; error: string | undefined; help: string; inputId: string; label: string }) {
   const descriptionId = `${inputId}-description`;
   return <label className="product-admission-field" htmlFor={inputId}><span>{label}</span>{children}<small className={error ? "error" : ""} id={descriptionId}>{error ?? help}</small></label>;
 }
 
+/** 渲染「AdmissionEmpty」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function AdmissionEmpty() {
   return <div className="product-admission-empty"><Gauge size={22} /><strong>等待真实体检</strong><p>选择接入方式并填写连接信息后，MK 会按对应协议验证目标模型，不会按名称套用能力。</p></div>;
 }
 
+/** 渲染「AdmissionProgress」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function AdmissionProgress({ phase }: { phase: "testing" | "installing" }) {
   return <div className="product-admission-progress"><div aria-hidden="true"><span /></div><strong>{phase === "testing" ? "正在验证目标模型" : "正在安全保存模型"}</strong><p>{phase === "testing" ? "依次检查该协议的流式终态、Tool 结果续接、用量字段与原生推理控制。" : "能力事实已经冻结，正在创建可供 Session 绑定的 ModelStudent。"}</p></div>;
 }
 
+/** 渲染「AdmissionFailure」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function AdmissionFailure({ message }: { message: string }) {
   return <div className="product-admission-failure" role="alert"><CircleAlert size={18} /><div><strong>没有完成入园</strong><p>{message}</p><small>当前输入会保留；修改连接信息后可重新体检。</small></div></div>;
 }
 
+/** 渲染「AdmissionResult」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function AdmissionResult({ busy, defaultReasoningProfile, onDefaultReasoningProfileChange, snapshot }: {
   busy: boolean;
   defaultReasoningProfile: ConcreteReasoningProfile;
@@ -320,17 +361,20 @@ function AdmissionResult({ busy, defaultReasoningProfile, onDefaultReasoningProf
   ]>;
   return <div className="product-admission-result">
     <div className="product-admission-result-heading"><span><Check size={15} /></span><div><strong>接口体检完成</strong><small>{new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(snapshot.testedAt))}</small></div></div>
-    <ul>{facts.map((fact) => { const Icon = fact.icon; return <li key={fact.label}><Icon size={13} /><span>{fact.label}</span><em className={fact.value ? "accepted" : "rejected"}>{fact.value ? "已通过" : "未通过"}</em></li>; })}</ul>
+    <ul>{facts.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(fact) => { const Icon = fact.icon; return <li key={fact.label}><Icon size={13} /><span>{fact.label}</span><em className={fact.value ? "accepted" : "rejected"}>{fact.value ? "已通过" : "未通过"}</em></li>; })}</ul>
     <ModelDefaultReasoningSelect
       capability={snapshot.reasoning.capability}
       disabled={busy}
       onChange={onDefaultReasoningProfileChange}
       value={defaultReasoningProfile}
     />
-    <section><strong>对话中可选的思考控制</strong><div className="product-admission-profile-map">{profiles.map(([profile, native]) => <span key={profile}><b>{profileLabel(profile, snapshot.reasoning.capability)}</b><code>{nativeReasoningLabel(native)}</code></span>)}</div><p>这里只展示该目标模型体检确认的原生请求参数，不代表已经评估不同设置的推理效果。</p></section>
+    <section><strong>对话中可选的思考控制</strong><div className="product-admission-profile-map">{profiles.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+([profile, native]) => <span key={profile}><b>{profileLabel(profile, snapshot.reasoning.capability)}</b><code>{nativeReasoningLabel(native)}</code></span>)}</div><p>这里只展示该目标模型体检确认的原生请求参数，不代表已经评估不同设置的推理效果。</p></section>
   </div>;
 }
 
+/** 执行「actionMessage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function actionMessage(state: ModelAdmissionViewState): string {
   if (state.phase === "loading") return "正在读取 Remote 提供的接入方式。";
   if (state.phase === "testing") return "体检会发出多次低输出上游请求，请保持页面打开。";
@@ -340,22 +384,27 @@ function actionMessage(state: ModelAdmissionViewState): string {
   return "先体检，再确认入园；不会只根据模型名称猜测能力。";
 }
 
+/** 执行「protocolLabel」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function protocolLabel(preset: ModelProviderPresetView): string {
   if (preset.protocol === "openai_responses") return "Responses API";
   if (preset.protocol === "openai_chat_completions") return "Chat Completions API";
   return "Messages API";
 }
 
+/** 执行「nativeReasoningLabel」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function nativeReasoningLabel(native: Record<string, string | number | boolean>): string {
-  return Object.entries(native).map(([key, value]) => `${key}=${String(value)}`).join(" · ") || "固定";
+  return Object.entries(native).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+([key, value]) => `${key}=${String(value)}`).join(" · ") || "固定";
 }
 
+/** 执行「testStateMessage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function testStateMessage(state: ModelStudentTestRecord["state"]): string {
   if (state === "expired") return "本次体检已经过期，请重新测试。";
   if (state === "testing") return "体检尚未完成，请稍后重试。";
   return "目标接口没有通过能力体检。";
 }
 
+/** 执行「controlFieldErrors」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function controlFieldErrors(error: unknown): ModelAdmissionFieldErrors {
   if (!(error instanceof ControlApiError) || !error.fieldErrors) return {};
   const result: ModelAdmissionFieldErrors = {};
@@ -366,6 +415,7 @@ function controlFieldErrors(error: unknown): ModelAdmissionFieldErrors {
   return result;
 }
 
+/** 把未知异常转换为「errorMessage」文本，避免错误序列化过程再次抛出。 */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

@@ -14,6 +14,7 @@ import { Streamdown } from "streamdown";
 import { cjk } from "@streamdown/cjk";
 import type { DemoArtifact, DemoStreamItem } from "../demo-types.js";
 
+/** 渲染「DemoChatStream」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function DemoChatStream({
   items,
   artifacts,
@@ -26,7 +27,8 @@ export function DemoChatStream({
   compact?: boolean;
 }) {
   return <div className={`mk-demo-chat-stream ${compact ? "compact" : ""}`}>
-    {items.map((item) => {
+    {items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => {
       if (item.type === "user") return <article className="mk-demo-user-turn" key={item.id}>
         <p>{item.text}</p><small>输入约 {item.inputTokens} tokens</small>
       </article>;
@@ -37,20 +39,25 @@ export function DemoChatStream({
       </details>;
       if (item.type === "mcp_boundary") return <details className="mk-demo-activity mk-demo-tool" key={item.id}>
         <summary><ShieldCheck size={14} /><strong>MCP 能力边界 · {item.agentName}</strong><small>{item.allowedMcps.length} 个已注册 · 排除 {item.excludedCount} 个</small><ChevronDown size={13} /></summary>
-        <div className="mk-demo-tool-body mk-demo-mcp-boundary-body"><p>本轮只向模型暴露以下远程 MCP 的 Tool Schema；执行器还会按同一 allowlist 二次校验调用。</p>{item.allowedMcps.length > 0 ? <ul>{item.allowedMcps.map((mcp) => <li key={mcp.id}><Server size={12} /><span><strong>{mcp.name}</strong><small>{mcp.toolCount} 个 Tools · {mcp.id}</small></span></li>)}</ul> : <strong className="mk-demo-mcp-empty">当前 Agent 未配置可用 MCP</strong>}<small>另外 {item.excludedCount} 个已安装 MCP 未注册，模型不可见也不可调用。</small></div>
+        <div className="mk-demo-tool-body mk-demo-mcp-boundary-body"><p>本轮只向模型暴露以下远程 MCP 的 Tool Schema；执行器还会按同一 allowlist 二次校验调用。</p>{item.allowedMcps.length > 0 ? <ul>{item.allowedMcps.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(mcp) => <li key={mcp.id}><Server size={12} /><span><strong>{mcp.name}</strong><small>{mcp.toolCount} 个 Tools · {mcp.id}</small></span></li>)}</ul> : <strong className="mk-demo-mcp-empty">当前 Agent 未配置可用 MCP</strong>}<small>另外 {item.excludedCount} 个已安装 MCP 未注册，模型不可见也不可调用。</small></div>
       </details>;
       if (item.type === "tool") return <details className="mk-demo-activity mk-demo-tool" key={item.id}>
         <summary>{item.status === "in_progress" ? <LoaderCircle className="mk-demo-spin" size={14} /> : <Wrench size={14} />}<strong>{item.name}</strong><small>{item.status === "completed" ? "完成" : item.status === "failed" ? "失败" : "进行中"}{item.tokens > 0 ? ` · ${item.tokens} tokens` : ""}</small><ChevronDown size={13} /></summary>
         <div className="mk-demo-tool-body">{item.source === "mcp" && <div className="mk-demo-tool-source"><Server size={12} /><span><strong>{item.serverName}</strong><small>Remote MCP · {item.toolCallId}</small></span></div>}<span>输入</span><pre>{item.input}</pre><span>输出</span><pre>{item.output}</pre></div>
       </details>;
-      const linkedArtifacts = (item.artifactIds ?? []).flatMap((id) => {
-        const artifact = artifacts.find((candidate) => candidate.id === id);
+      const linkedArtifacts = (item.artifactIds ?? []).flatMap(/** 执行「linkedArtifacts」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(id) => {
+        const artifact = artifacts.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.id === id);
         return artifact ? [artifact] : [];
       });
       return <article className="mk-demo-assistant-turn" key={item.id}>
         <Streamdown plugins={{ cjk }}>{item.markdown}</Streamdown>
         {linkedArtifacts.length > 0 && <div className="mk-demo-artifact-links">
-          {linkedArtifacts.map((artifact) => <button key={artifact.id} type="button" onClick={() => onOpenArtifact?.(artifact)}>
+          {linkedArtifacts.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(artifact) => <button key={artifact.id} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => onOpenArtifact?.(artifact)}>
             {artifact.kind === "markdown" ? <FileText size={15} /> : <FileCode2 size={15} />}
             <span><strong>{artifact.name}</strong><small>{artifact.kind === "markdown" ? "Markdown 产物" : "静态 HTML 产物"}</small></span>
           </button>)}
@@ -61,6 +68,7 @@ export function DemoChatStream({
   </div>;
 }
 
+/** 渲染「ContextItem」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function ContextItem({ item }: {
   item: Extract<DemoStreamItem, { type: "context" }>;
 }) {
@@ -68,13 +76,16 @@ function ContextItem({ item }: {
   return <section className="mk-demo-context-item">
     <div className="mk-demo-context-heading">
       <div className="mk-demo-context-title-row">
-        <button aria-expanded={expanded} className="mk-demo-context-toggle" type="button" onClick={() => setExpanded((value) => !value)}>
+        <button aria-expanded={expanded} className="mk-demo-context-toggle" type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => setExpanded(/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => !value)}>
           <Braces size={14} /><strong>上下文提要</strong><small>{item.items.length} 项 · 约 {item.totalTokens} tokens</small><ChevronDown className={expanded ? "expanded" : ""} size={13} />
         </button>
         {/* 上下文实验功能调研期间不暴露对话内入口。 */}
       </div>
       {expanded && <div className="mk-demo-context-panel">
-        {item.items.map((contextItem) => <details key={contextItem.id}>
+        {item.items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(contextItem) => <details key={contextItem.id}>
           <summary><span>{contextItem.title}</span><small>{contextItem.detail} · 约 {contextItem.tokens} tokens</small><ChevronDown size={12} /></summary>
           <pre>{contextItem.raw}</pre>
         </details>)}

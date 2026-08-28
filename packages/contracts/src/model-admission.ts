@@ -6,15 +6,20 @@ import {
   type ModelReasoningCapability,
 } from "./reasoning.js";
 
+/** 描述「ProviderProtocol」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ProviderProtocol =
   | "openai_responses"
   | "openai_chat_completions"
   | "anthropic_messages";
 
+/** 描述「ReadyModelProviderPresetId」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ReadyModelProviderPresetId = "openai" | "custom_responses" | "siliconflow";
+/** 描述「ModelProviderPresetId」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelProviderPresetId = ReadyModelProviderPresetId | "anthropic";
+/** 描述「ModelStudentTestState」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelStudentTestState = "testing" | "succeeded" | "failed" | "expired";
 
+/** 描述「ModelProviderPresetView」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelProviderPresetView {
   schemaVersion: 1;
   presetId: ModelProviderPresetId;
@@ -68,9 +73,12 @@ export interface ModelStudentCandidatePublic {
 /** 旧名称只作为源码兼容别名；持久化读取会补齐 custom_responses。 */
 export type ResponsesModelCandidatePublic = ModelStudentCandidatePublic;
 
+/** 描述「NativeReasoningValue」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type NativeReasoningValue = string | number | boolean;
+/** 描述「NativeReasoningParameters」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type NativeReasoningParameters = Record<string, NativeReasoningValue>;
 
+/** 描述「ProviderReasoningProbe」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ProviderReasoningProbe {
   capability: ModelReasoningCapability;
   /** 按产品档位保存精确原生参数；不能通过模型名称或供应商域名推断。 */
@@ -79,6 +87,7 @@ export interface ProviderReasoningProbe {
   acceptedNativeValues: NativeReasoningParameters[];
 }
 
+/** 描述「ProviderCapabilitySnapshot」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ProviderCapabilitySnapshot {
   schemaVersion: 1;
   protocol: Exclude<ProviderProtocol, "anthropic_messages">;
@@ -103,8 +112,10 @@ interface LegacyResponsesReasoningProbe {
   acceptedEfforts: string[];
 }
 
+/** 描述「ResponsesCapabilityProbe」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ResponsesCapabilityProbe = ProviderCapabilitySnapshot & { protocol: "openai_responses" };
 
+/** 描述「ModelStudentTestRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelStudentTestRecord {
   schemaVersion: 1;
   testId: string;
@@ -117,6 +128,7 @@ export interface ModelStudentTestRecord {
   expiresAt: string;
 }
 
+/** 描述「ModelStudentInstallInput」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelStudentInstallInput {
   testId: string;
   displayName?: string;
@@ -138,6 +150,7 @@ export interface ProviderConnectionView {
   updatedAt: string;
 }
 
+/** 校验并规范化「parseModelStudentCandidateInput」输入，非法数据直接返回明确错误。 */
 export function parseModelStudentCandidateInput(value: unknown): ModelStudentCandidateInput {
   if (!isRecord(value)) throw new Error("模型连接配置必须是对象");
 
@@ -156,7 +169,8 @@ export function parseModelStudentCandidateInput(value: unknown): ModelStudentCan
     "apiKey",
     ...(presetId === "custom_responses" ? ["baseUrl"] : []),
   ]);
-  const unknown = Object.keys(value).find((key) => !allowed.has(key));
+  const unknown = Object.keys(value).find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(key) => !allowed.has(key));
   if (unknown) throw new Error(`模型连接配置包含未知字段: ${unknown}`);
   const common = {
     displayName: boundedString(value.displayName, "displayName", 1, 80),
@@ -174,6 +188,7 @@ export function parseModelStudentCandidateInput(value: unknown): ModelStudentCan
 }
 
 /** @deprecated 新代码使用 parseModelStudentCandidateInput。 */
+/** 校验并规范化「parseResponsesModelCandidateInput」输入，非法数据直接返回明确错误。 */
 export function parseResponsesModelCandidateInput(value: unknown): ResponsesModelCandidateInput {
   const parsed = parseModelStudentCandidateInput(value);
   if (parsed.presetId !== "custom_responses") {
@@ -187,10 +202,12 @@ export function parseResponsesModelCandidateInput(value: unknown): ResponsesMode
   };
 }
 
+/** 校验并规范化「parseModelStudentInstallInput」输入，非法数据直接返回明确错误。 */
 export function parseModelStudentInstallInput(value: unknown): ModelStudentInstallInput {
   if (!isRecord(value)) throw new Error("模型入园请求必须是对象");
   const allowed = new Set(["testId", "displayName", "defaultReasoningProfile", "contextWindowTokens"]);
-  const unknown = Object.keys(value).find((key) => !allowed.has(key));
+  const unknown = Object.keys(value).find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(key) => !allowed.has(key));
   if (unknown) throw new Error(`模型入园请求包含未知字段: ${unknown}`);
   const testId = boundedString(value.testId, "testId", 1, 200);
   const displayName = value.displayName === undefined
@@ -210,6 +227,7 @@ export function parseModelStudentInstallInput(value: unknown): ModelStudentInsta
   };
 }
 
+/** 读取「readProviderCapabilitySnapshot」所需数据，并遵守作用域、分页与容量边界。 */
 export function readProviderCapabilitySnapshot(value: unknown): ProviderCapabilitySnapshot {
   if (!isRecord(value) || value.schemaVersion !== 1) {
     throw new Error("Provider capability snapshot 格式无效");
@@ -221,6 +239,7 @@ export function readProviderCapabilitySnapshot(value: unknown): ProviderCapabili
   return readGenericCapabilitySnapshot(value, "openai_chat_completions");
 }
 
+/** 读取「readResponsesCapabilityProbe」所需数据，并遵守作用域、分页与容量边界。 */
 export function readResponsesCapabilityProbe(value: unknown): ResponsesCapabilityProbe {
   if (!isRecord(value) || value.schemaVersion !== 1 || value.protocol !== "openai_responses") {
     throw new Error("Responses capability probe 格式无效");
@@ -258,6 +277,7 @@ export function readResponsesCapabilityProbe(value: unknown): ResponsesCapabilit
   };
 }
 
+/** 校验并规范化「normalizeModelBaseUrl」输入，非法数据直接返回明确错误。 */
 export function normalizeModelBaseUrl(value: string): string {
   let url: URL;
   try { url = new URL(value); }
@@ -272,6 +292,7 @@ export function normalizeModelBaseUrl(value: string): string {
 /** @deprecated 新代码使用 normalizeModelBaseUrl。 */
 export const normalizeResponsesBaseUrl = normalizeModelBaseUrl;
 
+/** 读取「readGenericCapabilitySnapshot」所需数据，并遵守作用域、分页与容量边界。 */
 function readGenericCapabilitySnapshot(
   value: Record<string, unknown>,
   protocol: "openai_chat_completions",
@@ -294,6 +315,7 @@ function readGenericCapabilitySnapshot(
   };
 }
 
+/** 读取「readLegacyResponsesReasoning」所需数据，并遵守作用域、分页与容量边界。 */
 function readLegacyResponsesReasoning(
   value: Record<string, unknown>,
   capability: ModelReasoningCapability,
@@ -314,18 +336,22 @@ function readLegacyResponsesReasoning(
     if (typeof effort !== "string" || effort.length === 0) throw new Error(`Responses reasoning ${profile} 缺少 effort`);
     legacy.efforts[profile] = effort;
   }
-  if (value.acceptedEfforts.some((item) => typeof item !== "string" || item.length === 0)) {
+  if (value.acceptedEfforts.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => typeof item !== "string" || item.length === 0)) {
     throw new Error("Responses acceptedEfforts 格式无效");
   }
   legacy.acceptedEfforts = [...new Set(value.acceptedEfforts as string[])];
   return {
     nativeByProfile: Object.fromEntries(
-      Object.entries(legacy.efforts).map(([profile, effort]) => [profile, { effort: effort! }]),
+      Object.entries(legacy.efforts).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+([profile, effort]) => [profile, { effort: effort! }]),
     ),
-    acceptedNativeValues: legacy.acceptedEfforts.map((effort) => ({ effort })),
+    acceptedNativeValues: legacy.acceptedEfforts.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(effort) => ({ effort })),
   };
 }
 
+/** 读取「readCapabilityCommon」所需数据，并遵守作用域、分页与容量边界。 */
 function readCapabilityCommon(value: Record<string, unknown>, label: string) {
   const streaming = booleanField(value, "streaming", label);
   const text = booleanField(value, "text", label);
@@ -337,6 +363,7 @@ function readCapabilityCommon(value: Record<string, unknown>, label: string) {
   return { streaming, text, toolCalls, toolContinuation, usage, thought, testedAt: value.testedAt };
 }
 
+/** 读取「readNativeByProfile」所需数据，并遵守作用域、分页与容量边界。 */
 function readNativeByProfile(
   value: unknown,
   capability: ModelReasoningCapability,
@@ -358,9 +385,11 @@ function readNativeByProfile(
   return result;
 }
 
+/** 读取「readAcceptedNativeValues」所需数据，并遵守作用域、分页与容量边界。 */
 function readAcceptedNativeValues(value: unknown): NativeReasoningParameters[] {
   if (!Array.isArray(value)) throw new Error("reasoning.acceptedNativeValues 格式无效");
-  return value.map((raw, index) => {
+  return value.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(raw, index) => {
     if (!isRecord(raw)) throw new Error(`reasoning.acceptedNativeValues.${index} 格式无效`);
     const result: NativeReasoningParameters = {};
     for (const [key, item] of Object.entries(raw)) {
@@ -373,36 +402,43 @@ function readAcceptedNativeValues(value: unknown): NativeReasoningParameters[] {
   });
 }
 
+/** 执行「optionalNonEmptyString」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function optionalNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
+/** 校验并取得「requiredNonEmptyString」所需对象；缺失或归属不符时立即抛出明确错误。 */
 function requiredNonEmptyString(value: unknown, field: string): string {
   const result = optionalNonEmptyString(value);
   if (!result) throw new Error(`${field} 必须是非空字符串`);
   return result;
 }
 
+/** 执行「positiveInteger」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function positiveInteger(value: unknown): number | undefined {
   return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : undefined;
 }
 
+/** 校验并取得「requiredPositiveInteger」所需对象；缺失或归属不符时立即抛出明确错误。 */
 function requiredPositiveInteger(value: unknown, field: string): number {
   const result = positiveInteger(value);
   if (result === undefined) throw new Error(`${field} 必须是正整数`);
   return result;
 }
 
+/** 执行「optionalConnectionFingerprint」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function optionalConnectionFingerprint(value: unknown): string | undefined {
   return typeof value === "string" && /^[a-f0-9]{64}$/.test(value) ? value : undefined;
 }
 
+/** 校验并取得「requiredConnectionFingerprint」所需对象；缺失或归属不符时立即抛出明确错误。 */
 function requiredConnectionFingerprint(value: unknown): string {
   const result = optionalConnectionFingerprint(value);
   if (!result) throw new Error("connectionFingerprint 必须是 SHA-256 十六进制字符串");
   return result;
 }
 
+/** 执行「boundedString」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function boundedString(
   value: unknown,
   field: string,
@@ -416,6 +452,7 @@ function boundedString(
   return result;
 }
 
+/** 执行「booleanField」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function booleanField(value: Record<string, unknown>, field: string, label: string): boolean {
   const result = value[field];
   if (typeof result !== "boolean") throw new Error(`${label} capability snapshot.${field} 格式无效`);

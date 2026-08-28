@@ -9,6 +9,7 @@ import {
   rebudgetContextMessages,
 } from "./context-assembler.js";
 
+/** 描述「ContextWindowPreview」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextWindowPreview {
   estimatedTokens: number;
   windowTokens: number;
@@ -34,7 +35,7 @@ export async function previewContextWindow(input: {
   const capacity = modelInputMessageCapacity(input.model, input.tools.length > 0);
   const messages = capacity === undefined
     ? built.messages
-    : rebudgetContextMessages(built.messages, built.observations, capacity).messages;
+    : rebudgetContextMessages(built.messages, built.messageTraces, capacity).messages;
   const serialized = [
     input.model.serializeContext({ kind: "system", content: input.systemPrompt }).value,
     input.model.serializeContext({ kind: "tools", tools: input.tools }).value,

@@ -42,12 +42,15 @@ const input: ModelInput = {
   }],
 };
 
-afterEach(() => {
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+() => {
   vi.unstubAllGlobals();
 });
 
-describe("Ollama Provider 上下文序列化", () => {
-  it("只声明 think 布尔开关可以忠实表达的两个档位", () => {
+describe("Ollama Provider 上下文序列化", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("只声明 think 布尔开关可以忠实表达的两个档位", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new OllamaProvider(student);
     expect(provider.reasoningCapability).toMatchObject({
       control: "toggle",
@@ -57,10 +60,12 @@ describe("Ollama Provider 上下文序列化", () => {
     });
     expect(provider.nativeReasoning("fast")).toEqual({ think: false });
     expect(provider.nativeReasoning("balanced")).toEqual({ think: true });
-    expect(() => provider.nativeReasoning("deep")).toThrow("不支持");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => provider.nativeReasoning("deep")).toThrow("不支持");
   });
 
-  it("按 Ollama Chat API 的实际字段序列化 system、tools 和 messages", () => {
+  it("按 Ollama Chat API 的实际字段序列化 system、tools 和 messages", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new OllamaProvider(student);
 
     expect(JSON.parse(provider.serializeContext({
@@ -87,9 +92,11 @@ describe("Ollama Provider 上下文序列化", () => {
     ]);
   });
 
-  it("展示快照与发送给 Ollama 的请求使用同一份转换结果", async () => {
+  it("展示快照与发送给 Ollama 的请求使用同一份转换结果", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     let body: Record<string, unknown> | undefined;
-    vi.stubGlobal("fetch", vi.fn(async (_url: URL, init?: RequestInit) => {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async (_url: URL, init?: RequestInit) => {
       body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response([
         JSON.stringify({ message: { content: "完成" }, done: false }),
@@ -120,8 +127,10 @@ describe("Ollama Provider 上下文序列化", () => {
     expect(body?.think).toBe(true);
   });
 
-  it("把 Ollama done_reason=length 映射为通用截断原因", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response([
+  it("把 Ollama done_reason=length 映射为通用截断原因", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response([
       JSON.stringify({ message: { content: "尚未完成" }, done: false }),
       JSON.stringify({ message: { content: "" }, done: true, done_reason: "length" }),
       "",
@@ -136,13 +145,34 @@ describe("Ollama Provider 上下文序列化", () => {
     expect(events.at(-1)).toEqual({ type: "finish", reason: "length" });
   });
 
-  it("标注工作表可关闭推理，但普通聊天默认保持推理", () => {
+  it("在无换行的流式响应超过单行上限时立即失败", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response("x".repeat(1024 * 1024 + 1), { status: 200 })));
+    const provider = new OllamaProvider(student);
+
+    await expect((/** 构造「rejects」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => {
+      for await (const _event of provider.stream(input, new AbortController().signal)) {
+        // 消费流以触发 NDJSON 边界检查。
+      }
+    })()).rejects.toMatchObject({
+      name: "ModelProviderError",
+      code: "invalid_model_response",
+      retryable: false,
+      message: expect.stringContaining("单行"),
+    });
+  });
+
+  it("标注工作表可关闭推理，但普通聊天默认保持推理", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new OllamaProvider(student);
     expect(JSON.parse(provider.serializeInput({ ...input, reasoning: "disabled" }).value).think).toBe(false);
     expect(JSON.parse(provider.serializeInput(input).value).think).toBe(true);
   });
 
-  it("将 Turn 冻结的原生 think 快照发送给 Ollama", () => {
+  it("将 Turn 冻结的原生 think 快照发送给 Ollama", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new OllamaProvider(student);
     const request = JSON.parse(provider.serializeInput({
       ...input,
@@ -159,7 +189,8 @@ describe("Ollama Provider 上下文序列化", () => {
     expect(request.think).toBe(false);
   });
 
-  it("明确标记被裁剪来源没有进入当前模型请求", () => {
+  it("明确标记被裁剪来源没有进入当前模型请求", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new OllamaProvider(student);
     expect(JSON.parse(provider.serializeContext({
       kind: "omitted",
@@ -167,9 +198,11 @@ describe("Ollama Provider 上下文序列化", () => {
     }).value)).toEqual({ sent: false, sourceIds: ["message-old"] });
   });
 
-  it("遇到其他 Provider 的 continuation 时明确拒绝，不序列化为空 assistant", () => {
+  it("遇到其他 Provider 的 continuation 时明确拒绝，不序列化为空 assistant", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new OllamaProvider(student);
-    expect(() => provider.serializeInput({
+    expect(/** 构造「toThrowError」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => provider.serializeInput({
       ...input,
       messages: [{
         role: "assistant",

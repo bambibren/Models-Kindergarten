@@ -1,12 +1,16 @@
+/** 描述「ArtifactKind」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ArtifactKind = "file" | "html_bundle";
+/** 描述「ArtifactState」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ArtifactState = "active" | "archived";
 
+/** 描述「ArtifactBlobRef」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ArtifactBlobRef {
   sha256: string;
   byteLength: number;
   mimeType: string;
 }
 
+/** 描述「HtmlBundleManifest」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface HtmlBundleManifest {
   entryPath: string;
   files: Record<string, ArtifactBlobRef>;
@@ -23,6 +27,7 @@ export interface ArtifactRevision {
   createdAt: string;
 }
 
+/** 描述「ArtifactRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ArtifactRecord {
   schemaVersion: 1;
   artifactId: string;
@@ -60,10 +65,12 @@ export interface ArtifactMention {
   byteLength: number;
 }
 
+/** 描述「ArtifactListResponse」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ArtifactListResponse {
   items: ArtifactRecord[];
 }
 
+/** 描述「ArtifactPreviewResponse」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ArtifactPreviewResponse = {
   artifact: ArtifactRecord;
   content:
@@ -76,6 +83,7 @@ export type ArtifactPreviewResponse = {
     | { kind: "unsupported"; contentUrl: string };
 };
 
+/** 描述「PptxPlaybackResponse」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PptxPlaybackResponse {
   documentServerApiUrl: string;
   config: {
@@ -104,6 +112,7 @@ export interface PptxPlaybackResponse {
 
 const OPAQUE_ARTIFACT_ID = /^[A-Za-z0-9_-]{8,160}$/;
 
+/** 校验并规范化「parseArtifactUri」输入，非法数据直接返回明确错误。 */
 export function parseArtifactUri(value: string): string | undefined {
   const prefix = "artifact://";
   if (!value.startsWith(prefix)) return undefined;
@@ -111,6 +120,7 @@ export function parseArtifactUri(value: string): string | undefined {
   return OPAQUE_ARTIFACT_ID.test(id) ? id : undefined;
 }
 
+/** 根据已校验输入构建「makeArtifactUri」结果，不额外持有调用方的大对象。 */
 export function makeArtifactUri(artifactId: string): string {
   if (!OPAQUE_ARTIFACT_ID.test(artifactId)) throw new Error("artifactId 必须是 opaque ID");
   return `artifact://${artifactId}`;

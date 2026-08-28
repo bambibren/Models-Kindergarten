@@ -4,8 +4,10 @@ import { previewContextWindow } from "../src/conversation/context-window-preview
 import { FixtureProvider } from "../src/model/fixture-provider.js";
 import type { SessionEntry } from "../src/repository/session-types.js";
 
-describe("context window preview", () => {
-  it("重组完整保留会话且不调用模型", async () => {
+describe("context window preview", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("重组完整保留会话且不调用模型", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const model = new FixtureProvider();
     model.student.contextWindowTokens = 128_000;
     const serialize = vi.spyOn(model, "serializeContext");
@@ -48,7 +50,8 @@ describe("context window preview", () => {
     expect(result).toMatchObject({ windowTokens: 128_000, basis: "next_prompt_base" });
     expect(result?.estimatedTokens).toBeGreaterThan(0);
     expect(stream).not.toHaveBeenCalled();
-    const messages = serialize.mock.calls.find(([fragment]) => fragment.kind === "messages")?.[0];
+    const messages = serialize.mock.calls.find(/** 构造「messages」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+([fragment]) => fragment.kind === "messages")?.[0];
     expect(messages?.kind).toBe("messages");
     if (messages?.kind !== "messages") throw new Error("缺少 messages 序列化");
     expect(messages.messages).toMatchObject([
@@ -65,7 +68,8 @@ describe("context window preview", () => {
     expect(JSON.stringify(messages.messages)).not.toContain("77777");
   });
 
-  it("按下一次请求的历史预算裁剪旧消息，不累计历史请求 usage", async () => {
+  it("按下一次请求的历史预算裁剪旧消息，不累计历史请求 usage", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const model = new FixtureProvider();
     model.student.contextWindowTokens = 8_000;
     const serialize = vi.spyOn(model, "serializeContext");
@@ -85,12 +89,15 @@ describe("context window preview", () => {
       signal: new AbortController().signal,
     });
 
-    const fragment = serialize.mock.calls.find(([value]) => value.kind === "messages")?.[0];
+    const fragment = serialize.mock.calls.find(/** 构造「fragment」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+([value]) => value.kind === "messages")?.[0];
     if (fragment?.kind !== "messages") throw new Error("缺少 messages 序列化");
-    expect(fragment.messages.map((item) => item.content)).toEqual(["新问题", "新回答", ""]);
+    expect(fragment.messages.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.content)).toEqual(["新问题", "新回答", ""]);
   });
 
-  it("模型没有显式窗口时不生成假百分比", async () => {
+  it("模型没有显式窗口时不生成假百分比", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const model = new FixtureProvider();
     expect(await previewContextWindow({
       model,
@@ -103,10 +110,12 @@ describe("context window preview", () => {
   });
 });
 
+/** 构造「message」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function message(role: "user" | "assistant", text: string, messageId: string, turnId: string): SessionEntry {
   return { type: "message", role, text, messageId, turnId, createdAt: now() };
 }
 
+/** 构造「now」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function now(): string {
   return "2026-08-18T00:00:00.000Z";
 }

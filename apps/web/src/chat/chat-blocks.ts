@@ -1,5 +1,6 @@
 import type { ChatEntry, EntryCollection, EntryId } from "./chat-types.js";
 
+/** 描述「ChatBlock」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ChatBlock =
   | { type: "entry"; id: string; entryId: EntryId }
   | { type: "activity"; id: string; turnId: string; itemIds: EntryId[] };
@@ -26,4 +27,5 @@ export function selectEntryBlocks(collection: EntryCollection): ChatBlock[] {
   return blocks;
 }
 
+/** 判断「isActivity」对应条件，只返回判定结果且不修改输入状态。 */
 function isActivity(entry: ChatEntry): boolean { return entry.type === "thought" || entry.type === "tool_call"; }

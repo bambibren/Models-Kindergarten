@@ -11,10 +11,14 @@ import { FileSandbox } from "../../src/tools/sandbox.js";
 import { ToolCallLedger, ToolRuntime } from "../../src/tools/tool-runtime.js";
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("ArtifactToolProvider", () => {
-  it("只暴露统一发布、服务端新版本和显式回滚工具", () => {
+describe("ArtifactToolProvider", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("只暴露统一发布、服务端新版本和显式回滚工具", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(ARTIFACT_TOOL_IDS).toEqual([
       "read_artifact",
       "publish_artifact",
@@ -23,7 +27,8 @@ describe("ArtifactToolProvider", () => {
     ]);
   });
 
-  it("Agent 配置 allow 时不询问 permission，并发布 resource_link", async () => {
+  it("Agent 配置 allow 时不询问 permission，并发布 resource_link", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-artifact-tool-"));
     dirs.push(dir);
     const workspaces = join(dir, "workspaces");
@@ -47,12 +52,16 @@ describe("ArtifactToolProvider", () => {
     expect(call.locations).toEqual([]);
     expect(provider.definitions[0]?.function.description).toContain("成功发布");
     expect(provider.definitions[0]?.function.description).toContain("预览");
-    const requestPermission = vi.fn(async () => true);
+    const requestPermission = vi.fn(/** 构造「requestPermission」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => true);
     const result = await new ToolRuntime(provider).executeBatch([call], {
-      toolStart: async () => undefined,
-      toolFinish: async () => undefined,
+      toolStart: /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => undefined,
+      toolFinish: /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => undefined,
       requestPermission,
-      askUser: async () => "",
+      askUser: /** 构造「askUser」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => "",
     }, new ToolCallLedger(), new AbortController().signal);
 
     expect(requestPermission).not.toHaveBeenCalled();
@@ -64,13 +73,16 @@ describe("ArtifactToolProvider", () => {
 
     const retryScope = { ...scope(), turnId: "turn-retry", operationId: "same-user-operation" };
     const firstProvider = new ArtifactToolProvider(service, retryScope, bindings);
-    const first = await firstProvider.execute(firstProvider.prepare({ id: "model-call-a", name: "publish_artifact", arguments: { artifact_type: "file", path: "index.html" } }, "fallback"), { signal: new AbortController().signal, askUser: async () => "" });
+    const first = await firstProvider.execute(firstProvider.prepare({ id: "model-call-a", name: "publish_artifact", arguments: { artifact_type: "file", path: "index.html" } }, "fallback"), { signal: new AbortController().signal, askUser: /** 构造「askUser」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => "" });
     const secondProvider = new ArtifactToolProvider(service, { ...retryScope, turnId: "turn-retry-2" }, bindings);
-    const second = await secondProvider.execute(secondProvider.prepare({ id: "model-call-b", name: "publish_artifact", arguments: { artifact_type: "file", path: "index.html" } }, "fallback"), { signal: new AbortController().signal, askUser: async () => "" });
+    const second = await secondProvider.execute(secondProvider.prepare({ id: "model-call-b", name: "publish_artifact", arguments: { artifact_type: "file", path: "index.html" } }, "fallback"), { signal: new AbortController().signal, askUser: /** 构造「askUser」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => "" });
     expect(second.rawOutput).toMatchObject({ artifactId: (first.rawOutput as { artifactId: string }).artifactId });
   });
 
-  it("覆盖保持 ID，新版本获得新 ID，回滚只恢复隐藏修订", async () => {
+  it("覆盖保持 ID，新版本获得新 ID，回滚只恢复隐藏修订", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-artifact-version-tool-"));
     dirs.push(dir);
     const workspaces = join(dir, "workspaces");
@@ -82,7 +94,8 @@ describe("ArtifactToolProvider", () => {
       new ArtifactBlobStore(join(dir, "blobs")),
       workspaces,
     );
-    const bindings = new Map(ARTIFACT_TOOL_IDS.map((toolId) => [
+    const bindings = new Map(ARTIFACT_TOOL_IDS.map(/** 构造「bindings」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(toolId) => [
       toolId,
       { enabled: true, permission: "allow" as const },
     ]));
@@ -118,10 +131,13 @@ describe("ArtifactToolProvider", () => {
   });
 });
 
+/** 构造「context」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function context() {
-  return { signal: new AbortController().signal, askUser: async () => "" };
+  return { signal: new AbortController().signal, askUser: /** 构造「askUser」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => "" };
 }
 
+/** 构造「scope」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function scope(): TurnScope {
   return {
     schemaVersion: 1, ownerId: "local-admin", sessionId: "session-a", turnId: "turn-a", operationId: "operation-a",

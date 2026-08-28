@@ -1,6 +1,7 @@
 import { parseFileReferenceUri, type FileReference } from "@kindergarten/contracts";
 import type { ChatEntry, EntryCollection } from "../chat/chat-types.js";
 
+/** 描述「ArtifactPreviewState」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ArtifactPreviewState =
   | { phase: "closed" }
   | {
@@ -10,6 +11,7 @@ export type ArtifactPreviewState =
       file?: FileReference;
     };
 
+/** 描述「ArtifactPreviewAction」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ArtifactPreviewAction =
   | { type: "preview/open"; sessionId: string; fileReferenceId: string }
   | { type: "preview/close" }
@@ -48,13 +50,15 @@ export function artifactPreviewReducer(
   if (state.phase !== "open" || !state.file || state.fileReferenceId !== action.expectedFileReferenceId) {
     return state;
   }
-  const latest = action.files.findLast((file) =>
+  const latest = action.files.findLast(/** 执行「latest」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(file) =>
     file.sessionId === state.sessionId && file.relativePath === state.file?.relativePath);
   return latest
     ? { phase: "open", sessionId: state.sessionId, fileReferenceId: latest.fileReferenceId, file: latest }
     : state;
 }
 
+/** 执行「activeArtifactPreview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function activeArtifactPreview(
   state: ArtifactPreviewState,
   sessionId: string | null,
@@ -62,11 +66,13 @@ export function activeArtifactPreview(
   return state.phase === "open" && state.sessionId === sessionId ? state : null;
 }
 
+/** 执行「fileReferenceIdsAfter」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function fileReferenceIdsAfter(ids: string[], currentId: string): string[] {
   const index = ids.lastIndexOf(currentId);
   return index < 0 ? [] : ids.slice(index + 1);
 }
 
+/** 执行「collectFileReferenceIds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function collectFileReferenceIds(...collections: EntryCollection[]): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
@@ -84,15 +90,18 @@ export function collectFileReferenceIds(...collections: EntryCollection[]): stri
   return result;
 }
 
+/** 执行「entryFileReferenceIds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function entryFileReferenceIds(entry: ChatEntry): string[] {
   if (entry.type === "tool_call") {
-    return entry.content.flatMap((item) =>
+    return entry.content.flatMap(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(item) =>
       item.type === "content" && item.content.type === "resource_link"
         ? parseFileReferenceUri(item.content.uri) ?? []
         : []);
   }
   if (entry.type === "message" || entry.type === "thought") {
-    return entry.content.flatMap((item) =>
+    return entry.content.flatMap(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(item) =>
       item.type === "resource_link" ? parseFileReferenceUri(item.uri) ?? [] : []);
   }
   return [];

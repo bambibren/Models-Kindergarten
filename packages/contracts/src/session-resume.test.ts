@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { makeSessionResumeMeta, readSessionResumeMeta } from "./session-resume.js";
 
-describe("SessionResumeMeta", () => {
-  it("保留当前 Turn 的消息偏移与下一个 Chunk 序号", () => {
+describe("SessionResumeMeta", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保留当前 Turn 的消息偏移与下一个 Chunk 序号", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const value = {
       schemaVersion: 1 as const,
       turnId: "turn-1",
@@ -12,7 +14,8 @@ describe("SessionResumeMeta", () => {
     expect(readSessionResumeMeta(makeSessionResumeMeta(value))).toEqual(value);
   });
 
-  it("拒绝负数、小数和缺失的游标字段", () => {
+  it("拒绝负数、小数和缺失的游标字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(readSessionResumeMeta(makeSessionResumeMeta({
       schemaVersion: 1,
       turnId: "turn-1",

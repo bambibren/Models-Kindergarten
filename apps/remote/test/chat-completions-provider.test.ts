@@ -65,12 +65,15 @@ const tools: ModelInput["tools"] = [
   },
 ];
 
-afterEach(() => {
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+() => {
   vi.unstubAllGlobals();
 });
 
-describe("ChatCompletionsProvider", () => {
-  it("保留 /v1 前缀并生成标准 Chat Completions 请求", () => {
+describe("ChatCompletionsProvider", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保留 /v1 前缀并生成标准 Chat Completions 请求", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = createProvider(student("http://127.0.0.1:1/v1"));
     const value = JSON.parse(provider.serializeInput({
       systemPrompt: "You are a test assistant.",
@@ -123,7 +126,8 @@ describe("ChatCompletionsProvider", () => {
     });
   });
 
-  it("按 tool_call.index 聚合乱序参数并以稳定原始顺序一次完成", async () => {
+  it("按 tool_call.index 聚合乱序参数并以稳定原始顺序一次完成", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer({ thinking: "toggle" });
     try {
       const provider = createProvider(student(mock.baseUrl));
@@ -134,7 +138,8 @@ describe("ChatCompletionsProvider", () => {
         reasoning: reasoningSnapshot("balanced", { enable_thinking: true }),
       }, new AbortController().signal));
 
-      expect(events.filter((event) => event.type === "tool_calls")).toEqual([{
+      expect(events.filter(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(event) => event.type === "tool_calls")).toEqual([{
         type: "tool_calls",
         calls: [
           {
@@ -169,7 +174,8 @@ describe("ChatCompletionsProvider", () => {
     }
   });
 
-  it("把 assistant tool_calls 与 tool_call_id 结果续接为下一轮正文", async () => {
+  it("把 assistant tool_calls 与 tool_call_id 结果续接为下一轮正文", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer({ thinking: "toggle" });
     try {
       const provider = createProvider(student(mock.baseUrl));
@@ -193,8 +199,10 @@ describe("ChatCompletionsProvider", () => {
         reasoning: reasoningSnapshot("fast", { enable_thinking: false }),
       }, new AbortController().signal));
 
-      expect(events.filter((event) => event.type === "text_delta")
-        .map((event) => event.type === "text_delta" ? event.text : "").join(""))
+      expect(events.filter(/** 构造「map」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(event) => event.type === "text_delta")
+        .map(/** 构造「join」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(event) => event.type === "text_delta" ? event.text : "").join(""))
         .toBe("MK_TOOL_CONTINUATION_OK");
       expect(mock.requests[0]?.body).toMatchObject({
         enable_thinking: false,
@@ -208,7 +216,8 @@ describe("ChatCompletionsProvider", () => {
     }
   });
 
-  it("流式输出 reasoning_content 与四维 token 用量", async () => {
+  it("流式输出 reasoning_content 与四维 token 用量", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer({ thinking: "toggle" });
     try {
       const events = await collect(createProvider(student(mock.baseUrl)).stream({
@@ -217,7 +226,8 @@ describe("ChatCompletionsProvider", () => {
         tools: [],
         reasoning: reasoningSnapshot("balanced", { enable_thinking: true }),
       }, new AbortController().signal));
-      expect(events.filter((event) => event.type === "thinking_delta")).toEqual([
+      expect(events.filter(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(event) => event.type === "thinking_delta")).toEqual([
         { type: "thinking_delta", text: "先计算，" },
         { type: "thinking_delta", text: "再作答。" },
       ]);
@@ -233,7 +243,8 @@ describe("ChatCompletionsProvider", () => {
     }
   });
 
-  it("finish_reason 之后缺少 [DONE] 仍拒绝提交本轮", async () => {
+  it("finish_reason 之后缺少 [DONE] 仍拒绝提交本轮", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer({ omitDone: true });
     try {
       await expect(collect(createProvider(student(mock.baseUrl)).stream({
@@ -249,7 +260,8 @@ describe("ChatCompletionsProvider", () => {
     }
   });
 
-  it("HTTP 与 SSE 错误都不会泄露 Bearer 或反射敏感字段", async () => {
+  it("HTTP 与 SSE 错误都不会泄露 Bearer 或反射敏感字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer();
     try {
       for (const model of ["http-error", "sse-error"] as const) {
@@ -258,7 +270,8 @@ describe("ChatCompletionsProvider", () => {
           messages: [{ role: "user", content: "hello" }],
           tools: [],
         }, new AbortController().signal));
-        await expect(consume).rejects.toSatisfy((error: unknown) => {
+        await expect(consume).rejects.toSatisfy(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
           return !message.includes("test-token")
             && !message.includes("reflected-api-key")
@@ -271,7 +284,8 @@ describe("ChatCompletionsProvider", () => {
     }
   });
 
-  it("拒绝超过上限的 SSE 单行", async () => {
+  it("拒绝超过上限的 SSE 单行", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer();
     try {
       await expect(collect(createProvider(student(mock.baseUrl, "oversized-line")).stream({
@@ -287,17 +301,20 @@ describe("ChatCompletionsProvider", () => {
     }
   });
 
-  it("使用 endpointResolver 的固定地址票据且保留原 hostname", async () => {
+  it("使用 endpointResolver 的固定地址票据且保留原 hostname", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer();
     try {
       const baseUrl = new URL(mock.baseUrl);
       baseUrl.hostname = "siliconflow-rebinding.invalid";
-      const resolver = vi.fn(async (url: URL) => ({
+      const resolver = vi.fn(/** 构造「resolver」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (url: URL) => ({
         url: new URL(url),
         addresses: [{ address: "127.0.0.1", family: 4 as const }],
       }));
       const provider = new ChatCompletionsProvider(student(baseUrl.toString()), {
-        readBearerToken: () => "test-token",
+        readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
         reasoning: toggleReasoning,
         endpointResolver: resolver,
       });
@@ -313,7 +330,8 @@ describe("ChatCompletionsProvider", () => {
     }
   });
 
-  it("原样传播 AbortSignal 取消", async () => {
+  it("原样传播 AbortSignal 取消", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const controller = new AbortController();
     controller.abort();
     await expect(collect(createProvider(student("http://127.0.0.1:1/v1")).stream({
@@ -323,7 +341,8 @@ describe("ChatCompletionsProvider", () => {
     }, controller.signal))).rejects.toMatchObject({ name: "AbortError" });
   });
 
-  it("SiliconFlow 不使用伪造的固定消息条数限制", async () => {
+  it("SiliconFlow 不使用伪造的固定消息条数限制", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer();
     const dir = await mkdtemp(join(tmpdir(), "mk-chat-message-limit-"));
     try {
@@ -341,7 +360,8 @@ describe("ChatCompletionsProvider", () => {
 
       expect(result.reason).toBe("stop");
       expect(mock.requests).toHaveLength(2);
-      const outbound = mock.requests.map((item) => {
+      const outbound = mock.requests.map(/** 构造「outbound」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => {
         const messages = item.body.messages;
         if (!Array.isArray(messages)) throw new Error("mock request messages missing");
         return messages as Array<Record<string, unknown>>;
@@ -361,6 +381,7 @@ describe("ChatCompletionsProvider", () => {
   });
 });
 
+/** 构造「student」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function student(baseUrl: string, model = "same-model-id"): ModelStudent {
   return {
     id: "siliconflow-test",
@@ -371,14 +392,17 @@ function student(baseUrl: string, model = "same-model-id"): ModelStudent {
   };
 }
 
+/** 构造「createProvider」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function createProvider(value: ModelStudent): ChatCompletionsProvider {
   return new ChatCompletionsProvider(value, {
-    readBearerToken: () => "test-token",
+    readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
     reasoning: toggleReasoning,
     includeStreamUsage: true,
   });
 }
 
+/** 构造「reasoningSnapshot」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function reasoningSnapshot(
   profile: "fast" | "balanced",
   native: Record<string, string | number | boolean>,
@@ -394,15 +418,18 @@ function reasoningSnapshot(
   };
 }
 
+/** 构造「collect」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function collect(stream: AsyncIterable<ModelEvent>): Promise<ModelEvent[]> {
   const result: ModelEvent[] = [];
   for await (const event of stream) result.push(event);
   return result;
 }
 
+/** 构造「longMessageHistory」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function longMessageHistory(count: number): SessionEntry[] {
   const createdAt = new Date("2026-08-14T00:00:00.000Z").toISOString();
-  return Array.from({ length: count }, (_, index) => ({
+  return Array.from({ length: count }, /** 构造「longMessageHistory」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(_, index) => ({
     type: "message" as const,
     role: index % 2 === 0 ? "user" as const : "assistant" as const,
     text: `history-${index}`,
@@ -412,15 +439,24 @@ function longMessageHistory(count: number): SessionEntry[] {
   }));
 }
 
+/** 构造「noopRunObserver」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function noopRunObserver(): RunObserver {
   return {
-    async context() {},
-    async text() {},
-    async thought() {},
-    async roundComplete() {},
-    async toolStart() {},
-    async toolFinish() {},
-    async requestPermission() { return true; },
-    async askUser() { return ""; },
+    /** 构造「context」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async context() {},
+    /** 构造「text」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async text() {},
+    /** 构造「thought」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async thought() {},
+    /** 构造「roundComplete」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async roundComplete() {},
+    /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async toolStart() {},
+    /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async toolFinish() {},
+    /** 构造「requestPermission」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async requestPermission() { return true; },
+    /** 构造「askUser」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async askUser() { return ""; },
   };
 }

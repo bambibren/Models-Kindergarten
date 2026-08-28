@@ -47,6 +47,7 @@ export async function stdioParameters(
   };
 }
 
+/** 校验并规范化「normalizedPaths」输入，非法数据直接返回明确错误。 */
 async function normalizedPaths(values: string[], allowMissing = false): Promise<string[]> {
   const results = new Set<string>();
   for (const value of values) {
@@ -61,6 +62,7 @@ async function normalizedPaths(values: string[], allowMissing = false): Promise<
   return [...results];
 }
 
+/** 执行「sandboxProfile」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function sandboxProfile(readPaths: string[], writePaths: string[], network: boolean): string {
   const lines = [
     "(version 1)",
@@ -68,13 +70,16 @@ function sandboxProfile(readPaths: string[], writePaths: string[], network: bool
     '(import "system.sb")',
     "(allow process*)",
     "(allow sysctl-read)",
-    ...readPaths.map((path) => `(allow file-read* (subpath "${escapeProfile(path)}"))`),
-    ...writePaths.map((path) => `(allow file-write* (subpath "${escapeProfile(path)}"))`),
+    ...readPaths.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(path) => `(allow file-read* (subpath "${escapeProfile(path)}"))`),
+    ...writePaths.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(path) => `(allow file-write* (subpath "${escapeProfile(path)}"))`),
     network ? "(allow network*)" : "(deny network*)",
   ];
   return lines.join("\n");
 }
 
+/** 执行「escapeProfile」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function escapeProfile(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }

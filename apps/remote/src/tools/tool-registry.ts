@@ -5,12 +5,15 @@ import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.js";
 import type { ModelToolCall, ModelToolDefinition, ModelToolSchema } from "../model/model-provider.js";
 import { ProcessSandbox } from "./process-sandbox.js";
-import { FileSandbox } from "./sandbox.js";
+import { FileSandbox, type SandboxTextEdit } from "./sandbox.js";
 import { WebAccess, type WebToolClient } from "./web-access.js";
 import { ToolExecutionError } from "./tool-error.js";
 
+/** 描述「PermissionMode」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type PermissionMode = "allow" | "ask" | "always_ask" | "deny";
+/** 描述「ToolOutcomeStatus」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ToolOutcomeStatus = "success" | "error" | "denied" | "duplicate_blocked";
+/** 描述「ToolErrorCategory」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ToolErrorCategory =
   | "validation"
   | "permission"
@@ -22,11 +25,13 @@ export type ToolErrorCategory =
   | "resource_limit"
   | "dependency_unavailable";
 
+/** 描述「ToolExactArgumentCorrection」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolExactArgumentCorrection {
   message: string;
   exactRetryArguments: Record<string, unknown>;
 }
 
+/** 描述「ToolSchemaValidationError」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolSchemaValidationError {
   keyword: string;
   instancePath: string;
@@ -34,11 +39,13 @@ export interface ToolSchemaValidationError {
   message: string;
 }
 
+/** 描述「ToolSchemaCorrection」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolSchemaCorrection {
   message: string;
   expectedSchema: ModelToolSchema;
 }
 
+/** 描述「ToolValidationError」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolValidationError {
   message: string;
   validationErrors?: ToolSchemaValidationError[];
@@ -47,6 +54,7 @@ export interface ToolValidationError {
   instruction?: string;
 }
 
+/** 描述「PreparedToolCall」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PreparedToolCall {
   id: string;
   name: ToolName | string;
@@ -60,11 +68,13 @@ export interface PreparedToolCall {
   validationError?: string | ToolValidationError;
 }
 
+/** 描述「ToolExecutionContext」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolExecutionContext {
   askUser(question: string, toolCallId: string): Promise<string>;
   signal: AbortSignal;
 }
 
+/** 描述「ToolResult」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolResult {
   modelContent: string;
   rawOutput: unknown;
@@ -84,6 +94,7 @@ export interface ToolRegistryPort {
   capabilitySnapshot(): RuntimeCapabilitySnapshot;
 }
 
+/** 描述「ToolOutcome」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolOutcome extends ToolResult {
   status: ToolOutcomeStatus;
   retryable: boolean;
@@ -94,10 +105,12 @@ export interface ToolOutcome extends ToolResult {
   };
 }
 
+/** 描述「ToolName」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ToolName =
   | "list_files"
   | "read_file"
   | "write_file"
+  | "edit_file"
   | "run_command"
   | "web_search"
   | "web_fetch"
@@ -114,7 +127,8 @@ export class ToolRegistry implements ToolRegistryPort {
   readonly process: ProcessSandbox;
   readonly web: WebToolClient;
 
-  constructor(
+  /** 初始化「ToolRegistry」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     readonly sandbox: FileSandbox,
     process?: ProcessSandbox,
     web?: WebToolClient,
@@ -122,14 +136,17 @@ export class ToolRegistry implements ToolRegistryPort {
   ) {
     this.process = process ?? new ProcessSandbox(sandbox);
     this.web = web ?? new WebAccess();
-    this.definitions = definitions.filter((definition) =>
+    this.definitions = definitions.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(definition) =>
       (EXPOSE_RUN_COMMAND_TOOL || definition.function.name !== "run_command") &&
-      (this.bindings === undefined || this.bindings.get(definition.function.name)?.enabled === true));
+      (this.bindings === undefined || this.binding(definition.function.name)?.enabled === true));
   }
 
-  prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
+  /** 执行「prepare」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     const name = toolName(call.name);
-    if (!this.definitions.some((item) => item.function.name === name)) {
+    if (!this.definitions.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.function.name === name)) {
       throw new Error(`当前 Agent 未启用 Built-in Tool: ${name}`);
     }
     const id = call.id ?? fallbackId;
@@ -147,6 +164,11 @@ export class ToolRegistry implements ToolRegistryPort {
       const path = stringArg(call.arguments, "path");
       const content = stringArg(call.arguments, "content", true);
       return prepared(id, name, `写入 ${path}`, "edit", { path, content }, "ask", [], "none", this.permission(name, "ask"));
+    }
+    if (name === "edit_file") {
+      const path = stringArg(call.arguments, "path");
+      const edits = textEditsArg(call.arguments, "edits");
+      return prepared(id, name, `按行替换 ${path}`, "edit", { path, edits }, "ask", [], "none", this.permission(name, "ask"));
     }
     if (name === "run_command") {
       const command = stringArg(call.arguments, "command");
@@ -180,7 +202,8 @@ export class ToolRegistry implements ToolRegistryPort {
     return prepared(id, name, "询问用户", "other", { question }, this.permission(name, "allow"), [], "none");
   }
 
-  async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
+  /** 执行「execute」主流程，传播取消与失败并在结束时清理临时资源。 */
+async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
     if (context.signal.aborted) throw new DOMException("已取消", "AbortError");
     if (call.name === "list_files") {
       const items = await this.sandbox.list(String(call.arguments.path));
@@ -199,6 +222,21 @@ export class ToolRegistry implements ToolRegistryPort {
       return {
         modelContent: modelEnvelope(call, true, rawOutput, undefined,
           "The file exists only in the Session Workspace and is not published, deliverable, or previewable. If the user requested a file, continue by calling publish_artifact or publish_artifact_version as appropriate; do not finish yet."),
+        rawOutput,
+        content: [{ type: "diff", path: value.path, oldText: value.oldText, newText: value.newText }],
+        locations: [],
+        effects: { fileRelativePaths: [relative(this.sandbox.root, value.path).split("\\").join("/")] },
+      };
+    }
+    if (call.name === "edit_file") {
+      const value = await this.sandbox.editText(
+        String(call.arguments.path),
+        call.arguments.edits as SandboxTextEdit[],
+      );
+      const rawOutput = { path: value.path, bytes: value.bytes, replacements: value.replacements };
+      return {
+        modelContent: modelEnvelope(call, true, rawOutput, undefined,
+          "The edited file exists only in the Session Workspace and is not published, deliverable, or previewable. If the user requested a file, continue by calling publish_artifact or publish_artifact_version as appropriate; do not finish yet."),
         rawOutput,
         content: [{ type: "diff", path: value.path, oldText: value.oldText, newText: value.newText }],
         locations: [],
@@ -252,9 +290,11 @@ export class ToolRegistry implements ToolRegistryPort {
     throw new Error(`未知工具: ${call.name}`);
   }
 
-  capabilitySnapshot(): RuntimeCapabilitySnapshot {
+  /** 生成「capabilitySnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
+capabilitySnapshot(): RuntimeCapabilitySnapshot {
     return {
-      tools: this.definitions.map((definition) => ({
+      tools: this.definitions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(definition) => ({
         id: `builtin:tool:${definition.function.name}`,
         modelName: definition.function.name,
         origin: "builtin",
@@ -267,15 +307,22 @@ export class ToolRegistry implements ToolRegistryPort {
     };
   }
 
-  private permission(name: string, required: PermissionMode): PermissionMode {
-    const configured = this.bindings?.get(name)?.permission;
+  /** 执行「permission」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private permission(name: string, required: PermissionMode): PermissionMode {
+    const configured = this.binding(name)?.permission;
     if (configured === "deny") return "deny";
     if (required === "always_ask") return "always_ask";
     if (required === "ask") return configured ?? "ask";
     return configured ?? required;
   }
+
+  /** edit_file 与 write_file 共享启用状态和权限，现有 Agent 无需迁移配置即可使用安全增量编辑。 */
+  private binding(name: string): { enabled: boolean; permission: "allow" | "ask" | "deny" } | undefined {
+    return this.bindings?.get(name === "edit_file" ? "write_file" : name);
+  }
 }
 
+/** 执行「prepared」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function prepared(
   id: string,
   name: ToolName,
@@ -300,6 +347,7 @@ function prepared(
   };
 }
 
+/** 执行「result」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function result(
   call: PreparedToolCall,
   rawOutput: unknown,
@@ -314,6 +362,7 @@ function result(
   };
 }
 
+/** 执行「modelEnvelope」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function modelEnvelope(
   call: Pick<PreparedToolCall, "id" | "name">,
   ok: boolean,
@@ -344,6 +393,23 @@ const definitions: ModelToolDefinition[] = [
     path: { type: "string", description: "沙箱内相对 POSIX 路径" },
     content: { type: "string", description: "完整文件内容" },
   }, ["path", "content"]),
+  definition("edit_file", "按行替换 Session Workspace 中已有 UTF-8 文本文件的一个或多个片段。每段 old_text 必须按字面值恰好匹配一次；全部片段校验成功后才写入，任一片段失败时文件保持不变。小范围修改已有文件时优先使用此工具，避免用 write_file 重写完整文件。此工具只修改工作区，不发布、不交付、也不提供预览；权限与 write_file 保持一致。", {
+    path: { type: "string", description: "沙箱内已有文件的相对 POSIX 路径" },
+    edits: {
+      type: "array",
+      minItems: 1,
+      description: "按顺序执行的精确旧文本替换列表",
+      items: {
+        type: "object",
+        properties: {
+          old_text: { type: "string", minLength: 1, description: "必须在当前文件内容中恰好出现一次的旧文本片段" },
+          new_text: { type: "string", description: "替换后的新文本；允许为空字符串以删除旧片段" },
+        },
+        required: ["old_text", "new_text"],
+        additionalProperties: false,
+      },
+    },
+  }, ["path", "edits"]),
   definition("run_command", "在受限 macOS 沙箱中运行终端命令。命令产生的文件只存在于 Session Workspace，不会自动发布或提供预览；用户要求生成文件时，必须继续调用适用的发布工具。每次执行都需要用户授权。", {
     command: { type: "string", description: "要运行的单条 shell 命令" },
     cwd: { type: "string", description: "沙箱内相对工作目录，默认 ." },
@@ -367,6 +433,7 @@ const definitions: ModelToolDefinition[] = [
   }, ["question"]),
 ];
 
+/** 执行「definition」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function definition(
   name: ToolName,
   description: string,
@@ -383,15 +450,17 @@ function definition(
   };
 }
 
+/** 根据已校验输入构建「toolName」结果，不额外持有调用方的大对象。 */
 function toolName(value: string): ToolName {
   const names: ToolName[] = [
-    "list_files", "read_file", "write_file", "run_command",
+    "list_files", "read_file", "write_file", "edit_file", "run_command",
     "web_search", "web_fetch", "ask_user",
   ];
   if (names.includes(value as ToolName)) return value as ToolName;
   throw new Error(`未知工具: ${value}`);
 }
 
+/** 执行「stringArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function stringArg(input: Record<string, unknown>, name: string, allowEmpty = false): string {
   const value = input[name];
   if (typeof value !== "string" || (!allowEmpty && value.trim().length === 0)) {
@@ -400,12 +469,14 @@ function stringArg(input: Record<string, unknown>, name: string, allowEmpty = fa
   return value;
 }
 
+/** 执行「optionalStringArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function optionalStringArg(input: Record<string, unknown>, name: string): string | undefined {
   const value = input[name];
   if (value === undefined) return undefined;
   return stringArg(input, name);
 }
 
+/** 执行「optionalNumberArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function optionalNumberArg(input: Record<string, unknown>, name: string): number | undefined {
   const value = input[name];
   if (value === undefined) return undefined;
@@ -413,17 +484,41 @@ function optionalNumberArg(input: Record<string, unknown>, name: string): number
   return value;
 }
 
+/** 校验模型提交的按行替换数组，并把 snake_case Schema 转成沙箱内部合同。 */
+function textEditsArg(input: Record<string, unknown>, name: string): SandboxTextEdit[] {
+  const value = input[name];
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${name} 必须是非空数组`);
+  return value.map(/** 将公开 Tool 参数规范化为内部文本编辑，额外字段由 JSON Schema 拒绝。 */
+  (item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`${name}[${index}] 必须是对象`);
+    }
+    const record = item as Record<string, unknown>;
+    const unexpected = Object.keys(record).filter(/** 只接受公开 Schema 声明的字段，避免绕过 Provider 侧 JSON Schema 校验。 */
+    (key) => key !== "old_text" && key !== "new_text");
+    if (unexpected.length > 0) throw new Error(`${name}[${index}] 包含未知字段: ${unexpected.join(", ")}`);
+    const oldText = stringArg(record, "old_text", true);
+    if (oldText.length === 0) throw new Error(`${name}[${index}].old_text 必须是非空字符串`);
+    const newText = stringArg(record, "new_text", true);
+    return { oldText, newText };
+  });
+}
+
+/** 判断「canonicalJson」对应条件，只返回判定结果且不修改输入状态。 */
 export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
-      .toSorted(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .toSorted(/** 执行「map」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+([a], [b]) => a.localeCompare(b))
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
       .join(",")}}`;
   }
   return JSON.stringify(value);
 }
 
+/** 执行「short」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function short(value: string, length: number): string {
   return value.length <= length ? value : `${value.slice(0, length)}…`;
 }

@@ -23,11 +23,13 @@ import {
   type OutboundHttpTransport,
 } from "./pinned-http-transport.js";
 
+/** 描述「ChatCompletionsNativeReasoning」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ChatCompletionsNativeReasoning = Record<
   string,
   string | number | boolean
 >;
 
+/** 描述「ChatCompletionsReasoningConfiguration」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ChatCompletionsReasoningConfiguration {
   capability: ModelReasoningCapability;
   nativeByProfile: Partial<
@@ -35,28 +37,30 @@ export interface ChatCompletionsReasoningConfiguration {
   >;
 }
 
+/** 描述「ChatCompletionsProviderOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ChatCompletionsProviderOptions {
   readBearerToken(): string | Promise<string>;
-  /** Must come from the exact endpoint's successful admission probe. */
+  /** 必须来自目标端点本身已成功的入园体检，不能按厂商或模型名猜测。 */
   reasoning: ChatCompletionsReasoningConfiguration;
-  /** Send OpenAI stream_options only after the exact endpoint accepted and reported usage. */
+  /** 只有目标端点实际接受并返回 usage 后，才发送 OpenAI `stream_options`。 */
   includeStreamUsage?: boolean;
   endpointGuard?: (url: URL) => void | Promise<void>;
-  /** Production remote endpoints must bind the checked address to socket lookup. */
+  /** 生产远端必须把已审核地址绑定到 socket lookup，防止 DNS 重绑定。 */
   endpointResolver?: HttpEndpointResolver;
-  /** Defaults to zero. Only same-origin 307/308 redirects are ever followed. */
+  /** 默认不跟随重定向；显式开启后也只跟随同源 307/308。 */
   maxRedirects?: number;
 }
 
+/** 描述「ChatCompletionsProbeStreamOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ChatCompletionsProbeStreamOptions {
   maxOutputTokens?: number;
   toolChoice?: "none" | "auto" | {
     type: "function";
     function: { name: string };
   };
-  /** Admission-only candidate parameter set; never persisted unless the probe succeeds. */
+  /** 仅用于入园体检的候选参数；探针成功前不得持久化。 */
   nativeReasoning?: ChatCompletionsNativeReasoning;
-  /** Admission-only opt-in used to test stream_options.include_usage independently. */
+  /** 仅供入园独立测试 `stream_options.include_usage`，不与基础流能力捆绑。 */
   includeUsage?: boolean;
 }
 
@@ -84,9 +88,10 @@ const MAX_SSE_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_HTTP_ERROR_BODY_BYTES = 64 * 1024;
 
 /**
- * OpenAI Chat Completions wire adapter used by SiliconFlow.
- * It deliberately does not infer capability from vendor/model names.
+ * 硅基流动使用的 OpenAI Chat Completions wire Adapter。
+ * 能力只来自目标端点探针，不根据厂商或模型名称推断。
  */
+/** 描述「ChatCompletionsProvider」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class ChatCompletionsProvider implements ModelProvider {
   readonly reasoningCapability: ModelReasoningCapability;
   private readonly readBearerToken: ChatCompletionsProviderOptions["readBearerToken"];
@@ -98,7 +103,8 @@ export class ChatCompletionsProvider implements ModelProvider {
   private readonly maxRedirects: number;
   readonly includeStreamUsage: boolean;
 
-  constructor(
+  /** 初始化「ChatCompletionsProvider」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     readonly student: ModelStudent,
     options: ChatCompletionsProviderOptions,
   ) {
@@ -116,7 +122,8 @@ export class ChatCompletionsProvider implements ModelProvider {
       options.reasoning.nativeByProfile,
     );
     this.readBearerToken = options.readBearerToken;
-    this.endpointGuard = options.endpointGuard ?? (() => undefined);
+    this.endpointGuard = options.endpointGuard ?? (/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => undefined);
     this.httpTransport = options.endpointResolver
       ? new PinnedHttpTransport(options.endpointResolver)
       : new GlobalFetchHttpTransport();
@@ -124,7 +131,8 @@ export class ChatCompletionsProvider implements ModelProvider {
     this.includeStreamUsage = options.includeStreamUsage === true;
   }
 
-  nativeReasoning(profile: ConcreteReasoningProfile): ChatCompletionsNativeReasoning {
+  /** 执行「nativeReasoning」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+nativeReasoning(profile: ConcreteReasoningProfile): ChatCompletionsNativeReasoning {
     const native = this.nativeByProfile[profile];
     if (!native) {
       throw new Error(`Chat Completions 模型不支持推理档位: ${profile}`);
@@ -132,7 +140,8 @@ export class ChatCompletionsProvider implements ModelProvider {
     return structuredClone(native);
   }
 
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 执行「serializeContext」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     let value: unknown;
     switch (fragment.kind) {
       case "system":
@@ -142,7 +151,8 @@ export class ChatCompletionsProvider implements ModelProvider {
         value = fragment.tools.map(toChatTool);
         break;
       case "messages":
-        value = fragment.messages.map((message) => toChatMessage(this.student, message));
+        value = fragment.messages.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(message) => toChatMessage(this.student, message));
         break;
       case "omitted":
         value = { sent: false, sourceIds: fragment.sourceIds };
@@ -156,7 +166,8 @@ export class ChatCompletionsProvider implements ModelProvider {
     };
   }
 
-  serializeInput(input: ModelInput): ModelContextSerialization {
+  /** 执行「serializeInput」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+serializeInput(input: ModelInput): ModelContextSerialization {
     return {
       provider: this.student.provider.kind,
       model: this.student.provider.model,
@@ -165,12 +176,14 @@ export class ChatCompletionsProvider implements ModelProvider {
     };
   }
 
-  async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
+  /** 执行「stream」主流程，传播取消与失败并在结束时清理临时资源。 */
+async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
     yield* this.streamRequest(input, signal, {});
   }
 
-  /** Admission probe entry point; it shares the production serializer and SSE parser. */
-  async *streamProbe(
+  /** 入园探针入口；复用生产序列化器和 SSE Parser，避免体检与运行协议漂移。 */
+  /** 执行「streamProbe」主流程，传播取消与失败并在结束时清理临时资源。 */
+async *streamProbe(
     input: ModelInput,
     signal: AbortSignal,
     options: ChatCompletionsProbeStreamOptions,
@@ -178,7 +191,8 @@ export class ChatCompletionsProvider implements ModelProvider {
     yield* this.streamRequest(input, signal, options);
   }
 
-  private async *streamRequest(
+  /** 执行「streamRequest」主流程，传播取消与失败并在结束时清理临时资源。 */
+private async *streamRequest(
     input: ModelInput,
     signal: AbortSignal,
     options: ChatCompletionsProbeStreamOptions,
@@ -309,7 +323,8 @@ export class ChatCompletionsProvider implements ModelProvider {
     }
   }
 
-  resolvedNativeReasoning(
+  /** 执行「resolvedNativeReasoning」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+resolvedNativeReasoning(
     input: ModelInput,
   ): ChatCompletionsNativeReasoning {
     if (input.reasoning === "disabled") {
@@ -340,7 +355,8 @@ export class ChatCompletionsProvider implements ModelProvider {
     return expected;
   }
 
-  private async loadToken(): Promise<string> {
+  /** 读取「loadToken」所需数据，并遵守作用域、分页与容量边界。 */
+private async loadToken(): Promise<string> {
     let token: string;
     try {
       token = (await this.readBearerToken()).trim();
@@ -362,7 +378,8 @@ export class ChatCompletionsProvider implements ModelProvider {
     return token;
   }
 
-  private async fetchResponse(
+  /** 读取「fetchResponse」所需数据，并遵守作用域、分页与容量边界。 */
+private async fetchResponse(
     initialUrl: URL,
     body: string,
     token: string,
@@ -383,7 +400,8 @@ export class ChatCompletionsProvider implements ModelProvider {
       });
       if (!isRedirectStatus(response.status)) return response;
       if ((response.status !== 307 && response.status !== 308) || redirects >= this.maxRedirects) {
-        await response.body?.cancel().catch(() => undefined);
+        await response.body?.cancel().catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
         throw new ModelProviderError(
           "model_request_failed",
           `Chat Completions API 返回不允许的重定向 (${response.status})`,
@@ -391,7 +409,8 @@ export class ChatCompletionsProvider implements ModelProvider {
         );
       }
       const location = response.headers.get("location");
-      await response.body?.cancel().catch(() => undefined);
+      await response.body?.cancel().catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
       if (!location) {
         throw new ModelProviderError(
           "invalid_model_response",
@@ -412,6 +431,7 @@ export class ChatCompletionsProvider implements ModelProvider {
   }
 }
 
+/** 根据已校验输入构建「toChatRequest」结果，不额外持有调用方的大对象。 */
 function toChatRequest(
   provider: ChatCompletionsProvider,
   input: ModelInput,
@@ -422,7 +442,8 @@ function toChatRequest(
     : validateNativeReasoning(options.nativeReasoning);
   const messages = [
     toSystemMessage(input.systemPrompt),
-    ...input.messages.map((message) => toChatMessage(provider.student, message)),
+    ...input.messages.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(message) => toChatMessage(provider.student, message)),
   ];
   return {
     model: provider.student.provider.model,
@@ -445,10 +466,12 @@ function toChatRequest(
   };
 }
 
+/** 根据已校验输入构建「toSystemMessage」结果，不额外持有调用方的大对象。 */
 function toSystemMessage(content: string): Record<string, unknown> {
   return { role: "system", content };
 }
 
+/** 根据已校验输入构建「toChatMessage」结果，不额外持有调用方的大对象。 */
 function toChatMessage(student: ModelStudent, message: ModelMessage): Record<string, unknown> {
   if (message.providerOpaqueContinuation) {
     throw new ModelProviderError(
@@ -477,7 +500,8 @@ function toChatMessage(student: ModelStudent, message: ModelMessage): Record<str
       role: "assistant",
       content: message.content || null,
       ...(message.thinking ? { reasoning_content: message.thinking } : {}),
-      tool_calls: message.toolCalls.map((call) => {
+      tool_calls: message.toolCalls.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(call) => {
         if (!call.id) {
           throw new ModelProviderError(
             "invalid_model_response",
@@ -505,6 +529,7 @@ function toChatMessage(student: ModelStudent, message: ModelMessage): Record<str
   };
 }
 
+/** 根据已校验输入构建「toChatTool」结果，不额外持有调用方的大对象。 */
 function toChatTool(tool: ModelToolDefinition): Record<string, unknown> {
   return {
     type: "function",
@@ -516,6 +541,7 @@ function toChatTool(tool: ModelToolDefinition): Record<string, unknown> {
   };
 }
 
+/** 校验并规范化「validateReasoningConfiguration」输入，非法数据直接返回明确错误。 */
 function validateReasoningConfiguration(
   capability: ModelReasoningCapability,
   nativeByProfile: ChatCompletionsReasoningConfiguration["nativeByProfile"],
@@ -529,6 +555,7 @@ function validateReasoningConfiguration(
   return Object.freeze(result);
 }
 
+/** 校验并规范化「validateNativeReasoning」输入，非法数据直接返回明确错误。 */
 function validateNativeReasoning(
   input: ChatCompletionsNativeReasoning,
 ): ChatCompletionsNativeReasoning {
@@ -551,15 +578,19 @@ function validateNativeReasoning(
   return result;
 }
 
+/** 执行「sameNativeReasoning」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function sameNativeReasoning(
   left: ChatCompletionsNativeReasoning,
   right: Readonly<Record<string, string | number | boolean>>,
 ): boolean {
-  const leftEntries = Object.entries(left).toSorted(([a], [b]) => a.localeCompare(b));
-  const rightEntries = Object.entries(right).toSorted(([a], [b]) => a.localeCompare(b));
+  const leftEntries = Object.entries(left).toSorted(/** 执行「leftEntries」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+([a], [b]) => a.localeCompare(b));
+  const rightEntries = Object.entries(right).toSorted(/** 执行「rightEntries」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+([a], [b]) => a.localeCompare(b));
   return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
 }
 
+/** 汇总「mergeToolCallDelta」对应指标，保持缺失字段语义且不重复计算同一来源。 */
 function mergeToolCallDelta(state: ToolCallState, call: Record<string, unknown>): void {
   const id = stringValue(call.id);
   if (id) {
@@ -579,10 +610,13 @@ function mergeToolCallDelta(state: ToolCallState, call: Record<string, unknown>)
   if (argumentsDelta) state.argumentsText += argumentsDelta;
 }
 
+/** 执行「completeToolCalls」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function completeToolCalls(calls: Map<number, ToolCallState>): ModelToolCall[] {
   return [...calls.values()]
-    .toSorted((left, right) => left.index - right.index || left.firstSeen - right.firstSeen)
-    .map((state) => {
+    .toSorted(/** 执行「map」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(left, right) => left.index - right.index || left.firstSeen - right.firstSeen)
+    .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(state) => {
       if (!state.id || !state.nameText) {
         throw new ModelProviderError(
           "invalid_model_response",
@@ -617,6 +651,7 @@ function completeToolCalls(calls: Map<number, ToolCallState>): ModelToolCall[] {
     });
 }
 
+/** 校验并规范化「normalizeFinishReason」输入，非法数据直接返回明确错误。 */
 function normalizeFinishReason(value: string): "stop" | "length" | "cancelled" {
   if (value === "stop" || value === "tool_calls" || value === "function_call") return "stop";
   if (value === "length") return "length";
@@ -628,6 +663,7 @@ function normalizeFinishReason(value: string): "stop" | "length" | "cancelled" {
   );
 }
 
+/** 读取「readUsage」所需数据，并遵守作用域、分页与容量边界。 */
 function readUsage(value: unknown): ModelUsage | undefined {
   const usage = recordValue(value);
   if (!usage) return undefined;
@@ -648,6 +684,7 @@ function readUsage(value: unknown): ModelUsage | undefined {
   };
 }
 
+/** 执行「chatCompletionsApiUrl」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function chatCompletionsApiUrl(baseUrl: string): URL {
   let url: URL;
   try {
@@ -666,6 +703,7 @@ export function chatCompletionsApiUrl(baseUrl: string): URL {
   return url;
 }
 
+/** 读取「readMaxRedirects」所需数据，并遵守作用域、分页与容量边界。 */
 function readMaxRedirects(value: number | undefined): number {
   if (value === undefined) return 0;
   if (!Number.isInteger(value) || value < 0 || value > 3) {
@@ -674,14 +712,17 @@ function readMaxRedirects(value: number | undefined): number {
   return value;
 }
 
+/** 判断「isRedirectStatus」对应条件，只返回判定结果且不修改输入状态。 */
 function isRedirectStatus(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
+/** 读取「readChoiceIndex」所需数据，并遵守作用域、分页与容量边界。 */
 function readChoiceIndex(choice: Record<string, unknown>): number {
   return integerValue(choice.index) ?? 0;
 }
 
+/** 校验并规范化「parseSseJson」输入，非法数据直接返回明确错误。 */
 function parseSseJson(message: SseEvent, token: string): Record<string, unknown> {
   let value: unknown;
   try {
@@ -704,6 +745,7 @@ function parseSseJson(message: SseEvent, token: string): Record<string, unknown>
   return value;
 }
 
+/** 执行「chatError」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function chatError(error: Record<string, unknown>, token: string): ModelProviderError {
   const code = stringValue(error.code) ?? stringValue(error.type);
   const message = stringValue(error.message) ?? "Chat Completions API 返回错误事件";
@@ -714,6 +756,7 @@ function chatError(error: Record<string, unknown>, token: string): ModelProvider
   );
 }
 
+/** 读取「readSse」所需数据，并遵守作用域、分页与容量边界。 */
 async function* readSse(body: ReadableStream<Uint8Array>): AsyncIterable<SseEvent> {
   let event: string | undefined;
   let data: string[] = [];
@@ -750,6 +793,7 @@ async function* readSse(body: ReadableStream<Uint8Array>): AsyncIterable<SseEven
   if (data.length > 0) yield { ...(event ? { event } : {}), data: data.join("\n") };
 }
 
+/** 读取「readLines」所需数据，并遵守作用域、分页与容量边界。 */
 async function* readLines(
   body: ReadableStream<Uint8Array>,
   limits: { maxLineBytes: number; maxTotalBytes: number },
@@ -811,12 +855,13 @@ async function* readLines(
     }
   } finally {
     if (!finished) {
-      try { await reader.cancel(); } catch { /* Keep the protocol error. */ }
+      try { await reader.cancel(); } catch { /* 保留原始协议错误，不用取消失败覆盖根因。 */ }
     }
     reader.releaseLock();
   }
 }
 
+/** 执行「nextLineSeparator」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function nextLineSeparator(
   value: string,
   finished: boolean,
@@ -831,11 +876,13 @@ function nextLineSeparator(
   return undefined;
 }
 
+/** 读取「readErrorBody」所需数据，并遵守作用域、分页与容量边界。 */
 async function readErrorBody(response: Response): Promise<string> {
   try { return short((await readLimitedText(response, MAX_HTTP_ERROR_BODY_BYTES)).trim(), 300); }
   catch { return ""; }
 }
 
+/** 读取「readLimitedText」所需数据，并遵守作用域、分页与容量边界。 */
 async function readLimitedText(response: Response, maxBytes: number): Promise<string> {
   if (!response.body) return "";
   const reader = response.body.getReader();
@@ -851,7 +898,8 @@ async function readLimitedText(response: Response, maxBytes: number): Promise<st
       }
       const remaining = maxBytes - bytes;
       if (remaining <= 0) {
-        await reader.cancel().catch(() => undefined);
+        await reader.cancel().catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
         return `${result}…`;
       }
       const accepted = part.value.byteLength <= remaining
@@ -861,7 +909,8 @@ async function readLimitedText(response: Response, maxBytes: number): Promise<st
       result += decoder.decode(accepted, { stream: part.value.byteLength <= remaining });
       if (part.value.byteLength > remaining) {
         result += decoder.decode();
-        await reader.cancel().catch(() => undefined);
+        await reader.cancel().catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
         return `${result}…`;
       }
     }
@@ -882,6 +931,7 @@ const SENSITIVE_FIELDS = [
   "password",
 ] as const;
 
+/** 执行「redact」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function redact(value: string, token: string): string {
   let redacted = token ? value.split(token).join("[REDACTED]") : value;
   try {
@@ -901,50 +951,62 @@ function redact(value: string, token: string): string {
   return short(redacted, 300);
 }
 
+/** 执行「redactSensitiveJson」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function redactSensitiveJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactSensitiveJson);
   if (!isRecord(value)) return value;
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+  return Object.fromEntries(Object.entries(value).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+([key, item]) => [
     key,
-    SENSITIVE_FIELDS.some((name) => name.toLowerCase() === key.toLowerCase())
+    SENSITIVE_FIELDS.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(name) => name.toLowerCase() === key.toLowerCase())
       ? "[REDACTED]"
       : redactSensitiveJson(item),
   ]));
 }
 
+/** 执行「escapeRegExp」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** 读取「readPositiveInteger」所需数据，并遵守作用域、分页与容量边界。 */
 function readPositiveInteger(value: number, field: string): number {
   if (!Number.isInteger(value) || value < 1) throw new Error(`${field} 必须是正整数`);
   return value;
 }
 
+/** 执行「integerValue」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function integerValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) ? value : undefined;
 }
 
+/** 执行「nonNegativeNumber」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function nonNegativeNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+/** 执行「stringValue」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/** 更新「recordValue」对应状态，并保持写入顺序、原子性与容量约束。 */
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? value : undefined;
 }
 
+/** 判断「isRecord」对应条件，只返回判定结果且不修改输入状态。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** 执行「short」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function short(value: string, length: number): string {
   return value.length <= length ? value : `${value.slice(0, length)}…`;
 }
 
+/** 判断「isAbort」对应条件，只返回判定结果且不修改输入状态。 */
 function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError"
     || isRecord(error) && error.name === "AbortError";

@@ -2,8 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ChatHeader } from "./ChatHeader.js";
 
-describe("ChatHeader", () => {
-  it("shows the bound ModelStudent context window", () => {
+describe("ChatHeader", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("shows the bound ModelStudent context window", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const html = renderToStaticMarkup(<ChatHeader
       connection={{ phase: "connected" }}
       identity={{
@@ -17,7 +19,8 @@ describe("ChatHeader", () => {
     expect(html).toContain("上下文窗口 262,144 tokens");
   });
 
-  it("omits context copy and its separator when no value exists", () => {
+  it("omits context copy and its separator when no value exists", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const html = renderToStaticMarkup(<ChatHeader
       connection={{ phase: "connected" }}
       identity={{ agentName: "Agent", modelName: "未知模型" }}

@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
+/** 构造「CapabilityMockRequest」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export interface CapabilityMockRequest {
   method: string;
   url: string;
@@ -8,6 +9,7 @@ export interface CapabilityMockRequest {
   body: Record<string, unknown>;
 }
 
+/** 构造「ResponsesCapabilityMockOptions」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export interface ResponsesCapabilityMockOptions {
   supportedEfforts: readonly string[];
   model?: string;
@@ -17,6 +19,7 @@ export interface ResponsesCapabilityMockOptions {
   effectiveEffort?: (requested: string | undefined) => string | undefined;
 }
 
+/** 构造「ResponsesCapabilityMockServer」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export interface ResponsesCapabilityMockServer {
   baseUrl: string;
   requests: CapabilityMockRequest[];
@@ -40,17 +43,21 @@ const reasoningItem = {
   status: "completed",
 } as const;
 
+/** 构造「startResponsesCapabilityMockServer」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 export async function startResponsesCapabilityMockServer(
   options: ResponsesCapabilityMockOptions,
 ): Promise<ResponsesCapabilityMockServer> {
   const requests: CapabilityMockRequest[] = [];
-  const server = createServer((request, response) => {
-    void handle(request, response, options, requests).catch((error: unknown) => {
+  const server = createServer(/** 构造「server」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(request, response) => {
+    void handle(request, response, options, requests).catch(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error: unknown) => {
       if (!response.headersSent) response.writeHead(500, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { code: "mock_failure", message: String(error) } }));
     });
   });
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
@@ -58,13 +65,17 @@ export async function startResponsesCapabilityMockServer(
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     requests,
-    close: () => new Promise<void>((resolve, reject) => {
-      server.close((error) => error ? reject(error) : resolve());
+    close: /** 构造「close」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => new Promise<void>(/** 构造「close」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(resolve, reject) => {
+      server.close(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error) => error ? reject(error) : resolve());
       server.closeIdleConnections();
     }),
   };
 }
 
+/** 构造「handle」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function handle(
   request: IncomingMessage,
   response: ServerResponse,
@@ -122,6 +133,7 @@ async function handle(
   streamEvents(response, textEvents(options, effectiveEffort));
 }
 
+/** 构造「textEvents」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function textEvents(
   options: ResponsesCapabilityMockOptions,
   effectiveEffort: string | undefined,
@@ -141,6 +153,7 @@ function textEvents(
   ];
 }
 
+/** 构造「toolEvents」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function toolEvents(
   options: ResponsesCapabilityMockOptions,
   effectiveEffort: string | undefined,
@@ -173,6 +186,7 @@ function toolEvents(
   ];
 }
 
+/** 构造「finalTextEvents」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function finalTextEvents(
   options: ResponsesCapabilityMockOptions,
   effectiveEffort: string | undefined,
@@ -191,6 +205,7 @@ function finalTextEvents(
   ];
 }
 
+/** 构造「createdEvent」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function createdEvent(
   options: ResponsesCapabilityMockOptions,
   effectiveEffort: string | undefined,
@@ -201,6 +216,7 @@ function createdEvent(
   };
 }
 
+/** 构造「completedEvent」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function completedEvent(
   options: ResponsesCapabilityMockOptions,
   effectiveEffort: string | undefined,
@@ -212,6 +228,7 @@ function completedEvent(
   };
 }
 
+/** 构造「envelope」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function envelope(
   status: "in_progress" | "completed",
   options: ResponsesCapabilityMockOptions,
@@ -236,6 +253,7 @@ function envelope(
   };
 }
 
+/** 构造「thoughtEvents」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function thoughtEvents(options: ResponsesCapabilityMockOptions): Array<Record<string, unknown>> {
   if (options.thought === false) return [];
   return [{
@@ -247,6 +265,7 @@ function thoughtEvents(options: ResponsesCapabilityMockOptions): Array<Record<st
   }];
 }
 
+/** 构造「streamEvents」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function streamEvents(response: ServerResponse, events: readonly Record<string, unknown>[]): void {
   response.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -258,22 +277,28 @@ function streamEvents(response: ServerResponse, events: readonly Record<string, 
   response.end();
 }
 
+/** 构造「forcedProbeTool」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function forcedProbeTool(body: Record<string, unknown>): boolean {
   const choice = record(body.tool_choice);
   return choice?.type === "function" && choice.name === "mk_capability_probe";
 }
 
+/** 构造「effort」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function effort(body: Record<string, unknown>): string | undefined {
   const reasoning = record(body.reasoning);
   return typeof reasoning?.effort === "string" ? reasoning.effort : undefined;
 }
 
+/** 构造「containsType」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function containsType(value: unknown, type: string): boolean {
-  if (Array.isArray(value)) return value.some((item) => containsType(item, type));
+  if (Array.isArray(value)) return value.some(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(item) => containsType(item, type));
   const item = record(value);
-  return item ? item.type === type || Object.values(item).some((child) => containsType(child, type)) : false;
+  return item ? item.type === type || Object.values(item).some(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(child) => containsType(child, type)) : false;
 }
 
+/** 构造「readBody」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -283,13 +308,16 @@ async function readBody(request: IncomingMessage): Promise<Record<string, unknow
   return result;
 }
 
+/** 构造「headers」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function headers(request: IncomingMessage): Record<string, string> {
-  return Object.fromEntries(Object.entries(request.headers).flatMap(([key, value]) => {
+  return Object.fromEntries(Object.entries(request.headers).flatMap(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+([key, value]) => {
     if (value === undefined) return [];
     return [[key, Array.isArray(value) ? value.join(", ") : value]];
   }));
 }
 
+/** 构造「record」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>

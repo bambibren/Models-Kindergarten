@@ -5,7 +5,7 @@ const MAX_MCP_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 /** 创建 Transport 专用 fetch，使 OAuth 元数据和每次重定向也经过同一网络策略。 */
 export function createMcpFetch(allowPrivateNetwork: boolean): typeof fetch {
-  return async (input, init) => {
+  return /** 根据已校验输入构建「createMcpFetch」结果，不额外持有调用方的大对象。 */ async (input, init) => {
     const url = requestUrl(input);
     await assertMcpUrl(url, allowPrivateNetwork);
     const response = await fetch(input, { ...init, redirect: "manual" });
@@ -17,6 +17,7 @@ export function createMcpFetch(allowPrivateNetwork: boolean): typeof fetch {
   };
 }
 
+/** 校验并规范化「assertMcpUrl」输入，非法数据直接返回明确错误。 */
 export async function assertMcpUrl(url: URL, allowPrivateNetwork: boolean): Promise<void> {
   if (url.username || url.password) throw new Error("MCP URL 不允许包含认证信息");
   const loopback = isLoopbackHost(url.hostname);
@@ -27,22 +28,26 @@ export async function assertMcpUrl(url: URL, allowPrivateNetwork: boolean): Prom
   const addresses = isIP(url.hostname)
     ? [{ address: url.hostname }]
     : await lookup(url.hostname, { all: true, verbatim: true });
-  if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
+  if (addresses.length === 0 || addresses.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+({ address }) => isPrivateAddress(address))) {
     throw new Error("MCP URL 指向本机、私有网络或保留地址");
   }
 }
 
+/** 执行「requestUrl」主流程，传播取消与失败并在结束时清理临时资源。 */
 function requestUrl(input: string | URL | Request): URL {
   if (input instanceof URL) return input;
   if (typeof input === "string") return new URL(input);
   return new URL(input.url);
 }
 
+/** 判断「isLoopbackHost」对应条件，只返回判定结果且不修改输入状态。 */
 function isLoopbackHost(host: string): boolean {
   const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
 }
 
+/** 判断「isPrivateAddress」对应条件，只返回判定结果且不修改输入状态。 */
 function isPrivateAddress(value: string): boolean {
   const normalized = value.toLowerCase();
   if (normalized === "::1" || normalized === "::" || normalized.startsWith("fe80:")) return true;
@@ -57,6 +62,7 @@ function isPrivateAddress(value: string): boolean {
     (a === 192 && b === 168) || a >= 224;
 }
 
+/** 执行「limitResponse」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function limitResponse(response: Response, maxBytes: number): Response {
   const declared = Number(response.headers.get("content-length") ?? "0");
   if (declared > maxBytes) {
@@ -66,7 +72,8 @@ function limitResponse(response: Response, maxBytes: number): Response {
   if (!response.body) return response;
   let total = 0;
   const limited = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
+    /** 执行「transform」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+transform(chunk, controller) {
       total += chunk.byteLength;
       if (total > maxBytes) {
         controller.error(new Error(`MCP 响应超过 ${maxBytes} 字节限制`));

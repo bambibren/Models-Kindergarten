@@ -12,22 +12,28 @@ import {
   versionTokenLabel,
 } from "./context-lab-state.js";
 
-describe("context lab state", () => {
-  it("requires two different strategies before a fresh experiment can run", () => {
+describe("context lab state", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("requires two different strategies before a fresh experiment can run", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const versions = createFreshVersions();
     expect(canRunExperiment("fresh_prompt", "解释这个页面", versions)).toBe(false);
-    const changed = updateModule(versions, "b", "memory", (module) => ({ ...module, enabled: true }));
+    const changed = updateModule(versions, "b", "memory", /** 构造「changed」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(module) => ({ ...module, enabled: true }));
     expect(canRunExperiment("fresh_prompt", "解释这个页面", changed)).toBe(true);
   });
 
-  it("keeps historical snapshot immutable and reuses it", () => {
+  it("keeps historical snapshot immutable and reuses it", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const versions = createHistoryVersions();
-    const changed = updateModule(versions, "a", "history", (module) => ({ ...module, historyTurns: 2 }));
+    const changed = updateModule(versions, "a", "history", /** 构造「changed」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(module) => ({ ...module, historyTurns: 2 }));
     expect(changed).toBe(versions);
     expect(versions[0]?.runPolicy).toBe("reuse_snapshot");
   });
 
-  it("allows two or three versions and never removes a locked version", () => {
+  it("allows two or three versions and never removes a locked version", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const history = createHistoryVersions();
     const withThird = addVersion(history);
     expect(withThird).toHaveLength(3);
@@ -36,21 +42,27 @@ describe("context lab state", () => {
     expect(removeVersion(withThird, "c")).toHaveLength(2);
   });
 
-  it("does not invent token usage for a standalone history policy", () => {
+  it("does not invent token usage for a standalone history policy", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const fresh = createFreshVersions();
-    const history = fresh[0]?.modules.find((module) => module.id === "history");
+    const history = fresh[0]?.modules.find(/** 构造「history」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(module) => module.id === "history");
     expect(history?.tokens).toBeNull();
     expect(history && moduleTokenLabel(history)).toBe("运行时计算");
     expect(fresh[0] && versionTokenLabel(fresh[0])).toContain("动态项");
 
-    const snapshot = createHistoryVersions()[0]?.modules.find((module) => module.id === "history");
+    const snapshot = createHistoryVersions()[0]?.modules.find(/** 构造「snapshot」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(module) => module.id === "history");
     expect(snapshot?.tokens).toBe(162);
   });
 
-  it("recalculates selectable module tokens when Skills or MCP selections change", () => {
+  it("recalculates selectable module tokens when Skills or MCP selections change", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const version = createFreshVersions()[0];
-    const skills = version?.modules.find((module) => module.id === "skills");
-    const mcp = version?.modules.find((module) => module.id === "mcp");
+    const skills = version?.modules.find(/** 构造「skills」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(module) => module.id === "skills");
+    const mcp = version?.modules.find(/** 构造「mcp」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(module) => module.id === "mcp");
     expect(skills?.tokens).toBe(126);
     expect(mcp?.tokens).toBe(292);
     expect(skills && updateSelectedItems(skills, ["sandbox-notes"]).tokens).toBe(64);
@@ -60,18 +72,22 @@ describe("context lab state", () => {
     if (!version || !skills) return;
     const changed = {
       ...version,
-      modules: version.modules.map((module) => module.id === "skills" ? updateSelectedItems(module, ["web-static"]) : module),
+      modules: version.modules.map(/** 构造「modules」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(module) => module.id === "skills" ? updateSelectedItems(module, ["web-static"]) : module),
     };
     expect(versionTokenLabel(version)).toBe("静态约 1022 tokens + 动态项");
     expect(versionTokenLabel(changed)).toBe("静态约 958 tokens + 动态项");
   });
 
-  it("imports a cloned Agent strategy only into an editable version", () => {
+  it("imports a cloned Agent strategy only into an editable version", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const fresh = createFreshVersions();
-    const imported = fresh[0]?.modules.map((module) => ({ ...module, enabled: module.id === "memory" }));
+    const imported = fresh[0]?.modules.map(/** 构造「imported」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(module) => ({ ...module, enabled: module.id === "memory" }));
     expect(imported).toBeDefined();
     const changed = replaceVersionModules(fresh, "b", imported ?? []);
-    expect(changed[1]?.modules.find((module) => module.id === "memory")?.enabled).toBe(true);
+    expect(changed[1]?.modules.find(/** 构造「enabled」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(module) => module.id === "memory")?.enabled).toBe(true);
     expect(changed[1]?.modules).not.toBe(imported);
 
     const locked = createHistoryVersions();

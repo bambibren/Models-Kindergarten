@@ -1,6 +1,9 @@
+/** 描述「SkillScope」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type SkillScope = "builtin" | "project" | "user";
+/** 描述「SkillSourceKind」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type SkillSourceKind = "builtin" | "project" | "user" | "git" | "resource";
 
+/** 描述「SkillManifest」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SkillManifest {
   name: string;
   description: string;
@@ -10,6 +13,7 @@ export interface SkillManifest {
   metadata?: Record<string, string>;
 }
 
+/** 描述「SkillInstallRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SkillInstallRecord {
   name: string;
   description: string;
@@ -27,10 +31,12 @@ export interface SkillInstallRecord {
   manifest: SkillManifest;
 }
 
+/** 描述「SkillDefinition」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SkillDefinition extends SkillInstallRecord {
   instructions: string;
 }
 
+/** 描述「SkillRoot」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SkillRoot {
   path: string;
   scope: SkillScope;
@@ -38,11 +44,13 @@ export interface SkillRoot {
   source: SkillSourceKind;
 }
 
+/** 描述「SkillInstallSource」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type SkillInstallSource =
   | { kind: "local"; path: string }
   | { kind: "git"; url: string; ref: string; subdir?: string }
   | { kind: "resource"; url: string };
 
+/** 描述「SkillInstallRequest」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SkillInstallRequest {
   source: SkillInstallSource;
   approved: boolean;

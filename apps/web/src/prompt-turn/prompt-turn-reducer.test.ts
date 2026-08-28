@@ -14,8 +14,10 @@ const request: PromptRequestState = {
   text: "测试 Prompt",
 };
 
-describe("prompt turn reducer", () => {
-  it("全量 load 回放活动 TurnState 时，从 idle 恢复统一状态机并接收授权交互", () => {
+describe("prompt turn reducer", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("全量 load 回放活动 TurnState 时，从 idle 恢复统一状态机并接收授权交互", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     let state = promptTurnReducer(idlePromptTurn, {
       type: "turn/remote-state",
       sessionId: "session-restored",
@@ -49,7 +51,8 @@ describe("prompt turn reducer", () => {
     });
   });
 
-  it("用 order + byId 保存多个并发交互，并在全部处理后恢复 running", () => {
+  it("用 order + byId 保存多个并发交互，并在全部处理后恢复 running", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     let state = promptTurnReducer(idlePromptTurn, { type: "turn/start", request });
     state = promptTurnReducer(state, {
       type: "turn/remote-state",
@@ -82,7 +85,8 @@ describe("prompt turn reducer", () => {
     expect(state).toMatchObject({ status: "active", request, interactions: { order: [] } });
   });
 
-  it("只接受当前 operation 的终态，并由 reducer 生成稳定操作", () => {
+  it("只接受当前 operation 的终态，并由 reducer 生成稳定操作", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const running = promptTurnReducer(idlePromptTurn, { type: "turn/start", request });
     const stale = promptTurnReducer(running, {
       type: "turn/fail",
@@ -103,7 +107,8 @@ describe("prompt turn reducer", () => {
     });
   });
 
-  it("连接失败和用户取消分别进入不同终态", () => {
+  it("连接失败和用户取消分别进入不同终态", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const running = promptTurnReducer(idlePromptTurn, { type: "turn/start", request });
     const disconnected = promptTurnReducer(running, {
       type: "turn/fail",
@@ -122,7 +127,8 @@ describe("prompt turn reducer", () => {
     expect(cancelled).toMatchObject({ status: "cancelled", request });
   });
 
-  it("服务端终态到达后不被矛盾的本地 RPC 结果覆盖", () => {
+  it("服务端终态到达后不被矛盾的本地 RPC 结果覆盖", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const active = promptTurnReducer(idlePromptTurn, { type: "turn/start", request });
     const completed = promptTurnReducer(active, {
       type: "turn/remote-state",
@@ -145,7 +151,8 @@ describe("prompt turn reducer", () => {
     expect(lateFailure).toBe(cancelled);
   });
 
-  it("会话总量仅在 Prompt Turn 非活动状态展示", () => {
+  it("会话总量仅在 Prompt Turn 非活动状态展示", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const running = promptTurnReducer(idlePromptTurn, { type: "turn/start", request });
     const pending = promptTurnReducer(running, {
       type: "turn/remote-state",
@@ -189,6 +196,7 @@ describe("prompt turn reducer", () => {
   });
 });
 
+/** 构造「permission」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function permission(toolCallId: string) {
   const id = `permission:${toolCallId}`;
   const request: acp.RequestPermissionRequest = {
@@ -205,6 +213,7 @@ function permission(toolCallId: string) {
   return { id, kind: "permission" as const, request };
 }
 
+/** 构造「pendingPermission」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function pendingPermission(toolCallId: string) {
   return {
     schemaVersion: 1 as const,

@@ -3,8 +3,10 @@ import { makeAcpMeta } from "@kindergarten/contracts";
 import { describe, expect, it } from "vitest";
 import { chatReducer, emptyChat } from "./chat-reducer.js";
 
-describe("chatReducer", () => {
-  it("把 ACP MessageMeta 中的 Artifact Mention 投影到用户消息", () => {
+describe("chatReducer", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("把 ACP MessageMeta 中的 Artifact Mention 投影到用户消息", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     let state = chatReducer(emptyChat, { type: "session/open", sessionId: "session-a" });
     state = chatReducer(state, { type: "stream/start", operationId: "op-a", source: "prompt", turnId: "turn-a", optimisticContent: [{ type: "text", text: "使用它" }] });
     state = chatReducer(state, { type: "acp/update", value: {
@@ -24,7 +26,8 @@ describe("chatReducer", () => {
       artifactMentions: [{ artifactId: "artifact_12345678", displayName: "海报" }],
     });
   });
-  it("在 PromptResponse 前只更新 streamingChatEntries，结束后整体提交", () => {
+  it("在 PromptResponse 前只更新 streamingChatEntries，结束后整体提交", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     let state = openStream("prompt", [{ type: "text", text: "你好" }]);
 
     state = chatReducer(state, {
@@ -135,7 +138,8 @@ describe("chatReducer", () => {
     expect(state.streaming).toBeNull();
   });
 
-  it("并行 Tool 按首次出现顺序就地更新，不按完成顺序重排", () => {
+  it("并行 Tool 按首次出现顺序就地更新，不按完成顺序重排", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     let state = openStream("load");
     state = update(state, {
       sessionUpdate: "tool_call",
@@ -188,7 +192,8 @@ describe("chatReducer", () => {
     ]);
   });
 
-  it("允许 tool_call_update 先到并在原位置补全", () => {
+  it("允许 tool_call_update 先到并在原位置补全", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     let state = openStream("load");
     state = update(state, {
       sessionUpdate: "tool_call_update",
@@ -213,7 +218,8 @@ describe("chatReducer", () => {
     ]);
   });
 
-  it("忽略其他 session 的消息", () => {
+  it("忽略其他 session 的消息", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const state = chatReducer(openStream("load"), {
       type: "acp/update",
       value: {
@@ -224,7 +230,8 @@ describe("chatReducer", () => {
     expect(state.streamingChatEntries.order).toHaveLength(0);
   });
 
-  it("忽略其他 session 的上下文窗口快照", () => {
+  it("忽略其他 session 的上下文窗口快照", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const state = chatReducer(openStream("load"), {
       type: "context-window/usage",
       value: {
@@ -235,7 +242,8 @@ describe("chatReducer", () => {
     expect(state.streamingChatEntries.order).toHaveLength(0);
   });
 
-  it("load 恢复活动 Turn 后继续接收授权后的工具更新和回复", () => {
+  it("load 恢复活动 Turn 后继续接收授权后的工具更新和回复", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     let state = openStream("load");
     state = update(state, {
       sessionUpdate: "tool_call",
@@ -293,7 +301,8 @@ describe("chatReducer", () => {
     expect(state.streaming).toBeNull();
   });
 
-  it("提交旧流后可以开始新的 streamingEntries", () => {
+  it("提交旧流后可以开始新的 streamingEntries", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     let state = openStream("prompt", [{ type: "text", text: "上一轮" }]);
     state = chatReducer(state, {
       type: "stream/commit",
@@ -309,8 +318,37 @@ describe("chatReducer", () => {
     });
     expect(state.streaming?.operationId).toBe("operation-2");
   });
+
+  it("历史分页最多保留最新一百个完整 Turn", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    let state = chatReducer(emptyChat, { type: "session/open", sessionId: "long-session" });
+    const order = Array.from({ length: 101 }, /** 构造「order」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(_, index) => `message:${index}`);
+    state = chatReducer(state, {
+      type: "history/prepend",
+      maxTurns: 100,
+      entries: {
+        order,
+        byId: Object.fromEntries(order.map(/** 构造「byId」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(id, index) => [id, {
+          type: "message" as const,
+          id,
+          messageId: String(index),
+          turnId: `turn-${index}`,
+          role: "user" as const,
+          content: [{ type: "text" as const, text: String(index) }],
+          status: "done" as const,
+        }])),
+      },
+    });
+
+    expect(state.historyChatEntries.order).toHaveLength(100);
+    expect(state.historyChatEntries.byId["message:0"]).toBeUndefined();
+    expect(state.historyChatEntries.byId["message:100"]).toMatchObject({ turnId: "turn-100" });
+  });
 });
 
+/** 构造「openStream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function openStream(
   source: "prompt" | "load",
   optimisticContent?: Array<{ type: "text"; text: string }>,
@@ -329,10 +367,13 @@ function openStream(
   return state;
 }
 
+/** 构造「values」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function values(collection: ReturnType<typeof openStream>["streamingChatEntries"]) {
-  return collection.order.map((id) => collection.byId[id]);
+  return collection.order.map(/** 构造「values」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(id) => collection.byId[id]);
 }
 
+/** 构造「update」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function update(state: ReturnType<typeof openStream>, value: SessionUpdate) {
   return chatReducer(state, {
     type: "acp/update",
@@ -340,6 +381,7 @@ function update(state: ReturnType<typeof openStream>, value: SessionUpdate) {
   });
 }
 
+/** 构造「messageNotice」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function messageNotice(
   role: "user" | "assistant",
   messageId: string,

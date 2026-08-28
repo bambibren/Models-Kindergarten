@@ -19,7 +19,13 @@ import {
   readProviderOpaqueContinuation,
 } from "./provider-continuation.js";
 
+const MAX_OLLAMA_LINE_BYTES = 1024 * 1024;
+const MAX_OLLAMA_STREAM_BYTES = 64 * 1024 * 1024;
+const MAX_OLLAMA_JSON_BODY_BYTES = 1024 * 1024;
+const MAX_OLLAMA_ERROR_BODY_BYTES = 64 * 1024;
+
 /** Ollama 是 V1 唯一面向用户的真实 Provider。 */
+/** 描述「OllamaProvider」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class OllamaProvider implements ModelProvider {
   private readonly circuit = new CircuitBreaker("ollama");
   readonly reasoningCapability: ModelReasoningCapability = {
@@ -30,20 +36,23 @@ export class OllamaProvider implements ModelProvider {
     defaultProfile: "balanced",
     native: { parameter: "think", values: [false, true] },
   };
-  constructor(readonly student: ModelStudent) {
+  /** 初始化「OllamaProvider」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(readonly student: ModelStudent) {
     if (student.provider.kind !== "ollama") {
       throw new Error("OllamaProvider 只能接收 ollama ModelStudent");
     }
   }
 
-  nativeReasoning(profile: ConcreteReasoningProfile): Record<string, boolean> {
+  /** 执行「nativeReasoning」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+nativeReasoning(profile: ConcreteReasoningProfile): Record<string, boolean> {
     if (profile !== "fast" && profile !== "balanced") {
       throw new Error(`当前 Ollama ModelStudent 不支持推理档位: ${profile}`);
     }
     return { think: profile === "balanced" };
   }
 
-  async verify(): Promise<void> {
+  /** 执行「verify」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async verify(): Promise<void> {
     let response: Response;
     try {
       response = await this.fetchWithResilience(
@@ -59,7 +68,7 @@ export class OllamaProvider implements ModelProvider {
         response.status === 429 || response.status >= 500,
       );
     }
-    const value = await response.json() as unknown;
+    const value = await readJsonAtMost(response, MAX_OLLAMA_JSON_BODY_BYTES, "模型目录");
     const models = readModelNames(value);
     if (!models.has(this.student.provider.model)) {
       throw new ModelProviderError(
@@ -70,7 +79,8 @@ export class OllamaProvider implements ModelProvider {
     }
   }
 
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 执行「serializeContext」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     let value: unknown;
     switch (fragment.kind) {
       case "system":
@@ -80,7 +90,8 @@ export class OllamaProvider implements ModelProvider {
         value = fragment.tools;
         break;
       case "messages":
-        value = fragment.messages.map((message) => toOllamaMessage(this.student, message));
+        value = fragment.messages.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(message) => toOllamaMessage(this.student, message));
         break;
       case "omitted":
         value = { sent: false, sourceIds: fragment.sourceIds };
@@ -94,7 +105,8 @@ export class OllamaProvider implements ModelProvider {
     };
   }
 
-  serializeInput(input: ModelInput): ModelContextSerialization {
+  /** 执行「serializeInput」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+serializeInput(input: ModelInput): ModelContextSerialization {
     return {
       provider: "ollama",
       model: this.student.provider.model,
@@ -103,7 +115,8 @@ export class OllamaProvider implements ModelProvider {
     };
   }
 
-  async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
+  /** 执行「stream」主流程，传播取消与失败并在结束时清理临时资源。 */
+async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
     let response: Response;
     try {
       response = await this.fetchWithResilience(
@@ -121,7 +134,7 @@ export class OllamaProvider implements ModelProvider {
     }
 
     if (!response.ok) {
-      const detail = (await response.text()).slice(0, 240);
+      const detail = (await readTextAtMost(response, MAX_OLLAMA_ERROR_BODY_BYTES)).slice(0, 240);
       throw new ModelProviderError(
         "model_request_failed",
         `Ollama 请求失败 (${response.status}): ${detail || response.statusText}`,
@@ -164,11 +177,14 @@ export class OllamaProvider implements ModelProvider {
     }
   }
 
-  private fetchWithResilience(
+  /** 读取「fetchWithResilience」所需数据，并遵守作用域、分页与容量边界。 */
+private fetchWithResilience(
     url: URL,
     init?: RequestInit,
   ): Promise<Response> {
-    return this.circuit.execute(() => withRetry(async () => {
+    return this.circuit.execute(/** 读取「fetchWithResilience」所需数据，并遵守作用域、分页与容量边界。 */
+() => withRetry(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+async () => {
       const response = await fetch(url, init);
       if (response.status === 429 || response.status >= 500) {
         await response.body?.cancel();
@@ -185,6 +201,7 @@ export class OllamaProvider implements ModelProvider {
   }
 }
 
+/** 根据已校验输入构建「toOllamaRequest」结果，不额外持有调用方的大对象。 */
 function toOllamaRequest(student: ModelStudent, input: ModelInput): Record<string, unknown> {
   const think = ollamaThink(student, input);
   return {
@@ -199,11 +216,13 @@ function toOllamaRequest(student: ModelStudent, input: ModelInput): Record<strin
     },
     messages: [
       toOllamaSystemMessage(input.systemPrompt),
-      ...input.messages.map((message) => toOllamaMessage(student, message)),
+      ...input.messages.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(message) => toOllamaMessage(student, message)),
     ],
   };
 }
 
+/** 执行「ollamaThink」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function ollamaThink(student: ModelStudent, input: ModelInput): boolean {
   if (input.reasoning === "disabled" || input.reasoning === undefined) {
     return input.reasoning !== "disabled";
@@ -228,10 +247,12 @@ function ollamaThink(student: ModelStudent, input: ModelInput): boolean {
   return input.reasoning.native.think;
 }
 
+/** 根据已校验输入构建「toOllamaSystemMessage」结果，不额外持有调用方的大对象。 */
 function toOllamaSystemMessage(content: string): Record<string, unknown> {
   return { role: "system", content };
 }
 
+/** 根据已校验输入构建「toOllamaMessage」结果，不额外持有调用方的大对象。 */
 function toOllamaMessage(student: ModelStudent, message: ModelInput["messages"][number]): Record<string, unknown> {
   if (message.providerOpaqueContinuation) {
     try {
@@ -255,7 +276,8 @@ function toOllamaMessage(student: ModelStudent, message: ModelInput["messages"][
     return {
       role: "assistant",
       content: message.content,
-      tool_calls: message.toolCalls.map((call) => ({
+      tool_calls: message.toolCalls.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(call) => ({
         function: { name: call.name, arguments: call.arguments },
       })),
     };
@@ -275,15 +297,18 @@ function toOllamaMessage(student: ModelStudent, message: ModelInput["messages"][
 }
 
 class RetryableHttpError extends Error {
-  constructor(readonly status: number) {
+  /** 初始化「RetryableHttpError」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(readonly status: number) {
     super(`HTTP ${status}`);
   }
 }
 
+/** 判断「isTransientModelError」对应条件，只返回判定结果且不修改输入状态。 */
 function isTransientModelError(error: unknown): boolean {
   return error instanceof RetryableHttpError || error instanceof TypeError;
 }
 
+/** 执行「modelConnectionError」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function modelConnectionError(error: unknown, message: string): ModelProviderError {
   if (error instanceof ModelProviderError) return error;
   if (error instanceof RetryableHttpError) {
@@ -295,10 +320,12 @@ function modelConnectionError(error: unknown, message: string): ModelProviderErr
   return new ModelProviderError("model_request_failed", message, false, { cause: error });
 }
 
+/** 判断「isAbort」对应条件，只返回判定结果且不修改输入状态。 */
 function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+/** 把未知异常转换为「errorText」文本，避免错误序列化过程再次抛出。 */
 function errorText(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
 }
@@ -314,6 +341,7 @@ interface ParsedChunk {
   outputTokens?: number;
 }
 
+/** 校验并规范化「parseChunk」输入，非法数据直接返回明确错误。 */
 function parseChunk(line: string): ParsedChunk {
   let value: unknown;
   try {
@@ -350,9 +378,11 @@ function parseChunk(line: string): ParsedChunk {
   };
 }
 
+/** 读取「readToolCalls」所需数据，并遵守作用域、分页与容量边界。 */
 function readToolCalls(value: unknown): ModelToolCall[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
+  return value.flatMap(/** 读取「readToolCalls」所需数据，并遵守作用域、分页与容量边界。 */
+(item) => {
     if (!isRecord(item) || !isRecord(item.function)) return [];
     const fn = item.function;
     if (typeof fn.name !== "string" || !isRecord(fn.arguments)) return [];
@@ -365,28 +395,47 @@ function readToolCalls(value: unknown): ModelToolCall[] {
   });
 }
 
+/** 读取「readModelNames」所需数据，并遵守作用域、分页与容量边界。 */
 function readModelNames(value: unknown): Set<string> {
   if (!isRecord(value) || !Array.isArray(value.models)) return new Set();
   return new Set(
-    value.models.flatMap((item) =>
+    value.models.flatMap(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(item) =>
       isRecord(item) && typeof item.name === "string" ? [item.name] : [],
     ),
   );
 }
 
+/** 读取「readLines」所需数据，并遵守作用域、分页与容量边界。 */
 async function* readLines(body: ReadableStream<Uint8Array>): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let pending = "";
+  let totalBytes = 0;
 
   try {
     while (true) {
       const { done, value } = await reader.read();
+      if (value) {
+        totalBytes += value.byteLength;
+        if (totalBytes > MAX_OLLAMA_STREAM_BYTES) {
+          await reader.cancel();
+          throw ollamaSizeError("流", MAX_OLLAMA_STREAM_BYTES);
+        }
+      }
       pending += decoder.decode(value, { stream: !done });
       const lines = pending.split("\n");
       pending = lines.pop() ?? "";
       for (const line of lines) {
+        if (Buffer.byteLength(line, "utf8") > MAX_OLLAMA_LINE_BYTES) {
+          await reader.cancel();
+          throw ollamaSizeError("单行", MAX_OLLAMA_LINE_BYTES);
+        }
         if (line.trim()) yield line;
+      }
+      if (Buffer.byteLength(pending, "utf8") > MAX_OLLAMA_LINE_BYTES) {
+        await reader.cancel();
+        throw ollamaSizeError("单行", MAX_OLLAMA_LINE_BYTES);
       }
       if (done) break;
     }
@@ -396,6 +445,60 @@ async function* readLines(body: ReadableStream<Uint8Array>): AsyncIterable<strin
   }
 }
 
+/** 读取「readJsonAtMost」所需数据，并遵守作用域、分页与容量边界。 */
+async function readJsonAtMost(response: Response, maxBytes: number, scope: string): Promise<unknown> {
+  const text = await readTextAtMost(response, maxBytes);
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new ModelProviderError("invalid_model_response", `Ollama ${scope}不是有效 JSON`, false, { cause: error });
+  }
+}
+
+/** 读取「readTextAtMost」所需数据，并遵守作用域、分页与容量边界。 */
+async function readTextAtMost(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return "";
+  const declared = Number(response.headers.get("content-length") ?? "0");
+  if (declared > maxBytes) {
+    await response.body.cancel();
+    throw ollamaSizeError("响应", maxBytes);
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw ollamaSizeError("响应", maxBytes);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/** 执行「ollamaSizeError」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function ollamaSizeError(scope: string, maxBytes: number): ModelProviderError {
+  return new ModelProviderError(
+    "invalid_model_response",
+    `Ollama ${scope}超过 ${maxBytes} 字节资源上限`,
+    false,
+  );
+}
+
+/** 判断「isRecord」对应条件，只返回判定结果且不修改输入状态。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

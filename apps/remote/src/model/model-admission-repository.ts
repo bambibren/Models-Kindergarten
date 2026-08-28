@@ -10,6 +10,7 @@ import {
 import type { SecretRef } from "../mcp/mcp-types.js";
 import { AtomicJsonStore } from "../storage/atomic-json-store.js";
 
+/** 描述「ProviderConnectionRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ProviderConnectionRecord {
   schemaVersion: 1;
   recordKind: "provider_connection";
@@ -24,6 +25,7 @@ export interface ProviderConnectionRecord {
   updatedAt: string;
 }
 
+/** 描述「ManagedModelStudentRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ManagedModelStudentRecord {
   schemaVersion: 1;
   recordKind: "model_student";
@@ -35,7 +37,7 @@ export interface ManagedModelStudentRecord {
   sizeClass: "large";
   contextWindowTokens?: number;
   /** 旧记录缺省视为 active；新事务必须显式写入。 */
-  lifecycle?: "installing" | "active" | "rollback_pending" | "deleting";
+  lifecycle?: "installing" | "active" | "capacity_blocked" | "rollback_pending" | "deleting";
   installationTestId?: string;
   generationDefaults: {
     reasoningProfile: ConcreteReasoningProfile;
@@ -47,8 +49,10 @@ export interface ManagedModelStudentRecord {
 
 type AdmissionCatalogRecord = ProviderConnectionRecord | ManagedModelStudentRecord;
 
+/** 描述「ModelAdmissionConflictError」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class ModelAdmissionConflictError extends Error {
-  constructor(readonly reason: "duplicate_id" | "duplicate_test" | "duplicate_model", message: string) {
+  /** 初始化「ModelAdmissionConflictError」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(readonly reason: "duplicate_id" | "duplicate_test" | "duplicate_model", message: string) {
     super(message);
   }
 }
@@ -58,21 +62,29 @@ export class ModelAdmissionRepository {
   private readonly tests: AtomicJsonStore<ModelStudentTestRecord>;
   private readonly catalog: AtomicJsonStore<AdmissionCatalogRecord>;
 
-  constructor(testsFile: string, catalogFile: string) {
+  /** 初始化「ModelAdmissionRepository」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(testsFile: string, catalogFile: string) {
     this.tests = new AtomicJsonStore({ file: testsFile, schemaVersion: 1, validate: isTestRecord });
     this.catalog = new AtomicJsonStore({ file: catalogFile, schemaVersion: 1, validate: isCatalogRecord });
   }
 
-  async putTest(value: ModelStudentTestRecord): Promise<void> {
-    await this.tests.update((records) => [
-      ...records.filter((item) => item.testId !== value.testId),
-      structuredClone(value),
-    ]);
+  /** 更新「putTest」对应状态，并保持写入顺序、原子性与容量约束。 */
+async putTest(value: ModelStudentTestRecord): Promise<void> {
+    const now = Date.now();
+    await this.tests.update(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(records) => {
+      const active = records.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.testId !== value.testId && !isExpired(item.expiresAt, now));
+      // expired 是对调用方的一次性状态，不再重新写回已过期的临时测试记录。
+      return isExpired(value.expiresAt, now) ? active : [...active, structuredClone(value)];
+    });
   }
 
   /** 启动时一次性固化旧受管模型缺失的模型侧默认配置。 */
   async persistMigrations(): Promise<void> {
-    await this.catalog.update((records) => records.map((item) => {
+    await this.catalog.update(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(records) => records.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => {
       if (item.recordKind !== "model_student") return item;
       const legacy = item as ManagedModelStudentRecord & {
         generationDefaults?: ManagedModelStudentRecord["generationDefaults"];
@@ -86,31 +98,51 @@ export class ModelAdmissionRepository {
     }));
   }
 
-  async getTest(testId: string): Promise<ModelStudentTestRecord | undefined> {
-    const item = (await this.tests.read()).find((candidate) => candidate.testId === testId);
-    return item ? normalizeTestRecord(item) : undefined;
+  /** 读取「getTest」所需数据，并遵守作用域、分页与容量边界。 */
+async getTest(testId: string): Promise<ModelStudentTestRecord | undefined> {
+    const now = Date.now();
+    return this.tests.update(/** 读取「getTest」所需数据，并遵守作用域、分页与容量边界。 */
+(records) => {
+      const item = records.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.testId === testId);
+      const active = records.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => !isExpired(candidate.expiresAt, now));
+      return {
+        records: active,
+        // 首次命中过期记录时仍把事实返回给 Service；清理只影响后续查询。
+        result: item ? normalizeTestRecord(item) : undefined,
+      };
+    });
   }
 
-  async install(connection: ProviderConnectionRecord, student: ManagedModelStudentRecord): Promise<void> {
+  /** 执行「install」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async install(connection: ProviderConnectionRecord, student: ManagedModelStudentRecord): Promise<void> {
     if (connection.connectionId !== student.connectionId || connection.ownerId !== student.ownerId) {
       throw new Error("ProviderConnection 与 ModelStudent 归属不一致");
     }
-    await this.catalog.update((records) => {
-      if (records.some((item) => item.recordKind === "provider_connection" && item.connectionId === connection.connectionId)) {
+    await this.catalog.update(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(records) => {
+      if (records.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.recordKind === "provider_connection" && item.connectionId === connection.connectionId)) {
         throw new ModelAdmissionConflictError("duplicate_id", `ProviderConnection 已存在: ${connection.connectionId}`);
       }
-      if (records.some((item) => item.recordKind === "model_student" && item.modelStudentId === student.modelStudentId)) {
+      if (records.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.recordKind === "model_student" && item.modelStudentId === student.modelStudentId)) {
         throw new ModelAdmissionConflictError("duplicate_id", `ModelStudent 已存在: ${student.modelStudentId}`);
       }
-      if (student.installationTestId && records.some((item) =>
+      if (student.installationTestId && records.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) =>
         item.recordKind === "model_student" && item.installationTestId === student.installationTestId,
       )) {
         throw new ModelAdmissionConflictError("duplicate_test", "同一模型测试已经完成过入园");
       }
       const connections = new Map(records
-        .filter((item): item is ProviderConnectionRecord => item.recordKind === "provider_connection")
-        .map((item) => [item.connectionId, item]));
-      if (records.some((item) => {
+        .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item): item is ProviderConnectionRecord => item.recordKind === "provider_connection")
+        .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => [item.connectionId, item]));
+      if (records.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => {
         if (item.recordKind !== "model_student" || item.ownerId !== student.ownerId || item.model !== student.model) return false;
         const existing = connections.get(item.connectionId);
         return existing?.baseUrl === connection.baseUrl && existing.protocol === connection.protocol;
@@ -121,13 +153,16 @@ export class ModelAdmissionRepository {
     });
   }
 
-  async setLifecycle(
+  /** 更新「setLifecycle」对应状态，并保持写入顺序、原子性与容量约束。 */
+async setLifecycle(
     modelStudentId: string,
     ownerId: string,
     lifecycle: NonNullable<ManagedModelStudentRecord["lifecycle"]>,
   ): Promise<ManagedModelStudentRecord> {
-    const result = await this.catalog.update((records) => {
-      const index = records.findIndex((item) => item.recordKind === "model_student" && item.modelStudentId === modelStudentId && item.ownerId === ownerId);
+    const result = await this.catalog.update(/** 执行「result」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(records) => {
+      const index = records.findIndex(/** 执行「index」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => item.recordKind === "model_student" && item.modelStudentId === modelStudentId && item.ownerId === ownerId);
       if (index < 0) throw new Error(`ModelStudent 不存在: ${modelStudentId}`);
       const current = records[index];
       if (!current || current.recordKind !== "model_student") throw new Error(`ModelStudent 不存在: ${modelStudentId}`);
@@ -143,14 +178,17 @@ export class ModelAdmissionRepository {
     return result;
   }
 
-  async setSnapshot(
+  /** 更新「setSnapshot」对应状态，并保持写入顺序、原子性与容量约束。 */
+async setSnapshot(
     modelStudentId: string,
     ownerId: string,
     snapshot: ProviderCapabilitySnapshot,
   ): Promise<ManagedModelStudentRecord> {
     const normalized = readProviderCapabilitySnapshot(snapshot);
-    const result = await this.catalog.update((records) => {
-      const index = records.findIndex((item) => item.recordKind === "model_student" && item.modelStudentId === modelStudentId && item.ownerId === ownerId);
+    const result = await this.catalog.update(/** 执行「result」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(records) => {
+      const index = records.findIndex(/** 执行「index」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => item.recordKind === "model_student" && item.modelStudentId === modelStudentId && item.ownerId === ownerId);
       if (index < 0) throw new Error(`ModelStudent 不存在: ${modelStudentId}`);
       const current = records[index];
       if (!current || current.recordKind !== "model_student") throw new Error(`ModelStudent 不存在: ${modelStudentId}`);
@@ -166,80 +204,104 @@ export class ModelAdmissionRepository {
     return result;
   }
 
-  async listStudents(ownerId?: string): Promise<ManagedModelStudentRecord[]> {
+  /** 读取「listStudents」所需数据，并遵守作用域、分页与容量边界。 */
+async listStudents(ownerId?: string): Promise<ManagedModelStudentRecord[]> {
     return (await this.catalog.read())
-      .filter((item): item is ManagedModelStudentRecord => item.recordKind === "model_student")
-      .filter((item) => ownerId === undefined || item.ownerId === ownerId)
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item): item is ManagedModelStudentRecord => item.recordKind === "model_student")
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => ownerId === undefined || item.ownerId === ownerId)
       .map(normalizeStudentRecord);
   }
 
-  async listConnections(ownerId?: string): Promise<ProviderConnectionRecord[]> {
+  /** 读取「listConnections」所需数据，并遵守作用域、分页与容量边界。 */
+async listConnections(ownerId?: string): Promise<ProviderConnectionRecord[]> {
     return (await this.catalog.read())
-      .filter((item): item is ProviderConnectionRecord => item.recordKind === "provider_connection")
-      .filter((item) => ownerId === undefined || item.ownerId === ownerId)
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item): item is ProviderConnectionRecord => item.recordKind === "provider_connection")
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => ownerId === undefined || item.ownerId === ownerId)
       .map(normalizeConnectionRecord);
   }
 
-  async getStudent(modelStudentId: string): Promise<ManagedModelStudentRecord | undefined> {
-    return (await this.listStudents()).find((item) => item.modelStudentId === modelStudentId);
+  /** 读取「getStudent」所需数据，并遵守作用域、分页与容量边界。 */
+async getStudent(modelStudentId: string): Promise<ManagedModelStudentRecord | undefined> {
+    return (await this.listStudents()).find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.modelStudentId === modelStudentId);
   }
 
-  async getConnection(connectionId: string): Promise<ProviderConnectionRecord | undefined> {
-    return (await this.listConnections()).find((item) => item.connectionId === connectionId);
+  /** 读取「getConnection」所需数据，并遵守作用域、分页与容量边界。 */
+async getConnection(connectionId: string): Promise<ProviderConnectionRecord | undefined> {
+    return (await this.listConnections()).find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.connectionId === connectionId);
   }
 
-  async installed(): Promise<Array<{ student: ManagedModelStudentRecord; connection: ProviderConnectionRecord }>> {
+  /** 执行「installed」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async installed(): Promise<Array<{ student: ManagedModelStudentRecord; connection: ProviderConnectionRecord }>> {
     const records = await this.catalog.read();
     const connectionRecords = records
-      .filter((item): item is ProviderConnectionRecord => item.recordKind === "provider_connection")
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item): item is ProviderConnectionRecord => item.recordKind === "provider_connection")
       .map(normalizeConnectionRecord);
     const studentRecords = records
-      .filter((item): item is ManagedModelStudentRecord => item.recordKind === "model_student")
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item): item is ManagedModelStudentRecord => item.recordKind === "model_student")
       .map(normalizeStudentRecord);
-    if (new Set(connectionRecords.map((item) => item.connectionId)).size !== connectionRecords.length) {
+    if (new Set(connectionRecords.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.connectionId)).size !== connectionRecords.length) {
       throw new Error("模型入园目录存在重复 ProviderConnection ID，已停止启动恢复");
     }
-    if (new Set(studentRecords.map((item) => item.modelStudentId)).size !== studentRecords.length) {
+    if (new Set(studentRecords.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.modelStudentId)).size !== studentRecords.length) {
       throw new Error("模型入园目录存在重复 ModelStudent ID，已停止启动恢复");
     }
-    const connections = new Map(connectionRecords.map((item) => [item.connectionId, item]));
+    const connections = new Map(connectionRecords.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => [item.connectionId, item]));
     return studentRecords
-      .map((student) => {
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(student) => {
         const connection = connections.get(student.connectionId);
         if (!connection) throw new Error(`ModelStudent 缺少 ProviderConnection: ${student.modelStudentId}`);
         return { student, connection };
       });
   }
 
-  async removeStudent(modelStudentId: string, ownerId: string): Promise<{
+  /** 释放或删除「removeStudent」对应资源，重复调用仍保持安全。 */
+async removeStudent(modelStudentId: string, ownerId: string): Promise<{
     student: ManagedModelStudentRecord;
     removedConnection?: ProviderConnectionRecord;
   } | undefined> {
-    return this.catalog.update((records) => {
+    return this.catalog.update(/** 释放或删除「removeStudent」对应资源，重复调用仍保持安全。 */
+(records) => {
       const student = records.find(
-        (item): item is ManagedModelStudentRecord =>
+        /** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item): item is ManagedModelStudentRecord =>
           item.recordKind === "model_student" && item.modelStudentId === modelStudentId && item.ownerId === ownerId,
       );
       if (!student) return { records, result: undefined };
       const connectionStillUsed = records.some(
-        (item) => item.recordKind === "model_student" &&
+        /** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.recordKind === "model_student" &&
           item.modelStudentId !== student.modelStudentId && item.connectionId === student.connectionId,
       );
       const removedConnection = connectionStillUsed
         ? undefined
         : records.find(
-          (item): item is ProviderConnectionRecord =>
+          /** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item): item is ProviderConnectionRecord =>
             item.recordKind === "provider_connection" && item.connectionId === student.connectionId,
         );
       return {
-        records: records.filter((item) =>
+        records: records.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) =>
           item !== student && (!removedConnection || item !== removedConnection)),
         result: { student, ...(removedConnection ? { removedConnection } : {}) },
       };
     });
   }
 
-  connectionView(value: ProviderConnectionRecord): ProviderConnectionView {
+  /** 执行「connectionView」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+connectionView(value: ProviderConnectionRecord): ProviderConnectionView {
     return {
       schemaVersion: 1,
       connectionId: value.connectionId,
@@ -255,6 +317,13 @@ export class ModelAdmissionRepository {
   }
 }
 
+/** 非法时间也按过期处理，避免损坏记录永久滞留。 */
+function isExpired(expiresAt: string, now: number): boolean {
+  const timestamp = Date.parse(expiresAt);
+  return !Number.isFinite(timestamp) || timestamp <= now;
+}
+
+/** 判断「isTestRecord」对应条件，只返回判定结果且不修改输入状态。 */
 function isTestRecord(value: unknown): value is ModelStudentTestRecord {
   if (!record(value) || value.schemaVersion !== 1 || typeof value.testId !== "string" || typeof value.ownerId !== "string") return false;
   if (!record(value.candidate) || !isReadyProtocol(value.candidate.protocol)) return false;
@@ -271,6 +340,7 @@ function isTestRecord(value: unknown): value is ModelStudentTestRecord {
   return true;
 }
 
+/** 判断「isCatalogRecord」对应条件，只返回判定结果且不修改输入状态。 */
 function isCatalogRecord(value: unknown): value is AdmissionCatalogRecord {
   if (!record(value) || value.schemaVersion !== 1 || typeof value.ownerId !== "string" || typeof value.createdAt !== "string" || typeof value.updatedAt !== "string") return false;
   if (value.recordKind === "provider_connection") {
@@ -283,7 +353,7 @@ function isCatalogRecord(value: unknown): value is AdmissionCatalogRecord {
   if (value.recordKind !== "model_student") return false;
   if (typeof value.modelStudentId !== "string" || typeof value.connectionId !== "string" || typeof value.displayName !== "string" || typeof value.model !== "string" || value.sizeClass !== "large") return false;
   if (value.contextWindowTokens !== undefined && (!Number.isSafeInteger(value.contextWindowTokens) || Number(value.contextWindowTokens) <= 0)) return false;
-  if (value.lifecycle !== undefined && !["installing", "active", "rollback_pending", "deleting"].includes(String(value.lifecycle))) return false;
+  if (value.lifecycle !== undefined && !["installing", "active", "capacity_blocked", "rollback_pending", "deleting"].includes(String(value.lifecycle))) return false;
   if (value.installationTestId !== undefined && typeof value.installationTestId !== "string") return false;
   try {
     const snapshot = readProviderCapabilitySnapshot(value.snapshot);
@@ -293,6 +363,7 @@ function isCatalogRecord(value: unknown): value is AdmissionCatalogRecord {
   } catch { return false; }
 }
 
+/** 校验并规范化「normalizeTestRecord」输入，非法数据直接返回明确错误。 */
 function normalizeTestRecord(value: ModelStudentTestRecord): ModelStudentTestRecord {
   const candidate = value.candidate as ModelStudentTestRecord["candidate"] & { presetId?: ReadyModelProviderPresetId };
   return {
@@ -305,6 +376,7 @@ function normalizeTestRecord(value: ModelStudentTestRecord): ModelStudentTestRec
   };
 }
 
+/** 校验并规范化「normalizeConnectionRecord」输入，非法数据直接返回明确错误。 */
 function normalizeConnectionRecord(value: ProviderConnectionRecord): ProviderConnectionRecord {
   const legacy = value as ProviderConnectionRecord & { presetId?: ReadyModelProviderPresetId };
   return {
@@ -313,6 +385,7 @@ function normalizeConnectionRecord(value: ProviderConnectionRecord): ProviderCon
   };
 }
 
+/** 校验并规范化「normalizeStudentRecord」输入，非法数据直接返回明确错误。 */
 function normalizeStudentRecord(value: ManagedModelStudentRecord): ManagedModelStudentRecord {
   const snapshot = readProviderCapabilitySnapshot(value.snapshot);
   const legacy = value as ManagedModelStudentRecord & { generationDefaults?: ManagedModelStudentRecord["generationDefaults"] };
@@ -325,14 +398,17 @@ function normalizeStudentRecord(value: ManagedModelStudentRecord): ManagedModelS
   };
 }
 
+/** 判断「isReadyProtocol」对应条件，只返回判定结果且不修改输入状态。 */
 function isReadyProtocol(value: unknown): value is ProviderConnectionRecord["protocol"] {
   return value === "openai_responses" || value === "openai_chat_completions";
 }
 
+/** 判断「isReadyPreset」对应条件，只返回判定结果且不修改输入状态。 */
 function isReadyPreset(value: unknown): value is ReadyModelProviderPresetId {
   return value === "openai" || value === "custom_responses" || value === "siliconflow";
 }
 
+/** 判断「isReadyPresetProtocol」对应条件，只返回判定结果且不修改输入状态。 */
 function isReadyPresetProtocol(value: unknown, protocol: unknown): value is ReadyModelProviderPresetId {
   if (!isReadyPreset(value) || !isReadyProtocol(protocol)) return false;
   return value === "siliconflow"
@@ -340,10 +416,12 @@ function isReadyPresetProtocol(value: unknown, protocol: unknown): value is Read
     : protocol === "openai_responses";
 }
 
+/** 判断「isSecretRef」对应条件，只返回判定结果且不修改输入状态。 */
 function isSecretRef(value: unknown): value is SecretRef {
   return record(value) && (value.provider === "env" || value.provider === "keychain") && typeof value.key === "string";
 }
 
+/** 更新「record」对应状态，并保持写入顺序、原子性与容量约束。 */
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -6,8 +6,10 @@ import { PptxPreview } from "../components/artifacts/PptxPreview.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { useResource } from "./use-resource.js";
 
+/** 渲染「PublishedArtifactPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function PublishedArtifactPanel({ artifactId, onClose }: { artifactId: string; onClose: () => void }) {
-  const load = useCallback(() => controlApi.artifactPreview(artifactId), [artifactId]);
+  const load = useCallback(/** 缓存「load」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => controlApi.artifactPreview(artifactId), [artifactId]);
   const { state, retry } = useResource(load);
   const value = state.phase === "ready" || state.phase === "empty" ? state.data : undefined;
   return <aside className="artifact-panel">
@@ -23,15 +25,18 @@ export function PublishedArtifactPanel({ artifactId, onClose }: { artifactId: st
   </aside>;
 }
 
+/** 渲染「PublishedPreview」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function PublishedPreview({ value }: { value: Awaited<ReturnType<typeof controlApi.artifactPreview>> }) {
   if (value.content.kind === "static_html") return <HtmlPreviewFrame csp={value.content.csp} html={value.content.html} title={value.artifact.displayName} />;
   if (value.content.kind === "markdown" || value.content.kind === "text") return <pre className="artifact-text">{value.content.kind === "markdown" ? value.content.markdown : value.content.text}</pre>;
   if (value.content.kind === "image") return <img alt={value.artifact.displayName} src={value.content.contentUrl} />;
   if (value.content.kind === "pdf") return <iframe src={value.content.contentUrl} title={value.artifact.displayName} />;
   if (value.content.kind === "pptx") return <PptxPreview
+    byteLength={value.artifact.primary.byteLength}
     contentUrl={value.content.contentUrl}
     title={value.artifact.displayName}
-    loadPlayback={() => controlApi.artifactPptxPlayback(value.artifact.artifactId)}
+    loadPlayback={/** 读取「loadPlayback」所需数据，并遵守作用域、分页与容量边界。 */
+() => controlApi.artifactPptxPlayback(value.artifact.artifactId)}
   />;
   return <div className="product-state"><FileText size={20} /><strong>该格式仅支持下载</strong><a href={value.content.contentUrl}>下载 Artifact</a></div>;
 }

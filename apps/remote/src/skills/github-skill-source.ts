@@ -1,5 +1,6 @@
 import type { SkillSource } from "@kindergarten/contracts";
 
+/** 描述「ParsedGitHubSkillSource」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ParsedGitHubSkillSource =
   | {
       kind: "repository";
@@ -16,6 +17,7 @@ export type ParsedGitHubSkillSource =
       source: Extract<SkillSource, { kind: "github_tree" }>;
     };
 
+/** 描述「ExplicitGitHubSkillUrl」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExplicitGitHubSkillUrl {
   providedUrl: string;
   canonicalUrl: string;
@@ -65,8 +67,10 @@ export function parseGitHubSkillUrl(value: string): ParsedGitHubSkillSource {
   };
 }
 
+/** 执行「explicitGitHubSkillUrls」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function explicitGitHubSkillUrls(text: string): string[] {
-  return [...new Set(explicitGitHubSkillUrlCandidates(text).map((item) => item.canonicalUrl))];
+  return [...new Set(explicitGitHubSkillUrlCandidates(text).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.canonicalUrl))];
 }
 
 /** 模型可见候选保留用户原始写法；canonicalUrl 只用于服务端授权比较。 */
@@ -88,6 +92,7 @@ export function explicitGitHubSkillUrlCandidates(text: string): ExplicitGitHubSk
   return valid;
 }
 
+/** 执行「sameGitHubSource」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function sameGitHubSource(
   left: Extract<SkillSource, { kind: "github_tree" }>,
   right: Extract<SkillSource, { kind: "github_tree" }>,
@@ -96,6 +101,7 @@ export function sameGitHubSource(
     left.requestedRef === right.requestedRef && left.subdirectory === right.subdirectory;
 }
 
+/** 执行「safePart」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function safePart(value: string): boolean {
   return value !== "." && value !== ".." && !value.includes("\\") && !value.includes("/") && value.length <= 160;
 }

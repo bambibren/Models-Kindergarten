@@ -30,6 +30,7 @@ import {
   type OutboundHttpTransport,
 } from "./pinned-http-transport.js";
 
+/** 描述「ResponsesApiProviderOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ResponsesApiProviderOptions {
   readBearerToken(): string | Promise<string>;
   /**
@@ -50,11 +51,13 @@ export interface ResponsesApiProviderOptions {
   maxRedirects?: number;
 }
 
+/** 描述「ResponsesReasoningConfiguration」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ResponsesReasoningConfiguration {
   capability: ModelReasoningCapability;
   efforts: Partial<Record<ConcreteReasoningProfile, string>>;
 }
 
+/** 描述「ResponsesProbeStreamOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ResponsesProbeStreamOptions {
   maxOutputTokens?: number;
   toolChoice?: "none" | "auto" | { type: "function"; name: string };
@@ -89,7 +92,8 @@ export class ResponsesApiProvider implements ModelProvider {
   readonly reasoningCapability: ModelReasoningCapability;
   private readonly reasoningEfforts: Readonly<Partial<Record<ConcreteReasoningProfile, string>>>;
 
-  constructor(
+  /** 初始化「ResponsesApiProvider」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     readonly student: ModelStudent,
     options: ResponsesApiProviderOptions,
   ) {
@@ -97,7 +101,8 @@ export class ResponsesApiProvider implements ModelProvider {
       throw new Error("ResponsesApiProvider 只能接收 openai-compatible ModelStudent");
     }
     this.readBearerToken = options.readBearerToken;
-    this.endpointGuard = options.endpointGuard ?? (() => undefined);
+    this.endpointGuard = options.endpointGuard ?? (/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => undefined);
     this.httpTransport = options.endpointResolver
       ? new PinnedHttpTransport(options.endpointResolver)
       : new GlobalFetchHttpTransport();
@@ -114,13 +119,15 @@ export class ResponsesApiProvider implements ModelProvider {
     this.reasoningEfforts = Object.freeze({ ...reasoning.efforts });
   }
 
-  nativeReasoning(profile: ConcreteReasoningProfile): Record<string, string> {
+  /** 执行「nativeReasoning」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+nativeReasoning(profile: ConcreteReasoningProfile): Record<string, string> {
     const effort = this.reasoningEfforts[profile];
     if (!effort) throw new Error(`Responses 模型不支持推理档位: ${profile}`);
     return { effort };
   }
 
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 执行「serializeContext」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     let value: unknown;
     switch (fragment.kind) {
       case "system":
@@ -130,7 +137,8 @@ export class ResponsesApiProvider implements ModelProvider {
         value = fragment.tools.map(toResponsesTool);
         break;
       case "messages":
-        value = fragment.messages.flatMap((message) => toResponsesDisclosureItems(this.student, message));
+        value = fragment.messages.flatMap(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(message) => toResponsesDisclosureItems(this.student, message));
         break;
       case "omitted":
         value = { sent: false, sourceIds: fragment.sourceIds };
@@ -144,7 +152,8 @@ export class ResponsesApiProvider implements ModelProvider {
     };
   }
 
-  serializeInput(input: ModelInput): ModelContextSerialization {
+  /** 执行「serializeInput」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+serializeInput(input: ModelInput): ModelContextSerialization {
     return {
       provider: this.student.provider.kind,
       model: this.student.provider.model,
@@ -153,7 +162,8 @@ export class ResponsesApiProvider implements ModelProvider {
     };
   }
 
-  async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
+  /** 执行「stream」主流程，传播取消与失败并在结束时清理临时资源。 */
+async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
     yield* this.streamRequest(input, signal, {});
   }
 
@@ -166,7 +176,8 @@ export class ResponsesApiProvider implements ModelProvider {
     yield* this.streamRequest(input, signal, options);
   }
 
-  private async *streamRequest(
+  /** 执行「streamRequest」主流程，传播取消与失败并在结束时清理临时资源。 */
+private async *streamRequest(
     input: ModelInput,
     signal: AbortSignal,
     options: ResponsesProbeStreamOptions,
@@ -315,7 +326,8 @@ export class ResponsesApiProvider implements ModelProvider {
     }
   }
 
-  private async loadToken(): Promise<string> {
+  /** 读取「loadToken」所需数据，并遵守作用域、分页与容量边界。 */
+private async loadToken(): Promise<string> {
     let token: string;
     try {
       token = (await this.readBearerToken()).trim();
@@ -337,7 +349,8 @@ export class ResponsesApiProvider implements ModelProvider {
     return token;
   }
 
-  private async fetchResponse(
+  /** 读取「fetchResponse」所需数据，并遵守作用域、分页与容量边界。 */
+private async fetchResponse(
     initialUrl: URL,
     body: string,
     token: string,
@@ -358,7 +371,8 @@ export class ResponsesApiProvider implements ModelProvider {
       });
       if (!isRedirectStatus(response.status)) return response;
       if ((response.status !== 307 && response.status !== 308) || redirects >= this.maxRedirects) {
-        await response.body?.cancel().catch(() => undefined);
+        await response.body?.cancel().catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
         throw new ModelProviderError(
           "model_request_failed",
           `Responses API 返回不允许的重定向 (${response.status})`,
@@ -366,7 +380,8 @@ export class ResponsesApiProvider implements ModelProvider {
         );
       }
       const location = response.headers.get("location");
-      await response.body?.cancel().catch(() => undefined);
+      await response.body?.cancel().catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
       if (!location) {
         throw new ModelProviderError(
           "invalid_model_response",
@@ -379,6 +394,7 @@ export class ResponsesApiProvider implements ModelProvider {
   }
 }
 
+/** 根据已校验输入构建「toResponsesRequest」结果，不额外持有调用方的大对象。 */
 function toResponsesRequest(
   student: ModelStudent,
   input: ModelInput,
@@ -389,7 +405,8 @@ function toResponsesRequest(
   return {
     model: student.provider.model,
     instructions: input.systemPrompt,
-    input: input.messages.flatMap((message) => toResponsesInputItems(student, message)),
+    input: input.messages.flatMap(/** 执行「input」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(message) => toResponsesInputItems(student, message)),
     tools: input.tools.map(toResponsesTool),
     stream: true,
     store: false,
@@ -407,6 +424,7 @@ function toResponsesRequest(
   };
 }
 
+/** 根据已校验输入构建「toResponsesDisclosureRequest」结果，不额外持有调用方的大对象。 */
 function toResponsesDisclosureRequest(
   student: ModelStudent,
   input: ModelInput,
@@ -414,10 +432,12 @@ function toResponsesDisclosureRequest(
   const request = toResponsesRequest(student, input);
   return {
     ...request,
-    input: input.messages.flatMap((message) => toResponsesDisclosureItems(student, message)),
+    input: input.messages.flatMap(/** 执行「input」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(message) => toResponsesDisclosureItems(student, message)),
   };
 }
 
+/** 执行「responsesReasoning」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function responsesReasoning(
   student: ModelStudent,
   input: ModelInput,
@@ -436,6 +456,7 @@ function responsesReasoning(
   return { effort, summary: "auto" };
 }
 
+/** 校验并规范化「assertSnapshotTargetsStudent」输入，非法数据直接返回明确错误。 */
 function assertSnapshotTargetsStudent(
   student: ModelStudent,
   snapshot: Exclude<ModelInput["reasoning"], "disabled" | undefined>,
@@ -452,6 +473,7 @@ function assertSnapshotTargetsStudent(
   }
 }
 
+/** 执行「officialReasoningPreset」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function officialReasoningPreset(model: string): ResponsesReasoningConfiguration | undefined {
   if (model !== "gpt-5.5" && !/^gpt-5\.5-\d{4}-\d{2}-\d{2}$/.test(model)) return undefined;
   return {
@@ -475,6 +497,7 @@ function officialReasoningPreset(model: string): ResponsesReasoningConfiguration
   };
 }
 
+/** 校验并规范化「validateReasoningConfiguration」输入，非法数据直接返回明确错误。 */
 function validateReasoningConfiguration(config: ResponsesReasoningConfiguration): void {
   const capability = readModelReasoningCapability(config.capability);
   if (capability.control !== "effort_levels" && capability.control !== "fixed") {
@@ -494,6 +517,7 @@ function validateReasoningConfiguration(config: ResponsesReasoningConfiguration)
   }
 }
 
+/** 根据已校验输入构建「toResponsesTool」结果，不额外持有调用方的大对象。 */
 function toResponsesTool(tool: ModelToolDefinition): Record<string, unknown> {
   return {
     type: "function",
@@ -503,6 +527,7 @@ function toResponsesTool(tool: ModelToolDefinition): Record<string, unknown> {
   };
 }
 
+/** 根据已校验输入构建「toResponsesInputItems」结果，不额外持有调用方的大对象。 */
 function toResponsesInputItems(
   student: ModelStudent,
   message: ModelMessage,
@@ -580,13 +605,15 @@ function toResponsesInputItems(
   return [{ role: message.role, content: message.content }];
 }
 
+/** 根据已校验输入构建「toResponsesDisclosureItems」结果，不额外持有调用方的大对象。 */
 function toResponsesDisclosureItems(
   student: ModelStudent,
   message: ModelMessage,
 ): Record<string, unknown>[] {
   const items = toResponsesInputItems(student, message);
   if (!message.providerOpaqueContinuation) return items;
-  return items.map((item) => {
+  return items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => {
     if (item.type === "function_call") {
       return {
         type: item.type,
@@ -603,13 +630,15 @@ function toResponsesDisclosureItems(
   });
 }
 
+/** 执行「responseContinuation」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function responseContinuation(
   student: ModelStudent,
   response: Record<string, unknown>,
 ): ProviderOpaqueContinuation | undefined {
   if (!Array.isArray(response.output) || response.output.length === 0) return undefined;
   try {
-    if (!response.output.every((item) => isRecord(item))) {
+    if (!response.output.every(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => isRecord(item))) {
       throw new Error("response.output item 必须是 JSON 对象");
     }
     const items = response.output as JsonObject[];
@@ -634,6 +663,7 @@ function responseContinuation(
   }
 }
 
+/** 读取「readResponsesContinuationItems」所需数据，并遵守作用域、分页与容量边界。 */
 function readResponsesContinuationItems(
   continuation: ProviderOpaqueContinuation,
 ): JsonObject[] {
@@ -644,21 +674,25 @@ function readResponsesContinuationItems(
   if (
     !isRecord(payload) ||
     !Array.isArray(payload.items) ||
-    !payload.items.every((item) => isRecord(item))
+    !payload.items.every(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => isRecord(item))
   ) {
     throw new Error("Responses continuation payload.items 必须是 JSON 对象数组");
   }
   return structuredClone(payload.items) as JsonObject[];
 }
 
+/** 执行「responsesContinuationFunctionCallIds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function responsesContinuationFunctionCallIds(items: JsonObject[]): string[] {
-  return items.flatMap((item) =>
+  return items.flatMap(/** 执行「responsesContinuationFunctionCallIds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) =>
     item.type === "function_call" && typeof item.call_id === "string"
       ? [item.call_id]
       : [],
   );
 }
 
+/** 执行「responsesApiUrl」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function responsesApiUrl(baseUrl: string): URL {
   let url: URL;
   try {
@@ -677,6 +711,7 @@ export function responsesApiUrl(baseUrl: string): URL {
   return url;
 }
 
+/** 读取「readMaxRedirects」所需数据，并遵守作用域、分页与容量边界。 */
 function readMaxRedirects(value: number | undefined): number {
   if (value === undefined) return 0;
   if (!Number.isInteger(value) || value < 0 || value > 3) {
@@ -685,10 +720,12 @@ function readMaxRedirects(value: number | undefined): number {
   return value;
 }
 
+/** 判断「isRedirectStatus」对应条件，只返回判定结果且不修改输入状态。 */
 function isRedirectStatus(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
+/** 执行「seedFunctionCall」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function seedFunctionCall(
   calls: Map<number, FunctionCallState>,
   itemIndexes: Map<string, number>,
@@ -715,6 +752,7 @@ function seedFunctionCall(
   return current;
 }
 
+/** 执行「functionCallForEvent」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function functionCallForEvent(
   calls: Map<number, FunctionCallState>,
   itemIndexes: Map<string, number>,
@@ -739,6 +777,7 @@ function functionCallForEvent(
   return current;
 }
 
+/** 执行「outputIndex」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function outputIndex(
   event: Record<string, unknown>,
   itemIndexes: Map<string, number>,
@@ -757,6 +796,7 @@ function outputIndex(
   );
 }
 
+/** 执行「completeFunctionCall」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function completeFunctionCall(state: FunctionCallState): ModelToolCall | undefined {
   if (state.emitted || !state.callId || !state.name) return undefined;
   let args: unknown;
@@ -786,6 +826,7 @@ function completeFunctionCall(state: FunctionCallState): ModelToolCall | undefin
   };
 }
 
+/** 执行「callsFromResponse」主流程，传播取消与失败并在结束时清理临时资源。 */
 function callsFromResponse(
   response: Record<string, unknown>,
   calls: Map<number, FunctionCallState>,
@@ -803,6 +844,7 @@ function callsFromResponse(
   return completed;
 }
 
+/** 读取「readUsage」所需数据，并遵守作用域、分页与容量边界。 */
 function readUsage(value: unknown): ModelUsage | undefined {
   const usage = recordValue(value);
   if (!usage) return undefined;
@@ -823,6 +865,7 @@ function readUsage(value: unknown): ModelUsage | undefined {
   };
 }
 
+/** 执行「responseFailure」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function responseFailure(event: Record<string, unknown>, token: string): ModelProviderError {
   const response = recordValue(event.response);
   const error = recordValue(response?.error);
@@ -836,6 +879,7 @@ function responseFailure(event: Record<string, unknown>, token: string): ModelPr
   );
 }
 
+/** 执行「eventFailure」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function eventFailure(event: Record<string, unknown>, token: string): ModelProviderError {
   const code = stringValue(event.code);
   const message = stringValue(event.message) ?? "Responses API 返回错误事件";
@@ -847,11 +891,13 @@ function eventFailure(event: Record<string, unknown>, token: string): ModelProvi
   );
 }
 
+/** 执行「retryableCode」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function retryableCode(code: string | undefined): boolean {
   if (!code) return false;
   return ["rate_limit_exceeded", "server_error", "service_unavailable", "timeout"].includes(code);
 }
 
+/** 校验并规范化「parseSseJson」输入，非法数据直接返回明确错误。 */
 function parseSseJson(message: SseEvent): Record<string, unknown> {
   let value: unknown;
   try {
@@ -874,6 +920,7 @@ function parseSseJson(message: SseEvent): Record<string, unknown> {
   return value;
 }
 
+/** 读取「readSse」所需数据，并遵守作用域、分页与容量边界。 */
 async function* readSse(body: ReadableStream<Uint8Array>): AsyncIterable<SseEvent> {
   let event: string | undefined;
   let data: string[] = [];
@@ -913,6 +960,7 @@ async function* readSse(body: ReadableStream<Uint8Array>): AsyncIterable<SseEven
   }
 }
 
+/** 读取「readLines」所需数据，并遵守作用域、分页与容量边界。 */
 async function* readLines(body: ReadableStream<Uint8Array>): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -969,6 +1017,7 @@ async function* readLines(body: ReadableStream<Uint8Array>): AsyncIterable<strin
   }
 }
 
+/** 执行「nextLineSeparator」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function nextLineSeparator(
   value: string,
   finished: boolean,
@@ -986,6 +1035,7 @@ function nextLineSeparator(
   return undefined;
 }
 
+/** 读取「readErrorBody」所需数据，并遵守作用域、分页与容量边界。 */
 async function readErrorBody(response: Response): Promise<string> {
   try {
     if (!response.body) return "";
@@ -995,6 +1045,7 @@ async function readErrorBody(response: Response): Promise<string> {
   }
 }
 
+/** 读取「readTextAtMost」所需数据，并遵守作用域、分页与容量边界。 */
 async function readTextAtMost(
   body: ReadableStream<Uint8Array>,
   maxBytes: number,
@@ -1030,6 +1081,7 @@ async function readTextAtMost(
   }
 }
 
+/** 执行「responseSizeError」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function responseSizeError(scope: string, maxBytes: number): ModelProviderError {
   return new ModelProviderError(
     "invalid_model_response",
@@ -1038,6 +1090,7 @@ function responseSizeError(scope: string, maxBytes: number): ModelProviderError 
   );
 }
 
+/** 执行「redact」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function redact(value: string, token: string): string {
   let redacted = token ? value.split(token).join("[REDACTED]") : value;
   try {
@@ -1068,41 +1121,51 @@ const SENSITIVE_FIELDS = [
   "password",
 ] as const;
 
+/** 执行「redactSensitiveJson」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function redactSensitiveJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactSensitiveJson);
   if (!isRecord(value)) return value;
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+  return Object.fromEntries(Object.entries(value).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+([key, item]) => [
     key,
-    SENSITIVE_FIELDS.some((name) => name.toLocaleLowerCase() === key.toLocaleLowerCase())
+    SENSITIVE_FIELDS.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(name) => name.toLocaleLowerCase() === key.toLocaleLowerCase())
       ? "[REDACTED]"
       : redactSensitiveJson(item),
   ]));
 }
 
+/** 执行「escapeRegExp」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** 执行「short」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function short(value: string, length: number): string {
   return value.length <= length ? value : `${value.slice(0, length)}…`;
 }
 
+/** 更新「recordValue」对应状态，并保持写入顺序、原子性与容量约束。 */
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? value : undefined;
 }
 
+/** 执行「stringValue」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/** 执行「numberValue」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/** 判断「isRecord」对应条件，只返回判定结果且不修改输入状态。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** 判断「isAbort」对应条件，只返回判定结果且不修改输入状态。 */
 function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }

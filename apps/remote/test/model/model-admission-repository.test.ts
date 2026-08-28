@@ -6,10 +6,14 @@ import type { ProviderCapabilitySnapshot } from "@kindergarten/contracts";
 import { ModelAdmissionRepository } from "../../src/model/model-admission-repository.js";
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("ModelAdmissionRepository", () => {
-  it("原子保存 Connection + ModelStudent，且公开 Connection 不泄漏 credentialRef", async () => {
+describe("ModelAdmissionRepository", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("原子保存 Connection + ModelStudent，且公开 Connection 不泄漏 credentialRef", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     const catalogFile = join(dir, "catalog.json");
     const repository = new ModelAdmissionRepository(join(dir, "tests.json"), catalogFile);
@@ -27,7 +31,8 @@ describe("ModelAdmissionRepository", () => {
     expect(persisted).not.toContain("super-secret");
   });
 
-  it("拒绝归属不一致的聚合，并在最后一个学生删除时一起移除 Connection", async () => {
+  it("拒绝归属不一致的聚合，并在最后一个学生删除时一起移除 Connection", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     const repository = new ModelAdmissionRepository(join(dir, "tests.json"), join(dir, "catalog.json"));
     await expect(repository.install(connectionRecord(), { ...studentRecord(), connectionId: "other" }))
@@ -38,7 +43,8 @@ describe("ModelAdmissionRepository", () => {
     expect(await repository.installed()).toEqual([]);
   });
 
-  it("测试记录只持久化公开候选，不接受 apiKey 字段", async () => {
+  it("测试记录只持久化公开候选，不接受 apiKey 字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     const testsFile = join(dir, "tests.json");
     const repository = new ModelAdmissionRepository(testsFile, join(dir, "catalog.json"));
@@ -55,7 +61,30 @@ describe("ModelAdmissionRepository", () => {
     expect(await readFile(testsFile, "utf8")).not.toContain("apiKey");
   });
 
-  it("在同一次原子 catalog update 内拒绝重复 testId 和重复 endpoint/model", async () => {
+  it("首次读取仍返回过期测试事实，同时从持久化中删除", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const dir = await tempDir();
+    const testsFile = join(dir, "tests.json");
+    const expired = {
+      schemaVersion: 1 as const,
+      testId: "expired-test",
+      ownerId: "local-admin",
+      candidate: { presetId: "custom_responses" as const, displayName: "旧测试", baseUrl: "https://api.example.test/v1", model: "gpt-x", protocol: "openai_responses" as const },
+      state: "succeeded" as const,
+      snapshot: capabilitySnapshot(),
+      createdAt: "2020-01-01T00:00:00.000Z",
+      expiresAt: "2020-01-01T00:01:00.000Z",
+    };
+    await writeFile(testsFile, JSON.stringify({ schemaVersion: 1, records: [expired] }), "utf8");
+    const repository = new ModelAdmissionRepository(testsFile, join(dir, "catalog.json"));
+
+    expect(await repository.getTest("expired-test")).toMatchObject({ testId: "expired-test" });
+    expect(await repository.getTest("expired-test")).toBeUndefined();
+    expect(JSON.parse(await readFile(testsFile, "utf8"))).toMatchObject({ records: [] });
+  });
+
+  it("在同一次原子 catalog update 内拒绝重复 testId 和重复 endpoint/model", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     const repository = new ModelAdmissionRepository(join(dir, "tests.json"), join(dir, "catalog.json"));
     const firstStudent = { ...studentRecord(), lifecycle: "active" as const, installationTestId: "test-1" };
@@ -71,7 +100,8 @@ describe("ModelAdmissionRepository", () => {
     expect(await repository.listStudents()).toHaveLength(1);
   });
 
-  it("持久化安装生命周期迁移", async () => {
+  it("持久化安装生命周期迁移", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     const repository = new ModelAdmissionRepository(join(dir, "tests.json"), join(dir, "catalog.json"));
     await repository.install(connectionRecord(), { ...studentRecord(), lifecycle: "installing", installationTestId: "test-1" });
@@ -79,7 +109,8 @@ describe("ModelAdmissionRepository", () => {
     expect((await repository.getStudent("student-1"))?.lifecycle).toBe("active");
   });
 
-  it("安全读取旧 custom Responses 记录并补齐 preset 与协议中立 reasoning", async () => {
+  it("安全读取旧 custom Responses 记录并补齐 preset 与协议中立 reasoning", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await tempDir();
     const catalogFile = join(dir, "catalog.json");
     const connection = connectionRecord();
@@ -123,6 +154,7 @@ describe("ModelAdmissionRepository", () => {
   });
 });
 
+/** 构造「connectionRecord」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function connectionRecord() {
   return {
     schemaVersion: 1 as const,
@@ -139,6 +171,7 @@ function connectionRecord() {
   };
 }
 
+/** 构造「studentRecord」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function studentRecord() {
   return {
     schemaVersion: 1 as const,
@@ -156,6 +189,7 @@ function studentRecord() {
   };
 }
 
+/** 构造「capabilitySnapshot」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function capabilitySnapshot(): ProviderCapabilitySnapshot {
   return {
     schemaVersion: 1 as const,
@@ -190,6 +224,7 @@ function capabilitySnapshot(): ProviderCapabilitySnapshot {
   };
 }
 
+/** 构造「tempDir」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function tempDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "mk-model-admission-repository-"));
   dirs.push(dir);

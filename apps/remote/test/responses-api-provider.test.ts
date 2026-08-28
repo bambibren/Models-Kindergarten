@@ -56,22 +56,29 @@ const input: ModelInput = {
   }],
 };
 
-afterEach(() => {
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+() => {
   vi.unstubAllGlobals();
 });
 
 const encryptedSentinel = "ENCRYPTED_REASONING_SENTINEL_MK_20260813";
 
-describe("Responses API reasoning 契约", () => {
-  it("自定义连接即使名为 GPT-5.5 也不会默认套用名称 preset", () => {
-    expect(() => new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+describe("Responses API reasoning 契约", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("自定义连接即使名为 GPT-5.5 也不会默认套用名称 preset", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => new ResponsesApiProvider(student, {
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
     })).toThrow("缺少入园体检");
   });
 
-  it("将 GPT-5.5 产品档位映射到官方 effort 集合", () => {
+  it("将 GPT-5.5 产品档位映射到官方 effort 集合", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
 
@@ -91,7 +98,8 @@ describe("Responses API reasoning 契约", () => {
     expect(provider.nativeReasoning("max")).toEqual({ effort: "xhigh" });
   });
 
-  it("发送 reasoning.effort 和 summary=auto，并对非 none 推理安全移除 temperature", async () => {
+  it("发送 reasoning.effort 和 summary=auto，并对非 none 推理安全移除 temperature", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startResponsesMockServer();
     try {
       const configuredStudent = {
@@ -99,7 +107,8 @@ describe("Responses API reasoning 契约", () => {
         provider: { ...student.provider, baseUrl: mock.baseUrl },
       };
       const provider = new ResponsesApiProvider(configuredStudent, {
-        readBearerToken: () => "test-token",
+        readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
         allowLegacyOfficialPreset: true,
       });
       const reasoning = {
@@ -129,7 +138,8 @@ describe("Responses API reasoning 契约", () => {
         include: ["reasoning.encrypted_content"],
       });
       expect(mock.requests[0]?.body).not.toHaveProperty("temperature");
-      expect(events.filter((event) => event.type === "thinking_delta")).not.toHaveLength(0);
+      expect(events.filter(/** 构造「not」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(event) => event.type === "thinking_delta")).not.toHaveLength(0);
       expect(events).toContainEqual({
         type: "usage",
         inputTokens: 80,
@@ -143,12 +153,14 @@ describe("Responses API reasoning 契约", () => {
     }
   });
 
-  it("正式模型流通过 endpointResolver 的地址票据连接，不对 hostname 二次 DNS", async () => {
+  it("正式模型流通过 endpointResolver 的地址票据连接，不对 hostname 二次 DNS", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startResponsesMockServer();
     try {
       const pinnedBaseUrl = new URL(mock.baseUrl);
       pinnedBaseUrl.hostname = "runtime-responses-rebinding.invalid";
-      const resolver = vi.fn(async (url: URL) => ({
+      const resolver = vi.fn(/** 构造「resolver」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async (url: URL) => ({
         url: new URL(url),
         addresses: [{ address: "127.0.0.1", family: 4 as const }],
       }));
@@ -156,7 +168,8 @@ describe("Responses API reasoning 契约", () => {
         ...student,
         provider: { ...student.provider, baseUrl: pinnedBaseUrl.toString() },
       }, {
-        readBearerToken: () => "test-token",
+        readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
         allowLegacyOfficialPreset: true,
         endpointResolver: resolver,
       });
@@ -177,9 +190,11 @@ describe("Responses API reasoning 契约", () => {
     }
   });
 
-  it("内部 disabled 显式发送 effort=none、没有 summary，并保留 temperature", () => {
+  it("内部 disabled 显式发送 effort=none、没有 summary，并保留 temperature", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
     const request = JSON.parse(provider.serializeInput({
@@ -193,9 +208,11 @@ describe("Responses API reasoning 契约", () => {
     expect(request.reasoning).not.toHaveProperty("summary");
   });
 
-  it("拒绝用 [DONE] 替代 Responses 正式终态", async () => {
+  it("拒绝用 [DONE] 替代 Responses 正式终态", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
     const body = [
@@ -216,12 +233,14 @@ describe("Responses API reasoning 契约", () => {
       "data: [DONE]",
       "",
     ].join("\n");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(body, {
       status: 200,
       headers: { "content-type": "text/event-stream" },
     })));
 
-    const consume = async () => {
+    const consume = /** 构造「consume」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => {
       for await (const _event of provider.stream(input, new AbortController().signal)) {
         // 消费完整流以触发终态校验。
       }
@@ -232,12 +251,15 @@ describe("Responses API reasoning 契约", () => {
     });
   });
 
-  it("非 2xx 错误回显系统脱敏 encrypted_content 和常见凭据字段", async () => {
+  it("非 2xx 错误回显系统脱敏 encrypted_content 和常见凭据字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "request-bearer-secret",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "request-bearer-secret",
       allowLegacyOfficialPreset: true,
     });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(JSON.stringify({
       error: {
         message: "upstream rejected",
         encrypted_content: encryptedSentinel,
@@ -247,10 +269,12 @@ describe("Responses API reasoning 契约", () => {
       },
     }), { status: 400 })));
 
-    const consume = async () => {
+    const consume = /** 构造「consume」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => {
       for await (const _event of provider.stream(input, new AbortController().signal)) {}
     };
-    await expect(consume()).rejects.toSatisfy((error: unknown) => {
+    await expect(consume()).rejects.toSatisfy(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       return message.includes("visible-detail")
         && !message.includes(encryptedSentinel)
@@ -261,12 +285,14 @@ describe("Responses API reasoning 契约", () => {
     });
   });
 
-  it("response.failed 流式失败不会把请求 token 或敏感字段带入上层错误", async () => {
+  it("response.failed 流式失败不会把请求 token 或敏感字段带入上层错误", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const requestToken = "request-token-response-failed-sentinel";
     const reflectedApiKey = "response-failed-api-key-sentinel";
     const reflectedPassword = "response-failed-password-sentinel";
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => requestToken,
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => requestToken,
       allowLegacyOfficialPreset: true,
     });
     const body = [
@@ -286,15 +312,18 @@ describe("Responses API reasoning 契约", () => {
       })}`,
       "",
     ].join("\n");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(body, {
       status: 200,
       headers: { "content-type": "text/event-stream" },
     })));
 
-    const consume = async () => {
+    const consume = /** 构造「consume」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => {
       for await (const _event of provider.stream(input, new AbortController().signal)) {}
     };
-    await expect(consume()).rejects.toSatisfy((error: unknown) => {
+    await expect(consume()).rejects.toSatisfy(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       return message.includes("response-failed-safe-marker")
         && message.includes("server_error")
@@ -305,14 +334,16 @@ describe("Responses API reasoning 契约", () => {
     });
   });
 
-  it("顶层 error 流式事件按字段边界脱敏 Bearer、Key、password 和 encrypted_content", async () => {
+  it("顶层 error 流式事件按字段边界脱敏 Bearer、Key、password 和 encrypted_content", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const requestToken = "request-token-top-level-error-sentinel";
     const reflectedAuth = "top-level-auth-sentinel";
     const reflectedApiKey = "top-level-api-key-sentinel";
     const reflectedPassword = "top-level-password-sentinel";
     const reflectedEncrypted = "top-level-encrypted-sentinel";
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => requestToken,
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => requestToken,
       allowLegacyOfficialPreset: true,
     });
     const message = [
@@ -328,15 +359,18 @@ describe("Responses API reasoning 契约", () => {
       `data: ${JSON.stringify({ type: "error", code: "service_unavailable", message })}`,
       "",
     ].join("\n");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, {
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(body, {
       status: 200,
       headers: { "content-type": "text/event-stream" },
     })));
 
-    const consume = async () => {
+    const consume = /** 构造「consume」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => {
       for await (const _event of provider.stream(input, new AbortController().signal)) {}
     };
-    await expect(consume()).rejects.toSatisfy((error: unknown) => {
+    await expect(consume()).rejects.toSatisfy(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error: unknown) => {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return errorMessage.includes("top-level-safe-marker")
         && errorMessage.includes("service_unavailable")
@@ -349,13 +383,16 @@ describe("Responses API reasoning 契约", () => {
     });
   });
 
-  it("拒绝超过 1 MiB 的 SSE 单行", async () => {
+  it("拒绝超过 1 MiB 的 SSE 单行", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
     const body = `data: ${"x".repeat(1024 * 1024)}\n\n`;
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 200 })));
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(body, { status: 200 })));
 
     await expect(consume(provider)).rejects.toMatchObject({
       code: "invalid_model_response",
@@ -363,13 +400,16 @@ describe("Responses API reasoning 契约", () => {
     });
   });
 
-  it("拒绝累计超过 2 MiB 的单个 SSE Event", async () => {
+  it("拒绝累计超过 2 MiB 的单个 SSE Event", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
     const dataLine = `data: ${"x".repeat(700_000)}`;
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(
       `${dataLine}\n${dataLine}\n${dataLine}\n\n`,
       { status: 200 },
     )));
@@ -380,9 +420,11 @@ describe("Responses API reasoning 契约", () => {
     });
   });
 
-  it("拒绝累计超过 64 MiB 的 SSE 流并取消上游 Body", async () => {
+  it("拒绝累计超过 64 MiB 的 SSE 流并取消上游 Body", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
     const encoder = new TextEncoder();
@@ -390,14 +432,17 @@ describe("Responses API reasoning 契约", () => {
     let sent = 0;
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
+      /** 构造「pull」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+pull(controller) {
         sent += 1;
         controller.enqueue(chunk);
         if (sent >= 140) controller.close();
       },
-      cancel() { cancelled = true; },
+      /** 构造「cancel」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+cancel() { cancelled = true; },
     });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 200 })));
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(body, { status: 200 })));
 
     await expect(consume(provider)).rejects.toMatchObject({
       code: "invalid_model_response",
@@ -407,9 +452,11 @@ describe("Responses API reasoning 契约", () => {
     expect(sent).toBeLessThan(140);
   }, 15_000);
 
-  it("HTTP 错误正文最多读取 64 KiB 后取消，不消费无限诊断流", async () => {
+  it("HTTP 错误正文最多读取 64 KiB 后取消，不消费无限诊断流", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
     const encoder = new TextEncoder();
@@ -417,28 +464,35 @@ describe("Responses API reasoning 契约", () => {
     let pulls = 0;
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
+      /** 构造「pull」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+pull(controller) {
         pulls += 1;
         controller.enqueue(chunk);
         if (pulls >= 100) controller.close();
       },
-      cancel() { cancelled = true; },
+      /** 构造「cancel」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+cancel() { cancelled = true; },
     });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 400 })));
+    vi.stubGlobal("fetch", vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+async () => new Response(body, { status: 400 })));
 
-    await expect(consume(provider)).rejects.toSatisfy((error: unknown) =>
+    await expect(consume(provider)).rejects.toSatisfy(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(error: unknown) =>
       error instanceof Error && error.message.includes("visible-error-marker"));
     expect(cancelled).toBe(true);
     expect(pulls).toBeLessThan(10);
   });
 
-  it("不猜测未知自定义模型的档位，但接受入园体检的显式映射", () => {
+  it("不猜测未知自定义模型的档位，但接受入园体检的显式映射", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const customStudent: ModelStudent = {
       ...student,
       provider: { ...student.provider, model: "vendor-reasoner-v2" },
     };
-    expect(() => new ResponsesApiProvider(customStudent, {
-      readBearerToken: () => "test-token",
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => new ResponsesApiProvider(customStudent, {
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
     })).toThrow("缺少入园体检");
 
     const reasoning: ResponsesReasoningConfiguration = {
@@ -453,19 +507,23 @@ describe("Responses API reasoning 契约", () => {
       efforts: { fast: "minimal", deep: "high" },
     };
     const provider = new ResponsesApiProvider(customStudent, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       reasoning,
     });
     expect(provider.nativeReasoning("deep")).toEqual({ effort: "high" });
-    expect(() => provider.nativeReasoning("balanced")).toThrow("不支持");
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => provider.nativeReasoning("balanced")).toThrow("不支持");
   });
 
-  it("接受体检只确认一个 effort 时生成的 fixed 能力", () => {
+  it("接受体检只确认一个 effort 时生成的 fixed 能力", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new ResponsesApiProvider({
       ...student,
       provider: { ...student.provider, model: "single-effort-model" },
     }, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       reasoning: {
         capability: {
           schemaVersion: 1,
@@ -481,13 +539,16 @@ describe("Responses API reasoning 契约", () => {
     expect(provider.nativeReasoning("fast")).toEqual({ effort: "low" });
   });
 
-  it("拒绝与 Responses effort 原生协议不一致的入园能力", () => {
+  it("拒绝与 Responses effort 原生协议不一致的入园能力", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const customStudent: ModelStudent = {
       ...student,
       provider: { ...student.provider, model: "vendor-budget-model" },
     };
-    expect(() => new ResponsesApiProvider(customStudent, {
-      readBearerToken: () => "test-token",
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => new ResponsesApiProvider(customStudent, {
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       reasoning: {
         capability: {
           schemaVersion: 1,
@@ -502,12 +563,15 @@ describe("Responses API reasoning 契约", () => {
     })).toThrow("effort_levels");
   });
 
-  it("在发请求前拒绝属于其他模型的 Turn 快照", () => {
+  it("在发请求前拒绝属于其他模型的 Turn 快照", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
-    expect(() => provider.serializeInput({
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => provider.serializeInput({
       ...input,
       reasoning: {
         schemaVersion: 1,
@@ -521,13 +585,15 @@ describe("Responses API reasoning 契约", () => {
     })).toThrow("不匹配");
   });
 
-  it("store=false 工具循环原样续接 encrypted output，按 output_index 启动且披露快照脱敏", async () => {
+  it("store=false 工具循环原样续接 encrypted output，按 output_index 启动且披露快照脱敏", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startResponsesMockServer();
     const dir = await mkdtemp(join(tmpdir(), "mk-responses-runtime-"));
     try {
       const configuredStudent = { ...student, provider: { ...student.provider, baseUrl: mock.baseUrl } };
       const provider = new ResponsesApiProvider(configuredStudent, {
-        readBearerToken: () => "test-token",
+        readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
         allowLegacyOfficialPreset: true,
       });
       const sandbox = new FileSandbox(dir);
@@ -560,10 +626,12 @@ describe("Responses API reasoning 契约", () => {
     }
   });
 
-  it("Session continuation 重建时保留 opaque→tool outputs 顺序且不重复可见投影", async () => {
+  it("Session continuation 重建时保留 opaque→tool outputs 顺序且不重复可见投影", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const entries = continuationHistory();
     const messages = await new ContextAssembler().build(entries, "下一轮");
-    expect(messages.map((message) => message.role)).toEqual([
+    expect(messages.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(message) => message.role)).toEqual([
       "user", "assistant", "tool", "tool", "user",
     ]);
     expect(responsesItems(messages[1]?.providerOpaqueContinuation)[0]).toMatchObject({
@@ -575,7 +643,8 @@ describe("Responses API reasoning 契约", () => {
     expect(messages[3]?.toolCallId).toBe("call_mock_b");
 
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
     const disclosed = provider.serializeContext({ kind: "messages", messages }).value;
@@ -583,7 +652,8 @@ describe("Responses API reasoning 契约", () => {
     expect(disclosed).toContain("providerOpaque");
   });
 
-  it("同名 Tool Call 只在所属 Turn 隐藏，且 continuation 与全部 Tool outputs 原子裁剪", async () => {
+  it("同名 Tool Call 只在所属 Turn 隐藏，且 continuation 与全部 Tool outputs 原子裁剪", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const now = new Date().toISOString();
     const prior = toolEntry("call_mock_a", "prior/same-id.md", now);
     prior.turnId = "t0";
@@ -591,11 +661,13 @@ describe("Responses API reasoning 契约", () => {
     const messages = await new ContextAssembler([], 4).build(entries, "当前问题");
 
     // max=4 的理论切点落在 continuation 组中间；实现必须扩回组首并保留全部 outputs。
-    expect(messages.map((message) => message.role)).toEqual([
+    expect(messages.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(message) => message.role)).toEqual([
       "assistant", "tool", "tool", "user",
     ]);
     expect(messages[0]?.providerOpaqueContinuation).toBeDefined();
-    expect(messages.slice(1, 3).map((message) => message.toolCallId)).toEqual([
+    expect(messages.slice(1, 3).map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(message) => message.toolCallId)).toEqual([
       "call_mock_a", "call_mock_b",
     ]);
 
@@ -604,7 +676,8 @@ describe("Responses API reasoning 契约", () => {
     expect(withoutTruncation[1]?.content).toBe("prior/same-id.md");
   });
 
-  it("Session 落盘重载后仍能为下一 Turn 恢复完整 continuation，通用观察只保留占位", async () => {
+  it("Session 落盘重载后仍能为下一 Turn 恢复完整 continuation，通用观察只保留占位", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-responses-session-"));
     try {
       const first = new SessionRepository(dir);
@@ -626,12 +699,14 @@ describe("Responses API reasoning 契约", () => {
       expect(responsesItems(built.messages[1]?.providerOpaqueContinuation)[0]).toMatchObject({
         encrypted_content: encryptedSentinel,
       });
-      expect(JSON.stringify(built.observations)).not.toContain(encryptedSentinel);
-      expect(JSON.stringify(built.observations)).toContain("provider continuation:");
-      expect(JSON.stringify(built.observations)).toContain("2 tools");
+      expect(JSON.stringify(built.messageTraces)).not.toContain(encryptedSentinel);
+      expect(built.messageTraces).toEqual(expect.arrayContaining([
+        expect.objectContaining({ contentHash: expect.any(String), byteLength: expect.any(Number) }),
+      ]));
 
       const provider = new ResponsesApiProvider(student, {
-        readBearerToken: () => "test-token",
+        readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
         allowLegacyOfficialPreset: true,
       });
       const request = JSON.parse(provider.serializeInput({ ...input, messages: built.messages }).value) as Record<string, unknown>;
@@ -644,14 +719,18 @@ describe("Responses API reasoning 契约", () => {
     }
   });
 
-  it("拒绝把其他模型的 opaque continuation 注入当前 Responses 请求", () => {
+  it("拒绝把其他模型的 opaque continuation 注入当前 Responses 请求", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
-    const continuation = continuationHistory().find((entry) => entry.type === "provider_continuation");
+    const continuation = continuationHistory().find(/** 构造「continuation」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(entry) => entry.type === "provider_continuation");
     if (!continuation || continuation.type !== "provider_continuation") throw new Error("fixture 无效");
-    expect(() => provider.serializeInput({
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => provider.serializeInput({
       ...input,
       messages: [{
         role: "assistant",
@@ -664,18 +743,22 @@ describe("Responses API reasoning 契约", () => {
     })).toThrow("不匹配");
   });
 
-  it("相同模型名也拒绝跨 ModelStudent 或跨协议消费 continuation", () => {
+  it("相同模型名也拒绝跨 ModelStudent 或跨协议消费 continuation", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const provider = new ResponsesApiProvider(student, {
-      readBearerToken: () => "test-token",
+      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => "test-token",
       allowLegacyOfficialPreset: true,
     });
-    const continuation = continuationHistory().find((entry) => entry.type === "provider_continuation");
+    const continuation = continuationHistory().find(/** 构造「continuation」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(entry) => entry.type === "provider_continuation");
     if (!continuation || continuation.type !== "provider_continuation") throw new Error("fixture 无效");
     for (const wrongIdentity of [
       { modelStudentId: "same-model-other-endpoint" },
       { protocol: "openai_chat_completions" },
     ]) {
-      expect(() => provider.serializeInput({
+      expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => provider.serializeInput({
         ...input,
         messages: [{
           role: "assistant",
@@ -693,21 +776,31 @@ describe("Responses API reasoning 契约", () => {
 class ContinuationObserver implements RunObserver {
   started: string[] = [];
   disclosures: string[] = [];
-  async context(summary: ContextSummary): Promise<void> { this.disclosures.push(JSON.stringify(summary)); }
-  async modelRoundStarted(facts: import("../src/runtime/agent-runtime.js").RuntimeModelRoundSnapshot): Promise<void> {
+  /** 构造「context」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async context(summary: ContextSummary): Promise<void> { this.disclosures.push(JSON.stringify(summary)); }
+  /** 构造「modelRoundStarted」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async modelRoundStarted(facts: import("../src/runtime/agent-runtime.js").RuntimeModelRoundSnapshot): Promise<void> {
     this.disclosures.push(facts.providerInput.value);
   }
-  async text(): Promise<void> {}
-  async thought(): Promise<void> {}
-  async roundComplete(): Promise<void> {}
-  async toolStart(call: PreparedToolCall): Promise<void> {
+  /** 构造「text」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async text(): Promise<void> {}
+  /** 构造「thought」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async thought(): Promise<void> {}
+  /** 构造「roundComplete」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async roundComplete(): Promise<void> {}
+  /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async toolStart(call: PreparedToolCall): Promise<void> {
     this.started.push(String(call.arguments.path));
   }
-  async toolFinish(): Promise<void> {}
-  async requestPermission(): Promise<boolean> { return true; }
-  async askUser(): Promise<string> { return ""; }
+  /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async toolFinish(): Promise<void> {}
+  /** 构造「requestPermission」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async requestPermission(): Promise<boolean> { return true; }
+  /** 构造「askUser」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async askUser(): Promise<string> { return ""; }
 }
 
+/** 构造「continuationHistory」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function continuationHistory(): SessionEntry[] {
   const now = new Date().toISOString();
   const items = [
@@ -736,18 +829,21 @@ function continuationHistory(): SessionEntry[] {
   ];
 }
 
+/** 构造「responsesItems」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function responsesItems(continuation: ProviderOpaqueContinuation | undefined): Record<string, unknown>[] {
   if (!continuation || typeof continuation.payload !== "object" || continuation.payload === null || Array.isArray(continuation.payload)) return [];
   const items = continuation.payload.items;
   return Array.isArray(items) ? items as Record<string, unknown>[] : [];
 }
 
+/** 构造「consume」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function consume(provider: ResponsesApiProvider): Promise<void> {
   for await (const _event of provider.stream(input, new AbortController().signal)) {
-    // Consume the complete stream so transport and terminal guards execute.
+    // 完整消费流，确保 transport 与终态防线都真正执行。
   }
 }
 
+/** 构造「toolEntry」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function toolEntry(id: string, path: string, createdAt: string): SessionEntry {
   return {
     type: "tool_call", turnId: "t1", toolCallId: id, title: "读取", name: "read_file",

@@ -6,7 +6,8 @@ import { ModelStudentCatalog } from "../../src/model/model-student-catalog.js";
 import type { ModelEvent, ModelInput } from "../../src/model/model-provider.js";
 
 class BoundaryDriftProvider extends FixtureProvider {
-  override async *stream(_input: ModelInput, _signal: AbortSignal): AsyncIterable<ModelEvent> {
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+override async *stream(_input: ModelInput, _signal: AbortSignal): AsyncIterable<ModelEvent> {
     yield { type: "text_delta", text: JSON.stringify({
       requirements: [{ label: "完整回答任务", weight: 1 }],
       workflows: [
@@ -35,8 +36,10 @@ class AlternateWorksheetProvider extends BoundaryDriftProvider {
   };
 }
 
-describe("AnnotationWorksheetGenerator", () => {
-  it("保留模型分段语义并把小模型漂移的编号规范化为完整连续原文", async () => {
+describe("AnnotationWorksheetGenerator", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保留模型分段语义并把小模型漂移的编号规范化为完整连续原文", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const generator = new AnnotationWorksheetGenerator(new BoundaryDriftProvider());
     const answers = ["第一点。\n\n第二点。", "甲。\n乙。"];
     const worksheet = await generator.generate(experiment(), [
@@ -51,10 +54,12 @@ describe("AnnotationWorksheetGenerator", () => {
         expect(output.sections[sectionIndex - 1]?.end).toBe(output.sections[sectionIndex]?.start);
       }
     }
-    expect(worksheet.outputSections[0]?.sections.map((item) => item.label)).toEqual(["第一点", "第二点"]);
+    expect(worksheet.outputSections[0]?.sections.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.label)).toEqual(["第一点", "第二点"]);
   });
 
-  it("从目录解析显式选择的非默认工作表 ModelStudent，并记录同一个真实 Provider", async () => {
+  it("从目录解析显式选择的非默认工作表 ModelStudent，并记录同一个真实 Provider", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
     catalog.register(new AlternateWorksheetProvider(), { initialStatus: "ready" });
     const generator = new AnnotationWorksheetGenerator(catalog);
@@ -72,6 +77,7 @@ describe("AnnotationWorksheetGenerator", () => {
   });
 });
 
+/** 构造「experiment」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function experiment(): ExperimentRecordV2 {
   const now = new Date().toISOString();
   const policy = {

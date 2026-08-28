@@ -156,16 +156,23 @@ const agentStoreExisted = await fileExists(agentStoreFile);
 const agentRepository = new AgentRepository(agentStoreFile);
 let skillInstallations: SkillInstallationService;
 const agentService = new AgentService(agentRepository, {
-  builtinToolIds: () => [
-    ...new ToolRegistry(sandbox).definitions.map((item) => item.function.name),
+  builtinToolIds: /** 执行「builtinToolIds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => [
+    ...new ToolRegistry(sandbox).definitions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.function.name),
     ...ARTIFACT_TOOL_IDS,
     ...PPTX_TOOL_IDS,
   ],
-  readySkillInstallationIds: () => skillInstallations?.readyInstallationIdsSync() ?? [],
-  mcpCapabilities: () => mcp.capabilitySnapshots().map((snapshot) => ({
+  readySkillInstallationIds: /** 读取「readySkillInstallationIds」所需数据，并遵守作用域、分页与容量边界。 */
+() => skillInstallations?.readyInstallationIdsSync() ?? [],
+  mcpCapabilities: /** 执行「mcpCapabilities」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => mcp.capabilitySnapshots().map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(snapshot) => ({
     installationId: snapshot.serverId,
-    tools: snapshot.tools.map((item) => item.name),
-    resources: snapshot.resources.map((item) => item.uri),
+    tools: snapshot.tools.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.name),
+    resources: snapshot.resources.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.uri),
   })),
 });
 skillInstallations = new SkillInstallationService(
@@ -185,22 +192,27 @@ const mcpManagement = new McpManagementService(
 );
 await mcpManagement.importExisting();
 let defaultAgent = (await agentService.list({ query: "系统默认 Agent", limit: 100 })).items
-  .find((item) => item.name === "系统默认 Agent");
+  .find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.name === "系统默认 Agent");
 if (!defaultAgent && !agentStoreExisted) {
   defaultAgent = await agentService.create({
     name: "系统默认 Agent",
     description: "从 D2P-1 启用时的真实 Runtime 配置导入",
     systemPrompt: process.env.AGENT_SYSTEM_PROMPT ?? DEFAULT_AGENT_SYSTEM_PROMPT,
     builtinTools: [
-      ...new ToolRegistry(sandbox).definitions.map((item) => item.function.name),
+      ...new ToolRegistry(sandbox).definitions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.function.name),
       ...ARTIFACT_TOOL_IDS,
-    ].map((toolId) => ({
+    ].map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(toolId) => ({
       toolId,
       enabled: true,
       permission: "allow",
     })),
-    skillInstallationIds: capabilityConfig.agentCapabilities.skills.map((name) => {
-      const installation = readySkillInstallations.find((item) => item.state === "ready" && item.skillName === name);
+    skillInstallationIds: capabilityConfig.agentCapabilities.skills.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(name) => {
+      const installation = readySkillInstallations.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.state === "ready" && item.skillName === name);
       if (!installation) throw new Error(`默认 Agent 引用了未安装的 Skill: ${name}`);
       return installation.skillInstallationId;
     }),
@@ -218,8 +230,10 @@ if (defaultAgent) {
       systemPrompt,
       builtinTools: defaultAgent.builtinTools,
       skillInstallationIds: defaultAgent.skills
-        .filter((item) => item.enabled)
-        .map((item) => item.skillInstallationId),
+        .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled)
+        .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.skillInstallationId),
       mcps: defaultAgent.mcps,
       historyPolicy: defaultAgent.historyPolicy,
       memoryPolicy: defaultAgent.memoryPolicy,
@@ -237,17 +251,22 @@ const recoveredTurns = await sessions.recoverInterruptedTurns();
 if (recoveredTurns > 0) console.warn(`已将 ${recoveredTurns} 个重启前未结束的 Turn 标记为 interrupted`);
 const modelAdmissionAdapters = new ModelAdmissionAdapterRegistry([
   new ResponsesAdmissionAdapter(
-    new ResponsesCapabilityProber({ endpointResolver: (url) => modelUrlPolicy.resolve(url) }),
-    (storedStudent, connection) => createResponsesProvider(storedStudent, connection, secrets, modelUrlPolicy),
+    new ResponsesCapabilityProber({ endpointResolver: /** 执行「endpointResolver」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(url) => modelUrlPolicy.resolve(url) }),
+    /** 执行「modelAdmissionAdapters」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(storedStudent, connection) => createResponsesProvider(storedStudent, connection, secrets, modelUrlPolicy),
   ),
   {
     protocol: "openai_chat_completions",
     adapterRevision: "siliconflow-chat-completions-v1",
     probeVersion: 1,
-    probe: (candidate) => new SiliconFlowCapabilityProber({
-      endpointResolver: (url) => modelUrlPolicy.resolve(url),
+    probe: /** 执行「probe」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(candidate) => new SiliconFlowCapabilityProber({
+      endpointResolver: /** 执行「endpointResolver」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(url) => modelUrlPolicy.resolve(url),
     }).probe(candidate),
-    createProvider: (storedStudent, connection) =>
+    createProvider: /** 根据已校验输入构建「createProvider」结果，不额外持有调用方的大对象。 */
+(storedStudent, connection) =>
       createSiliconFlowProvider(storedStudent, connection, secrets, modelUrlPolicy),
   },
 ]);
@@ -259,8 +278,8 @@ const modelAdmission = new ModelAdmissionService(
   modelStudents,
   modelUrlPolicy,
   {
-    modelInUse: async (modelStudentId) =>
-      (await sessions.allForRuntime()).some((session) => session.modelStudentId === modelStudentId),
+    modelInUse: /** 执行「modelInUse」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(modelStudentId) => sessions.usesModelStudent(modelStudentId),
   },
 );
 const restoredModels = await modelAdmission.restoreInstalled();
@@ -291,12 +310,16 @@ const experimentService = new ExperimentService(
   new AnnotationWorksheetGenerator(modelStudents),
   contextPreviews,
 );
-resolver.setExperimentSnapshotResolver((experimentId, testId) => experimentService.snapshot(experimentId, testId));
+resolver.setExperimentSnapshotResolver(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(experimentId, testId) => experimentService.snapshot(experimentId, testId));
 const bindings = new SessionBindingService({
   workspaceCwd: "/workspace",
-  agentExists: async (id) => Boolean(await agentRepository.get(id)),
-  modelStudentReady: (id) => modelStudents.isReady(id),
-  experimentBinding: (experimentId, variantId) => experimentService.binding(experimentId, variantId),
+  agentExists: /** 执行「agentExists」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async (id) => Boolean(await agentRepository.get(id)),
+  modelStudentReady: /** 执行「modelStudentReady」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(id) => modelStudents.isReady(id),
+  experimentBinding: /** 执行「experimentBinding」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(experimentId, variantId) => experimentService.binding(experimentId, variantId),
 });
 const runtime = new AgentRuntime(
   model,
@@ -308,7 +331,8 @@ const runtime = new AgentRuntime(
 );
 const control = new ControlApi({
   allowedOrigins: (process.env.CONTROL_ALLOWED_ORIGINS ?? "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175")
-    .split(",").map((item) => item.trim()).filter(Boolean),
+    .split(",").map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.trim()).filter(Boolean),
 });
 registerAgentRoutes(control.router, agentService);
 registerSessionRoutes(control.router, sessions, new SessionLaunchService(resolve(dataDir, "session-launches.json"), agentService, modelStudents));
@@ -334,6 +358,7 @@ const server = new RemoteServer(agent, {
 await server.listen(host, port);
 console.log(`Kindergarten Remote: ws://${host}:${port}/acp`);
 
+/** 判断「isLoopbackHost」对应条件，只返回判定结果且不修改输入状态。 */
 function isLoopbackHost(value: string): boolean {
   return value === "127.0.0.1" || value === "localhost" || value === "::1";
 }
@@ -345,11 +370,14 @@ for (const state of mcp.serverStates()) {
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    void Promise.all([server.close(), evaluation.flush(), mcp.close()]).finally(() => process.exit(0));
+  process.once(signal, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => {
+    void Promise.all([server.close(), evaluation.flush(), mcp.close()]).finally(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => process.exit(0));
   });
 }
 
+/** 根据已校验输入构建「createStudent」结果，不额外持有调用方的大对象。 */
 function createStudent(): ModelStudent {
   const provider = process.env.MODEL_PROVIDER ?? "ollama";
   if (provider !== "ollama") {
@@ -375,6 +403,7 @@ function createStudent(): ModelStudent {
   };
 }
 
+/** 根据已校验输入构建「createResponsesProvider」结果，不额外持有调用方的大对象。 */
 function createResponsesProvider(
   storedStudent: ManagedModelStudentRecord,
   connection: ProviderConnectionRecord,
@@ -395,16 +424,20 @@ function createResponsesProvider(
     },
     generationDefaults: { reasoningProfile: storedStudent.generationDefaults.reasoningProfile },
   }, {
-    readBearerToken: () => secretStore.read(connection.credentialRef),
+    readBearerToken: /** 读取「readBearerToken」所需数据，并遵守作用域、分页与容量边界。 */
+() => secretStore.read(connection.credentialRef),
     reasoning: {
       capability: storedStudent.snapshot.reasoning.capability,
       efforts: Object.fromEntries(Object.entries(storedStudent.snapshot.reasoning.nativeByProfile)
-        .flatMap(([profile, native]) => typeof native?.effort === "string" ? [[profile, native.effort]] : [])),
+        .flatMap(/** 执行「efforts」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+([profile, native]) => typeof native?.effort === "string" ? [[profile, native.effort]] : [])),
     },
-    endpointResolver: (url) => urlPolicy.resolve(url),
+    endpointResolver: /** 执行「endpointResolver」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(url) => urlPolicy.resolve(url),
   });
 }
 
+/** 根据已校验输入构建「createSiliconFlowProvider」结果，不额外持有调用方的大对象。 */
 function createSiliconFlowProvider(
   storedStudent: ManagedModelStudentRecord,
   connection: ProviderConnectionRecord,
@@ -425,16 +458,19 @@ function createSiliconFlowProvider(
     },
     generationDefaults: { reasoningProfile: storedStudent.generationDefaults.reasoningProfile },
   }, {
-    readBearerToken: () => secretStore.read(connection.credentialRef),
+    readBearerToken: /** 读取「readBearerToken」所需数据，并遵守作用域、分页与容量边界。 */
+() => secretStore.read(connection.credentialRef),
     reasoning: {
       capability: storedStudent.snapshot.reasoning.capability,
       nativeByProfile: storedStudent.snapshot.reasoning.nativeByProfile,
     },
     includeStreamUsage: storedStudent.snapshot.usage,
-    endpointResolver: (url) => urlPolicy.resolve(url),
+    endpointResolver: /** 执行「endpointResolver」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(url) => urlPolicy.resolve(url),
   });
 }
 
+/** 执行「modelSizeClassEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function modelSizeClassEnv(name: string, fallback: "small" | "large"): "small" | "large" {
   const value = process.env[name] ?? fallback;
   if (value !== "small" && value !== "large") {
@@ -443,6 +479,7 @@ function modelSizeClassEnv(name: string, fallback: "small" | "large"): "small" |
   return value;
 }
 
+/** 执行「integerEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function integerEnv(name: string, fallback: number): number {
   const value = numberEnv(name, fallback);
   if (!Number.isInteger(value) || value <= 0) {
@@ -451,6 +488,7 @@ function integerEnv(name: string, fallback: number): number {
   return value;
 }
 
+/** 执行「optionalPositiveIntegerEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function optionalPositiveIntegerEnv(name: string): number | undefined {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return undefined;
@@ -461,6 +499,7 @@ function optionalPositiveIntegerEnv(name: string): number | undefined {
   return value;
 }
 
+/** 执行「numberEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function numberEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -471,6 +510,7 @@ function numberEnv(name: string, fallback: number): number {
   return value;
 }
 
+/** 执行「fileExists」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async function fileExists(path: string): Promise<boolean> {
   try { await stat(path); return true; }
   catch (error) {

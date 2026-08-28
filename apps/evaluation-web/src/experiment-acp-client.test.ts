@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { elicitationFields } from "./experiment-acp-client.js";
 
-describe("experiment ACP interventions", () => {
-  it("保留 AskUser 完整表单字段，而不是只取第一个字段", () => {
+describe("experiment ACP interventions", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保留 AskUser 完整表单字段，而不是只取第一个字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(elicitationFields({
       type: "object",
       required: ["goal", "count"],

@@ -15,7 +15,8 @@ export async function loadTurnEvaluation(
     const response = await fetch(url);
     if (response.ok) return await response.json() as TurnEvaluationRecord;
     if (response.status !== 404) {
-      const value = await response.json().catch(() => null) as { error?: string } | null;
+      const value = await response.json().catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => null) as { error?: string } | null;
       throw new Error(value?.error ?? `Evaluation API HTTP ${response.status}`);
     }
     if (attempt < 11) await delay(250);
@@ -23,6 +24,8 @@ export async function loadTurnEvaluation(
   return null;
 }
 
+/** 执行「delay」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  return new Promise(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
+(resolve) => setTimeout(resolve, milliseconds));
 }

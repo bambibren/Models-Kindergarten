@@ -15,6 +15,7 @@ import type { PptxBuildInput, PptxBuildResult } from "./pptx-build-service.js";
 export const PPTX_TOOL_IDS = ["build_pptx"] as const;
 type PptxToolName = typeof PPTX_TOOL_IDS[number];
 
+/** 描述「PptxBuilder」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PptxBuilder {
   build(input: PptxBuildInput, signal: AbortSignal): Promise<PptxBuildResult>;
 }
@@ -36,22 +37,27 @@ export const pptxToolDefinitions: ModelToolDefinition[] = [{
   },
 }];
 
+/** 描述「PptxToolProvider」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class PptxToolProvider implements ToolRegistryPort {
   readonly providerId = "pptx";
   readonly definitions: ModelToolDefinition[];
 
-  constructor(
+  /** 初始化「PptxToolProvider」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly builder: PptxBuilder,
     private readonly bindings: Map<string, { enabled: boolean; permission: "allow" | "ask" | "deny" }>,
   ) {
-    this.definitions = pptxToolDefinitions.filter((item) =>
+    this.definitions = pptxToolDefinitions.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) =>
       this.bindings.get(item.function.name)?.enabled === true,
     );
   }
 
-  prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
+  /** 执行「prepare」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     const name = toolName(call.name);
-    if (!this.definitions.some((item) => item.function.name === name)) {
+    if (!this.definitions.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.function.name === name)) {
       throw new Error(`当前 Agent 未启用 PPTX Tool: ${name}`);
     }
     const sourcePath = stringArg(call.arguments, "source_path");
@@ -70,7 +76,8 @@ export class PptxToolProvider implements ToolRegistryPort {
     };
   }
 
-  async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
+  /** 执行「execute」主流程，传播取消与失败并在结束时清理临时资源。 */
+async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<ToolResult> {
     if (context.signal.aborted) throw new DOMException("已取消", "AbortError");
     const result = await this.builder.build({
       sourcePath: String(call.arguments.source_path),
@@ -101,9 +108,11 @@ export class PptxToolProvider implements ToolRegistryPort {
     };
   }
 
-  capabilitySnapshot(): RuntimeCapabilitySnapshot {
+  /** 生成「capabilitySnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
+capabilitySnapshot(): RuntimeCapabilitySnapshot {
     return {
-      tools: this.definitions.map((definition) => ({
+      tools: this.definitions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(definition) => ({
         id: `pptx:tool:${definition.function.name}`,
         modelName: definition.function.name,
         origin: "builtin",
@@ -114,16 +123,19 @@ export class PptxToolProvider implements ToolRegistryPort {
     };
   }
 
-  private permission(name: PptxToolName): PermissionMode {
+  /** 执行「permission」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private permission(name: PptxToolName): PermissionMode {
     return this.bindings.get(name)?.permission ?? "deny";
   }
 }
 
+/** 根据已校验输入构建「toolName」结果，不额外持有调用方的大对象。 */
 function toolName(value: string): PptxToolName {
   if (PPTX_TOOL_IDS.includes(value as PptxToolName)) return value as PptxToolName;
   throw new Error(`未知 PPTX Tool: ${value}`);
 }
 
+/** 执行「stringArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function stringArg(input: Record<string, unknown>, name: string): string {
   const value = input[name];
   if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${name} 必须是非空字符串`);

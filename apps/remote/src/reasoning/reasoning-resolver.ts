@@ -5,6 +5,7 @@ import type {
 } from "@kindergarten/contracts";
 import { resolveSupportedReasoningProfile } from "@kindergarten/contracts";
 
+/** 描述「ReasoningResolutionInput」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ReasoningResolutionInput {
   providerKind: string;
   model: string;

@@ -5,6 +5,7 @@ import { useAutoDisclosure } from "../../hooks/use-auto-disclosure.js";
 import { ContentRenderer } from "../chat/ContentRenderer.js";
 import { formatTokenCount } from "../tokens/token-format.js";
 
+/** 渲染「ReasoningItem」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ReasoningItem({ entry }: { entry: ThoughtEntry }) {
   const active = entry.status === "streaming";
   const disclosure = useAutoDisclosure(active ? "active" : "completed");

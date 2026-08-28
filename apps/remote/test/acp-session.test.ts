@@ -39,14 +39,18 @@ import { ModelStudentCatalog } from "../src/model/model-student-catalog.js";
 
 const tempDirs: string[] = [];
 
-afterEach(async () => {
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => {
   await Promise.all(
-    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+    tempDirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true })),
   );
 });
 
-describe("ACP 会话语义", () => {
-  it("load 完整回放，resume 零回放，且连接之间不广播", async () => {
+describe("ACP 会话语义", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("load 完整回放，resume 零回放，且连接之间不广播", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new StaticProvider();
     const agent = await makeAgent(provider);
     const firstUpdates: acp.SessionNotification[] = [];
@@ -96,11 +100,13 @@ describe("ACP 会话语义", () => {
       native: { level: "deep" },
     });
     expect(firstSummaries).toHaveLength(1);
-    expect(firstSummaries[0]?.summary.items.map((item) => item.kind)).toEqual([
+    expect(firstSummaries[0]?.summary.items.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.kind)).toEqual([
       "system_instruction",
       "available_tools",
     ]);
-    expect(firstSummaries[0]?.summary.items.every((item) => item.raw?.model === "fixture"))
+    expect(firstSummaries[0]?.summary.items.every(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.raw?.model === "fixture"))
       .toBe(true);
     expect(JSON.stringify(firstSummaries[0])).not.toContain("第一问");
     expect(firstUsages).toHaveLength(1);
@@ -173,7 +179,8 @@ describe("ACP 会话语义", () => {
       windowTokens: 128_000,
     });
     const historyRaw = firstSummaries[1]?.summary.items.find(
-      (item) => item.kind === "session_history",
+      /** 构造「raw」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.kind === "session_history",
     )?.raw?.value;
     expect(historyRaw).toContain("第一问");
     expect(historyRaw).toContain("第一段第二段");
@@ -187,10 +194,12 @@ describe("ACP 会话语义", () => {
     await closeClient(second);
   });
 
-  it("Agent 删除后仍可 load 历史，但新 prompt 在写入 user Turn 前失败", async () => {
+  it("Agent 删除后仍可 load 历史，但新 prompt 在写入 user Turn 前失败", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new StaticProvider();
     let agentExists = true;
-    const agent = await makeAgent(provider, undefined, () => agentExists);
+    const agent = await makeAgent(provider, undefined, /** 构造「agent」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => agentExists);
     const firstUpdates: acp.SessionNotification[] = [];
     const first = await openClient(agent, firstUpdates);
     const created = await first.agent.request(acp.methods.agent.session.new, {
@@ -209,7 +218,8 @@ describe("ACP 会话语义", () => {
       mcpServers: [],
     });
     const historyBeforeRejectedPrompt = messageTexts(beforeUpdates);
-    expect(historyBeforeRejectedPrompt.some(([, text]) => text === "删除前的问题")).toBe(true);
+    expect(historyBeforeRejectedPrompt.some(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+([, text]) => text === "删除前的问题")).toBe(true);
 
     await expect(sendPrompt(first, created.sessionId, "不应写入历史", "turn-after-delete"))
       .rejects.toMatchObject({
@@ -227,11 +237,13 @@ describe("ACP 会话语义", () => {
       mcpServers: [],
     });
     expect(messageTexts(afterUpdates)).toEqual(historyBeforeRejectedPrompt);
-    expect(messageTexts(afterUpdates).some(([, text]) => text === "不应写入历史")).toBe(false);
+    expect(messageTexts(afterUpdates).some(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+([, text]) => text === "不应写入历史")).toBe(false);
     await Promise.all([closeClient(first), closeClient(before), closeClient(after)]);
   });
 
-  it("同一 session 同时只允许一轮 prompt，并支持 cancel", async () => {
+  it("同一 session 同时只允许一轮 prompt，并支持 cancel", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new WaitingProvider();
     const agent = await makeAgent(provider);
     const updates: acp.SessionNotification[] = [];
@@ -277,7 +289,8 @@ describe("ACP 会话语义", () => {
     await closeClient(client);
   });
 
-  it("WebSocket 断开不取消 Runtime，手动 resume 只补当前 Turn 缺失文本", async () => {
+  it("WebSocket 断开不取消 Runtime，手动 resume 只补当前 Turn 缺失文本", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new DisconnectProvider();
     const agent = await makeAgent(provider);
     const firstUpdates: acp.SessionNotification[] = [];
@@ -290,12 +303,18 @@ describe("ACP 会话语义", () => {
       _meta: testSessionMeta(),
     });
     const running = sendPrompt(first, created.sessionId, "断线后继续", "turn-resume")
-      .then((value) => value, (error: unknown) => error);
+      .then(/** 构造「running」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(value) => value, /** 构造「running」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(error: unknown) => error);
     await provider.firstChunk;
-    await waitUntil(() => messageTexts(firstUpdates).some(([, text]) => text === "第一段"));
+    await waitUntil(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+() => messageTexts(firstUpdates).some(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+([, text]) => text === "第一段"));
     const received = messageTexts(firstUpdates);
-    const user = received.find(([, text]) => text === "断线后继续");
-    const assistant = received.find(([, text]) => text === "第一段");
+    const user = received.find(/** 构造「user」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+([, text]) => text === "断线后继续");
+    const assistant = received.find(/** 构造「assistant」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+([, text]) => text === "第一段");
     expect(user).toBeDefined();
     expect(assistant).toBeDefined();
 
@@ -325,7 +344,9 @@ describe("ACP 会话语义", () => {
     });
 
     expect(messageTexts(resumedUpdates)).toEqual([[assistant![0], "第二段"]]);
-    await waitUntil(() => resumedStates.some((item) => item.turn.status === "completed"));
+    await waitUntil(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+() => resumedStates.some(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(item) => item.turn.status === "completed"));
     expect(resumedStates.at(-1)?.turn).toEqual({
       schemaVersion: 1,
       turnId: "turn-resume",
@@ -344,7 +365,8 @@ describe("ACP 会话语义", () => {
     await closeClient(resumed);
   });
 
-  it("session/close 取消当前 Turn 但不关闭 ACP 连接或删除历史", async () => {
+  it("session/close 取消当前 Turn 但不关闭 ACP 连接或删除历史", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const provider = new WaitingProvider();
     const agent = await makeAgent(provider);
     const client = await openClient(agent, []);
@@ -363,7 +385,8 @@ describe("ACP 会话语义", () => {
     await closeClient(client);
   });
 
-  it("Prompt 致命错误只通过 JSON-RPC error 保留具体原因", async () => {
+  it("Prompt 致命错误只通过 JSON-RPC error 保留具体原因", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const client = await openClient(await makeAgent(new FailedProvider()), []);
     const created = await client.agent.request(acp.methods.agent.session.new, {
       cwd: "/workspace",
@@ -382,7 +405,8 @@ describe("ACP 会话语义", () => {
     await closeClient(client);
   });
 
-  it("Session Config 从该 Session 绑定的 ModelStudent 读取推理能力", async () => {
+  it("Session Config 从该 Session 绑定的 ModelStudent 读取推理能力", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const fallback = new StaticProvider();
     const selected = new MaxReasoningProvider();
     const models = new ModelStudentCatalog(fallback, "ready");
@@ -394,7 +418,8 @@ describe("ACP 会话语义", () => {
       _meta: testSessionMeta(selected.student.id),
     });
     const options = created.configOptions?.[0]?.type === "select" ? created.configOptions[0].options : [];
-    expect(options.map((item) => "value" in item ? item.value : item.group)).toEqual(["auto", "fast", "balanced", "deep", "max"]);
+    expect(options.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => "value" in item ? item.value : item.group)).toEqual(["auto", "fast", "balanced", "deep", "max"]);
     await expect(client.agent.request(acp.methods.agent.session.setConfigOption, {
       sessionId: created.sessionId,
       configId: "reasoning_profile",
@@ -413,12 +438,15 @@ class StaticProvider implements ModelProvider {
     supportedProfiles: ["balanced", "deep"],
     defaultProfile: "balanced" as const,
   };
-  nativeReasoning(profile: "balanced" | "deep") { return { level: profile }; }
+  /** 构造「nativeReasoning」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+nativeReasoning(profile: "balanced" | "deep") { return { level: profile }; }
   lastInput?: ModelInput;
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
-  async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     this.lastInput = structuredClone(input);
     yield { type: "text_delta", text: "第一段" };
     yield { type: "text_delta", text: "第二段" };
@@ -436,21 +464,26 @@ class WaitingProvider implements ModelProvider {
     supportedProfiles: ["balanced"],
     defaultProfile: "balanced",
   };
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
   private start!: () => void;
-  readonly started = new Promise<void>((resolve) => {
+  readonly started = new Promise<void>(/** 构造「started」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(resolve) => {
     this.start = resolve;
   });
 
-  async *stream(
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(
     _input: ModelInput,
     signal: AbortSignal,
   ): AsyncIterable<ModelEvent> {
     this.start();
-    await new Promise<void>((_resolve, reject) => {
-      const cancel = () => reject(new DOMException("已取消", "AbortError"));
+    await new Promise<void>(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(_resolve, reject) => {
+      const cancel = /** 构造「cancel」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => reject(new DOMException("已取消", "AbortError"));
       if (signal.aborted) cancel();
       else signal.addEventListener("abort", cancel, { once: true });
     });
@@ -463,17 +496,24 @@ class DisconnectProvider implements ModelProvider {
   private release!: () => void;
   private first!: () => void;
   private done!: () => void;
-  readonly firstChunk = new Promise<void>((resolve) => { this.first = resolve; });
-  readonly completed = new Promise<void>((resolve) => { this.done = resolve; });
-  readonly waiting = new Promise<void>((resolve) => { this.release = resolve; });
+  readonly firstChunk = new Promise<void>(/** 构造「firstChunk」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(resolve) => { this.first = resolve; });
+  readonly completed = new Promise<void>(/** 构造「completed」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(resolve) => { this.done = resolve; });
+  readonly waiting = new Promise<void>(/** 构造「waiting」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(resolve) => { this.release = resolve; });
   aborted = false;
 
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
-  continue(): void { this.release(); }
-  async *stream(_input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
-    signal.addEventListener("abort", () => { this.aborted = true; }, { once: true });
+  /** 构造「continue」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+continue(): void { this.release(); }
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(_input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
+    signal.addEventListener("abort", /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => { this.aborted = true; }, { once: true });
     yield { type: "text_delta", text: "第一段" };
     this.first();
     await this.waiting;
@@ -485,10 +525,12 @@ class DisconnectProvider implements ModelProvider {
 
 class FailedProvider implements ModelProvider {
   readonly student = testStudent;
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
-  async *stream(): AsyncIterable<ModelEvent> {
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(): AsyncIterable<ModelEvent> {
     throw new ModelProviderError("dependency_unavailable", "Ollama 不可用", true);
   }
 }
@@ -507,12 +549,15 @@ class MaxReasoningProvider implements ModelProvider {
     supportedProfiles: ["fast", "balanced", "deep", "max"],
     defaultProfile: "balanced",
   };
-  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+  /** 构造「serializeContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
     return serializeTestContext(this.student, fragment);
   }
-  async *stream(): AsyncIterable<ModelEvent> { yield { type: "finish", reason: "stop" }; }
+  /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async *stream(): AsyncIterable<ModelEvent> { yield { type: "finish", reason: "stop" }; }
 }
 
+/** 构造「serializeTestContext」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function serializeTestContext(
   student: ModelStudent,
   fragment: ModelContextFragment,
@@ -532,10 +577,12 @@ function serializeTestContext(
   };
 }
 
+/** 构造「makeAgent」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function makeAgent(
   provider: ModelProvider,
   models?: ModelStudentCatalog,
-  agentExists: (id: string) => boolean | Promise<boolean> = (id) => id === "agent-1",
+  agentExists: (id: string) => boolean | Promise<boolean> = /** 构造「agentExists」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(id) => id === "agent-1",
 ): Promise<acp.AgentApp> {
   const dir = await mkdtemp(join(tmpdir(), "kindergarten-"));
   tempDirs.push(dir);
@@ -548,18 +595,22 @@ async function makeAgent(
     new SessionBindingService({
       workspaceCwd: "/workspace",
       agentExists,
-      modelStudentReady: (id) => models?.isReady(id) ?? id === "student-1",
-      experimentBinding: async () => undefined,
+      modelStudentReady: /** 构造「modelStudentReady」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(id) => models?.isReady(id) ?? id === "student-1",
+      experimentBinding: /** 构造「experimentBinding」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => undefined,
     }),
     undefined,
     models,
   ).createApp();
 }
 
+/** 构造「testSessionMeta」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function testSessionMeta(modelStudentId = "student-1"): Record<string, unknown> {
   return makeSessionBindingMeta({ schemaVersion: 1, modelStudentId, agentId: "agent-1" });
 }
 
+/** 构造「openClient」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function openClient(
   agent: acp.AgentApp,
   updates: acp.SessionNotification[],
@@ -570,34 +621,39 @@ async function openClient(
 ): Promise<acp.ClientConnection> {
   const app = acp
     .client({ name: "test-client" })
-    .onNotification(acp.methods.client.session.update, ({ params }) => {
+    .onNotification(acp.methods.client.session.update, /** 构造「onNotification」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+({ params }) => {
       updates.push(params);
     })
     .onNotification(
       CONTEXT_SUMMARY_NOTIFICATION,
       readContextSummaryNotification,
-      ({ params }) => {
+      /** 构造「onNotification」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+({ params }) => {
         summaries.push(params);
       },
     )
     .onNotification(
       TOKEN_USAGE_NOTIFICATION,
       readTokenUsageNotification,
-      ({ params }) => {
+      /** 构造「onNotification」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+({ params }) => {
         usages.push(params);
       },
     )
     .onNotification(
       TURN_STATE_NOTIFICATION,
       readTurnStateNotification,
-      ({ params }) => {
+      /** 构造「onNotification」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+({ params }) => {
         turns.push(params);
       },
     )
     .onNotification(
       CONTEXT_WINDOW_USAGE_NOTIFICATION,
       readContextWindowUsageNotification,
-      ({ params }) => {
+      /** 构造「app」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+({ params }) => {
         windows.push(params);
       },
     );
@@ -609,6 +665,7 @@ async function openClient(
   return connection;
 }
 
+/** 构造「sendPrompt」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function sendPrompt(
   client: acp.ClientConnection,
   sessionId: string,
@@ -634,10 +691,12 @@ const testStudent: ModelStudent = {
   generationDefaults: {},
 };
 
+/** 构造「messageTexts」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function messageTexts(
   updates: acp.SessionNotification[],
 ): Array<[string, string]> {
-  return updates.flatMap((notice) => {
+  return updates.flatMap(/** 构造「messageTexts」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(notice) => {
     const update = notice.update;
     if (
       (update.sessionUpdate !== "user_message_chunk" &&
@@ -651,15 +710,18 @@ function messageTexts(
   });
 }
 
+/** 构造「closeClient」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function closeClient(client: acp.ClientConnection): Promise<void> {
   client.close();
   await client.closed;
 }
 
+/** 构造「waitUntil」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function waitUntil(predicate: () => boolean): Promise<void> {
   for (let index = 0; index < 100; index += 1) {
     if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(resolve) => setTimeout(resolve, 5));
   }
   throw new Error("等待 ACP 更新超时");
 }

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { TurnTraceDocument } from "@kindergarten/evaluation-contract";
+import type { LegacyTurnTraceDocumentV1 } from "@kindergarten/evaluation-contract";
 import { evaluateTurn } from "../src/evaluator.js";
+import { normalizeTurnTrace } from "../src/trace-migration.js";
 
-describe("Minimal Evaluator", () => {
-  it("区分工具失败、重复请求、权限违规和客观 Token 指标", () => {
+describe("Minimal Evaluator", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("区分工具失败、重复请求、权限违规和客观 Token 指标", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const trace = fixture();
     const result = evaluateTurn(trace);
     expect(result).toEqual({
@@ -22,9 +25,16 @@ describe("Minimal Evaluator", () => {
       permissionViolationCount: 1,
     });
   });
+
+  it("V1 原文 Trace 转为 V2 摘要后保持最小评测结果等价", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    const legacy = fixture();
+    expect(evaluateTurn(normalizeTurnTrace(legacy))).toEqual(evaluateTurn(legacy));
+  });
 });
 
-function fixture(): TurnTraceDocument {
+/** 构造「fixture」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+function fixture(): LegacyTurnTraceDocumentV1 {
   const resolvedReasoning = {
     schemaVersion: 1 as const,
     requestedProfile: "deep" as const,

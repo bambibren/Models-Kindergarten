@@ -10,8 +10,10 @@ const adjustable: ModelReasoningCapability = {
   defaultProfile: "balanced",
 };
 
-describe("reasoning config projection", () => {
-  it("projects the ACP thought_level option and filters unsupported provider values", () => {
+describe("reasoning config projection", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("projects the ACP thought_level option and filters unsupported provider values", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(projectReasoningConfig([{
       type: "select",
       id: "reasoning_profile",
@@ -37,7 +39,8 @@ describe("reasoning config projection", () => {
     });
   });
 
-  it("supports grouped ACP options", () => {
+  it("supports grouped ACP options", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(projectReasoningConfig([{
       type: "select",
       id: "reasoning_profile",
@@ -48,10 +51,12 @@ describe("reasoning config projection", () => {
         { value: "auto", name: "自动" },
         { value: "balanced", name: "均衡" },
       ] }],
-    }], adjustable)?.choices.map((choice) => choice.profile)).toEqual(["auto", "balanced"]);
+    }], adjustable)?.choices.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(choice) => choice.profile)).toEqual(["auto", "balanced"]);
   });
 
-  it("does not expose a control for fixed models or malformed ACP state", () => {
+  it("does not expose a control for fixed models or malformed ACP state", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const fixed: ModelReasoningCapability = {
       schemaVersion: 1,
       control: "fixed",
@@ -67,7 +72,8 @@ describe("reasoning config projection", () => {
     }], adjustable)).toBeUndefined();
   });
 
-  it("labels a boolean reasoning control as off/on instead of fake effort levels", () => {
+  it("labels a boolean reasoning control as off/on instead of fake effort levels", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const toggle: ModelReasoningCapability = {
       schemaVersion: 1,
       control: "toggle",
@@ -82,7 +88,8 @@ describe("reasoning config projection", () => {
     expect(reasoningAutoLabel(toggle)).toBe("跟随模型默认 · 开启思考");
   });
 
-  it("shows the selected ModelStudent default on the auto choice", () => {
+  it("shows the selected ModelStudent default on the auto choice", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(reasoningAutoLabel(adjustable)).toBe("跟随模型默认 · 均衡");
     expect(reasoningAutoLabel()).toBe("跟随模型默认");
   });

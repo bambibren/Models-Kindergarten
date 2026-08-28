@@ -13,8 +13,11 @@ import type {
   ArtifactMention,
 } from "@kindergarten/contracts";
 
+/** 描述「EntryId」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type EntryId = string;
+/** 描述「ChatRole」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ChatRole = "user" | "assistant";
+/** 描述「StreamSource」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type StreamSource = "prompt" | "load";
 
 interface EntryBase {
@@ -22,6 +25,7 @@ interface EntryBase {
   turnId: string;
 }
 
+/** 描述「MessageEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface MessageEntry extends EntryBase {
   type: "message";
   messageId: string | null;
@@ -32,6 +36,7 @@ export interface MessageEntry extends EntryBase {
   artifactMentions?: ArtifactMention[];
 }
 
+/** 描述「ThoughtEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ThoughtEntry extends EntryBase {
   type: "thought";
   messageId: string;
@@ -40,11 +45,13 @@ export interface ThoughtEntry extends EntryBase {
   tokenEstimate?: TokenUsageComponent;
 }
 
+/** 描述「ContextSummaryEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextSummaryEntry extends EntryBase {
   type: "context_summary";
   summary: ContextSummary;
 }
 
+/** 描述「ToolCallEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolCallEntry extends EntryBase {
   type: "tool_call";
   toolCallId: string;
@@ -59,16 +66,19 @@ export interface ToolCallEntry extends EntryBase {
   tokenEstimate?: TokenUsageComponent;
 }
 
+/** 描述「TokenUsageEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface TokenUsageEntry extends EntryBase {
   type: "token_usage";
   usage: TurnTokenUsage;
 }
 
+/** 描述「ContextWindowUsageEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextWindowUsageEntry extends EntryBase {
   type: "context_window_usage";
   state: ContextWindowUsageState;
 }
 
+/** 描述「ChatEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ChatEntry =
   | MessageEntry
   | ContextSummaryEntry
@@ -77,11 +87,13 @@ export type ChatEntry =
   | TokenUsageEntry
   | ContextWindowUsageEntry;
 
+/** 描述「EntryCollection」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface EntryCollection {
   order: EntryId[];
   byId: Record<EntryId, ChatEntry>;
 }
 
+/** 描述「StreamingContext」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface StreamingContext {
   operationId: string;
   source: StreamSource;
@@ -101,4 +113,5 @@ export interface ChatState {
   streaming: StreamingContext | null;
 }
 
-export const emptyEntries = (): EntryCollection => ({ order: [], byId: {} });
+export const emptyEntries = /** 执行「emptyEntries」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(): EntryCollection => ({ order: [], byId: {} });

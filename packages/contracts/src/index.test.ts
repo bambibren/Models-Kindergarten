@@ -7,8 +7,10 @@ import {
   readTokenUsageNotification,
 } from "./index.js";
 
-describe("Context window usage notification", () => {
-  it("保留下一次请求基础上下文估算和冻结窗口", () => {
+describe("Context window usage notification", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保留下一次请求基础上下文估算和冻结窗口", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(readContextWindowUsageNotification({
       sessionId: "session-1",
       state: {
@@ -32,7 +34,8 @@ describe("Context window usage notification", () => {
     });
   });
 
-  it("接受显式不可用状态，拒绝非法容量和口径", () => {
+  it("接受显式不可用状态，拒绝非法容量和口径", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     expect(readContextWindowUsageNotification({
       sessionId: "session-1",
       state: {
@@ -49,13 +52,16 @@ describe("Context window usage notification", () => {
       { schemaVersion: 1, status: "available", afterTurnId: "turn-2", estimatedTokens: 10, windowTokens: 128_000, basis: "last_request" },
       { schemaVersion: 1, status: "unavailable", afterTurnId: "turn-2", reason: "stale" },
     ]) {
-      expect(() => readContextWindowUsageNotification({ sessionId: "session-1", state })).toThrow("上下文窗口");
+      expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => readContextWindowUsageNotification({ sessionId: "session-1", state })).toThrow("上下文窗口");
     }
   });
 });
 
-describe("Artifact prompt meta", () => {
-  it("保留手动重试 operationId，并且 Mention 只接收稳定 Artifact ID", () => {
+describe("Artifact prompt meta", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保留手动重试 operationId，并且 Mention 只接收稳定 Artifact ID", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const value = readPromptMeta(makePromptMeta({
       schemaVersion: 1,
       turnId: "turn-retry",
@@ -72,8 +78,10 @@ describe("Artifact prompt meta", () => {
   });
 });
 
-describe("Context summary notification", () => {
-  it("保留当前模型适配层的原文快照", () => {
+describe("Context summary notification", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保留当前模型适配层的原文快照", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const result = readContextSummaryNotification({
       sessionId: "session-1",
       summary: {
@@ -103,7 +111,8 @@ describe("Context summary notification", () => {
     });
   });
 
-  it("兼容旧 Session 缺少 raw，但拒绝伪造的适配层格式", () => {
+  it("兼容旧 Session 缺少 raw，但拒绝伪造的适配层格式", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const base = {
       sessionId: "session-1",
       summary: {
@@ -120,7 +129,8 @@ describe("Context summary notification", () => {
     };
     expect(readContextSummaryNotification(base).summary.items[0]?.raw).toBeUndefined();
 
-    expect(() => readContextSummaryNotification({
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => readContextSummaryNotification({
       ...base,
       summary: {
         ...base.summary,
@@ -133,8 +143,10 @@ describe("Context summary notification", () => {
   });
 });
 
-describe("Token usage notification", () => {
-  it("保留精确总量和估算分项，并允许 Provider 缺少子集字段", () => {
+describe("Token usage notification", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("保留精确总量和估算分项，并允许 Provider 缺少子集字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const result = readTokenUsageNotification({
       sessionId: "session-1",
       usage: {
@@ -160,8 +172,10 @@ describe("Token usage notification", () => {
     expect(result.usage.cachedInputTokens).toBeUndefined();
   });
 
-  it("拒绝负数 token 和不匹配的目标类型", () => {
-    expect(() => readTokenUsageNotification({
+  it("拒绝负数 token 和不匹配的目标类型", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => readTokenUsageNotification({
       sessionId: "session-1",
       usage: {
         schemaVersion: 1,
@@ -172,7 +186,8 @@ describe("Token usage notification", () => {
       },
     })).toThrow("Token 用量字段无效");
 
-    expect(() => readTokenUsageNotification({
+    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => readTokenUsageNotification({
       sessionId: "session-1",
       usage: {
         schemaVersion: 1,

@@ -8,7 +8,8 @@ interface ToolExecutionErrorOptions extends ErrorOptions {
 export class ToolExecutionError extends Error {
   readonly effects?: ToolResult["effects"];
 
-  constructor(
+  /** 初始化「ToolExecutionError」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     readonly code: string,
     readonly category: ToolErrorCategory,
     message: string,

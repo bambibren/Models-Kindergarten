@@ -6,13 +6,16 @@ import {
 } from "../src/model/siliconflow-capability-probe.js";
 import { startChatCompletionsMockServer } from "./support/chat-completions-mock-server.js";
 
-describe("SiliconFlowCapabilityProber", () => {
-  it("主动确认文本、Tool 闭环、思考流、usage 与 enable_thinking toggle", async () => {
+describe("SiliconFlowCapabilityProber", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("主动确认文本、Tool 闭环、思考流、usage 与 enable_thinking toggle", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer({ thinking: "toggle" });
     try {
       const candidate = resolvedCandidate(mock.baseUrl);
       const snapshot = await new SiliconFlowCapabilityProber({
-        now: () => new Date("2026-08-14T00:00:00.000Z"),
+        now: /** 构造「now」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => new Date("2026-08-14T00:00:00.000Z"),
       }).probe(candidate);
 
       expect(snapshot).toMatchObject({
@@ -46,7 +49,8 @@ describe("SiliconFlowCapabilityProber", () => {
         },
         testedAt: "2026-08-14T00:00:00.000Z",
       });
-      expect(mock.requests.map((item) => item.body.enable_thinking)).toEqual([
+      expect(mock.requests.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.body.enable_thinking)).toEqual([
         undefined,
         undefined,
         false,
@@ -54,7 +58,8 @@ describe("SiliconFlowCapabilityProber", () => {
         true,
         true,
       ]);
-      expect(mock.requests.map((item) => item.body.stream_options)).toEqual([
+      expect(mock.requests.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.body.stream_options)).toEqual([
         undefined,
         { include_usage: true },
         { include_usage: true },
@@ -71,7 +76,8 @@ describe("SiliconFlowCapabilityProber", () => {
     }
   });
 
-  it("同一 model ID 在忽略控制参数的端点只声明 fixed，不按名称或域名猜测", async () => {
+  it("同一 model ID 在忽略控制参数的端点只声明 fixed，不按名称或域名猜测", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const toggleMock = await startChatCompletionsMockServer({ thinking: "toggle" });
     const ignoredMock = await startChatCompletionsMockServer({ thinking: "ignored" });
     try {
@@ -99,7 +105,8 @@ describe("SiliconFlowCapabilityProber", () => {
     }
   });
 
-  it("端点拒绝 enable_thinking 时仍可入园但不会虚报可调档位", async () => {
+  it("端点拒绝 enable_thinking 时仍可入园但不会虚报可调档位", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer({ thinking: "rejected" });
     try {
       const snapshot = await new SiliconFlowCapabilityProber()
@@ -115,7 +122,8 @@ describe("SiliconFlowCapabilityProber", () => {
     }
   });
 
-  it("Tool 请求成功但模型不返回调用时，不把请求被接受误判成 Tool 能力", async () => {
+  it("Tool 请求成功但模型不返回调用时，不把请求被接受误判成 Tool 能力", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const mock = await startChatCompletionsMockServer({ tools: false });
     try {
       const snapshot = await new SiliconFlowCapabilityProber()
@@ -127,7 +135,8 @@ describe("SiliconFlowCapabilityProber", () => {
     }
   });
 
-  it("fingerprint 不包含也不受 Secret 变化影响", () => {
+  it("fingerprint 不包含也不受 Secret 变化影响", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const first = resolvedCandidate("https://api.siliconflow.cn/v1");
     const second = { ...first, apiKey: "another-secret" };
     expect(connectionFingerprint(first)).toBe(connectionFingerprint(second));
@@ -135,6 +144,7 @@ describe("SiliconFlowCapabilityProber", () => {
   });
 });
 
+/** 构造「resolvedCandidate」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function resolvedCandidate(baseUrl: string): ResolvedModelStudentCandidate {
   return {
     presetId: "siliconflow",

@@ -17,6 +17,7 @@ export const TOKEN_USAGE_NOTIFICATION =
 export const CONTEXT_WINDOW_USAGE_NOTIFICATION =
   "model-kindergarten/session/context-window-usage" as const;
 
+/** 描述「ContextSummaryKind」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ContextSummaryKind =
   | "system_instruction"
   | "available_tools"
@@ -34,6 +35,7 @@ export interface ContextSummaryRaw {
   value: string;
 }
 
+/** 描述「ContextSummaryItem」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextSummaryItem {
   id: string;
   kind: ContextSummaryKind;
@@ -57,17 +59,20 @@ export interface ContextSummary {
   totalEstimatedTokens: number;
 }
 
+/** 描述「ContextSummaryNotification」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextSummaryNotification {
   sessionId: string;
   summary: ContextSummary;
 }
 
+/** 描述「TokenUsageCategory」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type TokenUsageCategory =
   | "current_prompt"
   | "reasoning"
   | "tool_call"
   | "answer";
 
+/** 描述「TokenUsageTargetType」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type TokenUsageTargetType = "message" | "thought" | "tool_call";
 
 /** 内容附近的分项只能估算；精确总量来自 Provider usage。 */
@@ -90,6 +95,7 @@ export interface TurnTokenUsage {
   components: TokenUsageComponent[];
 }
 
+/** 描述「TokenUsageNotification」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface TokenUsageNotification {
   sessionId: string;
   usage: TurnTokenUsage;
@@ -112,6 +118,7 @@ export type ContextWindowUsageState =
       reason: "unknown_window" | "preview_failed";
     };
 
+/** 描述「ContextWindowUsageNotification」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextWindowUsageNotification {
   sessionId: string;
   state: ContextWindowUsageState;
@@ -129,6 +136,7 @@ export interface MessageMeta {
   artifactMentions?: ArtifactMention[];
 }
 
+/** 描述「PromptMeta」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PromptMeta {
   schemaVersion: 1;
   turnId: string;
@@ -136,6 +144,7 @@ export interface PromptMeta {
   artifactMentions?: ArtifactMentionInput[];
 }
 
+/** 描述「KindergartenMeta」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface KindergartenMeta {
   message?: MessageMeta;
   prompt?: PromptMeta;
@@ -146,22 +155,26 @@ export interface KindergartenMeta {
   fileReferences?: FileReferencesMeta;
 }
 
+/** 描述「AcpMeta」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface AcpMeta extends Record<string, unknown> {
   [META_KEY]: KindergartenMeta;
 }
 
+/** 根据已校验输入构建「makeAcpMeta」结果，不额外持有调用方的大对象。 */
 export function makeAcpMeta(message: MessageMeta): AcpMeta {
   return {
     [META_KEY]: { message },
   };
 }
 
+/** 根据已校验输入构建「makePromptMeta」结果，不额外持有调用方的大对象。 */
 export function makePromptMeta(prompt: PromptMeta): AcpMeta {
   return {
     [META_KEY]: { prompt },
   };
 }
 
+/** 读取「readMessageMeta」所需数据，并遵守作用域、分页与容量边界。 */
 export function readMessageMeta(value: unknown): MessageMeta | undefined {
   if (!isRecord(value)) return undefined;
   const root = value[META_KEY];
@@ -187,6 +200,7 @@ export function readMessageMeta(value: unknown): MessageMeta | undefined {
   };
 }
 
+/** 读取「readPromptMeta」所需数据，并遵守作用域、分页与容量边界。 */
 export function readPromptMeta(value: unknown): PromptMeta | undefined {
   if (!isRecord(value)) return undefined;
   const root = value[META_KEY];
@@ -210,6 +224,7 @@ export function readPromptMeta(value: unknown): PromptMeta | undefined {
   };
 }
 
+/** 读取「readArtifactMentionInput」所需数据，并遵守作用域、分页与容量边界。 */
 function readArtifactMentionInput(value: unknown): ArtifactMentionInput {
   if (!isRecord(value) || typeof value.artifactId !== "string" || value.artifactId.length === 0) {
     throw new Error("Artifact Mention 缺少 artifactId");
@@ -217,6 +232,7 @@ function readArtifactMentionInput(value: unknown): ArtifactMentionInput {
   return { artifactId: value.artifactId };
 }
 
+/** 读取「readArtifactMention」所需数据，并遵守作用域、分页与容量边界。 */
 function readArtifactMention(value: unknown): ArtifactMention {
   if (
     !isRecord(value) ||
@@ -301,6 +317,7 @@ export function readTokenUsageNotification(
   };
 }
 
+/** 读取「readContextWindowUsageNotification」所需数据，并遵守作用域、分页与容量边界。 */
 export function readContextWindowUsageNotification(
   value: unknown,
 ): ContextWindowUsageNotification {
@@ -352,6 +369,7 @@ export function readContextWindowUsageNotification(
   };
 }
 
+/** 读取「readTokenUsageComponent」所需数据，并遵守作用域、分页与容量边界。 */
 function readTokenUsageComponent(value: unknown): TokenUsageComponent {
   if (
     !isRecord(value) ||
@@ -371,6 +389,7 @@ function readTokenUsageComponent(value: unknown): TokenUsageComponent {
   };
 }
 
+/** 执行「optionalTokenCount」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function optionalTokenCount<K extends string>(
   value: Record<string, unknown>,
   key: K,
@@ -381,14 +400,17 @@ function optionalTokenCount<K extends string>(
   return { [key]: count } as Record<K, number>;
 }
 
+/** 判断「isTokenCount」对应条件，只返回判定结果且不修改输入状态。 */
 function isTokenCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
+/** 判断「isSafeTokenCount」对应条件，只返回判定结果且不修改输入状态。 */
 function isSafeTokenCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
+/** 判断「isTokenUsageCategory」对应条件，只返回判定结果且不修改输入状态。 */
 function isTokenUsageCategory(value: unknown): value is TokenUsageCategory {
   return value === "current_prompt" ||
     value === "reasoning" ||
@@ -396,10 +418,12 @@ function isTokenUsageCategory(value: unknown): value is TokenUsageCategory {
     value === "answer";
 }
 
+/** 判断「isTokenUsageTargetType」对应条件，只返回判定结果且不修改输入状态。 */
 function isTokenUsageTargetType(value: unknown): value is TokenUsageTargetType {
   return value === "message" || value === "thought" || value === "tool_call";
 }
 
+/** 执行「validTarget」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function validTarget(
   category: TokenUsageCategory,
   targetType: TokenUsageTargetType,
@@ -409,6 +433,7 @@ function validTarget(
   return targetType === "tool_call";
 }
 
+/** 读取「readContextSummaryItem」所需数据，并遵守作用域、分页与容量边界。 */
 function readContextSummaryItem(value: unknown): ContextSummaryItem {
   if (
     !isRecord(value) ||
@@ -431,6 +456,7 @@ function readContextSummaryItem(value: unknown): ContextSummaryItem {
   };
 }
 
+/** 读取「readContextSummaryRaw」所需数据，并遵守作用域、分页与容量边界。 */
 function readContextSummaryRaw(value: unknown): ContextSummaryRaw {
   if (
     !isRecord(value) ||
@@ -449,6 +475,7 @@ function readContextSummaryRaw(value: unknown): ContextSummaryRaw {
   };
 }
 
+/** 判断「isContextSummaryKind」对应条件，只返回判定结果且不修改输入状态。 */
 function isContextSummaryKind(value: unknown): value is ContextSummaryKind {
   return value === "system_instruction" ||
     value === "available_tools" ||
@@ -459,10 +486,12 @@ function isContextSummaryKind(value: unknown): value is ContextSummaryKind {
     value === "truncated_history";
 }
 
+/** 判断「isContextTrust」对应条件，只返回判定结果且不修改输入状态。 */
 function isContextTrust(value: unknown): value is NonNullable<ContextSummaryItem["trust"]> {
   return value === "trusted" || value === "approved" || value === "untrusted";
 }
 
+/** 判断「isRecord」对应条件，只返回判定结果且不修改输入状态。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

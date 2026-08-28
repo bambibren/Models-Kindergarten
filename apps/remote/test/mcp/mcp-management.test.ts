@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,10 +13,14 @@ import type { McpConnectedClient, McpConnector, McpServerConfig } from "../../sr
 import { HostSecretStore } from "../../src/mcp/secret-store.js";
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("McpManagementService", () => {
-  it("先测试再安装，公开视图不含 credential", async () => {
+describe("McpManagementService", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("先测试再安装，公开视图不含 credential", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, manager } = await setup();
     const tested = await service.test({
       name: "Demo MCP", transport: "streamable_http", url: "https://example.com/mcp", auth: { kind: "none" },
@@ -29,17 +33,20 @@ describe("McpManagementService", () => {
     expect(installed).toMatchObject({ state: "connected", authKind: "none", enabled: true });
     expect(installed).not.toHaveProperty("auth");
     expect(installed).not.toHaveProperty("credentialRef");
-    expect(manager.capabilitySnapshots().some((item) => item.serverId === installed.mcpInstallationId)).toBe(true);
+    expect(manager.capabilitySnapshots().some(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => item.serverId === installed.mcpInstallationId)).toBe(true);
   });
 
-  it("拒绝 Bearer 与未成功测试的安装", async () => {
+  it("拒绝 Bearer 与未成功测试的安装", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service } = await setup();
     await expect(service.test({ name: "bad", transport: "streamable_http", url: "https://example.com/mcp", auth: { kind: "bearer", token: "secret" } }))
       .rejects.toMatchObject({ code: "MCP_AUTH_NOT_SUPPORTED" });
     await expect(service.install({ testId: "missing" })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("禁用、启用、删除并清理 Agent binding", async () => {
+  it("禁用、启用、删除并清理 Agent binding", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service, agents } = await setup();
     const tested = await service.test({ name: "Demo", transport: "streamable_http", url: "https://example.com/mcp", auth: { kind: "none" } });
     const installed = await service.install({ testId: tested.testId });
@@ -57,14 +64,38 @@ describe("McpManagementService", () => {
     expect((await agents.get(agent.agentId)).mcps).toEqual([]);
   });
 
-  it("随系统配置加载的内置 MCP 不可删除", async () => {
+  it("随系统配置加载的内置 MCP 不可删除", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const { service } = await setup(true);
     await service.importExisting();
     expect(await service.get("notes")).toMatchObject({ name: "笔记 MCP", deletable: false });
     await expect(service.uninstall("notes")).rejects.toMatchObject({ status: 409, code: "CONFLICT" });
   });
+
+  it("MCP 测试过期后首次返回事实并从持久化清理", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-mcp-expired-"));
+    dirs.push(dir);
+    const testsFile = join(dir, "tests.json");
+    await writeFile(testsFile, JSON.stringify({ schemaVersion: 1, records: [{
+      schemaVersion: 1,
+      testId: "expired",
+      ownerId: "local-admin",
+      candidateHash: "hash",
+      candidate: { name: "旧 MCP", transport: "streamable_http", url: "https://example.com/mcp", auth: { kind: "none" } },
+      state: "succeeded",
+      createdAt: "2020-01-01T00:00:00.000Z",
+      expiresAt: "2020-01-01T00:01:00.000Z",
+    }] }), "utf8");
+    const repository = new McpManagementRepository(testsFile, join(dir, "installations.json"));
+
+    expect(await repository.getTest("expired")).toMatchObject({ testId: "expired" });
+    expect(await repository.getTest("expired")).toBeUndefined();
+    expect(JSON.parse(await readFile(testsFile, "utf8"))).toMatchObject({ records: [] });
+  });
 });
 
+/** 构造「setup」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function setup(withBuiltin = false) {
   const dir = await mkdtemp(join(tmpdir(), "mk-mcp-management-"));
   dirs.push(dir);
@@ -83,11 +114,17 @@ async function setup(withBuiltin = false) {
   );
   await manager.initialize();
   const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
-    builtinToolIds: () => [], readySkillInstallationIds: () => [],
-    mcpCapabilities: () => manager.capabilitySnapshots().map((item) => ({
+    builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [], readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [],
+    mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => manager.capabilitySnapshots().map(/** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(item) => ({
       installationId: item.serverId,
-      tools: item.tools.map((tool) => tool.name),
-      resources: item.resources.map((resource) => resource.uri),
+      tools: item.tools.map(/** 构造「tools」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(tool) => tool.name),
+      resources: item.resources.map(/** 构造「resources」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(resource) => resource.uri),
     })),
   });
   const service = new McpManagementService(
@@ -97,16 +134,23 @@ async function setup(withBuiltin = false) {
 }
 
 class FakeConnector implements McpConnector {
-  async connect(_server: McpServerConfig): Promise<McpConnectedClient> { return new FakeClient(); }
+  /** 构造「connect」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async connect(_server: McpServerConfig): Promise<McpConnectedClient> { return new FakeClient(); }
 }
 
 class FakeClient implements McpConnectedClient {
   readonly protocolEra = "modern" as const;
   readonly instructions = undefined;
-  async listTools() { return [{ name: "echo", inputSchema: { type: "object" } }]; }
-  async listResources() { return [{ uri: "demo://guide", name: "Guide" }]; }
-  async listPrompts() { return []; }
-  async callTool() { return { isError: false, content: [{ type: "text" as const, text: "ok" }] }; }
-  async readResource() { return { contents: [] }; }
-  async close() {}
+  /** 构造「listTools」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async listTools() { return [{ name: "echo", inputSchema: { type: "object" } }]; }
+  /** 构造「listResources」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async listResources() { return [{ uri: "demo://guide", name: "Guide" }]; }
+  /** 构造「listPrompts」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async listPrompts() { return []; }
+  /** 构造「callTool」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async callTool() { return { isError: false, content: [{ type: "text" as const, text: "ok" }] }; }
+  /** 构造「readResource」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async readResource() { return { contents: [] }; }
+  /** 构造「close」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async close() {}
 }

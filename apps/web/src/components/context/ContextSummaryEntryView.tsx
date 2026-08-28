@@ -26,6 +26,7 @@ const icons: Record<ContextSummaryKind, LucideIcon> = {
   truncated_history: AlertTriangle,
 };
 
+/** 渲染「ContextSummaryEntryView」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ContextSummaryEntryView({ entry }: { entry: ContextSummaryEntry }) {
   const { items, totalEstimatedTokens } = entry.summary;
   if (items.length === 0) return null;
@@ -38,13 +39,15 @@ export function ContextSummaryEntryView({ entry }: { entry: ContextSummaryEntry 
     </Collapsible.Trigger>
     <Collapsible.Content className="context-summary-content">
       <div className="context-summary-panel">
-        {items.map((item) => <ContextSummaryRow key={item.id} item={item} />)}
+        {items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => <ContextSummaryRow key={item.id} item={item} />)}
         {/* 上下文实验功能调研期间不暴露“用本轮做实验”的入口。 */}
       </div>
     </Collapsible.Content>
   </Collapsible.Root>;
 }
 
+/** 渲染「ContextSummaryRow」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function ContextSummaryRow({ item }: { item: ContextSummaryItem }) {
   const Icon = icons[item.kind];
   const trust = trustLabel(item.trust);
@@ -79,12 +82,14 @@ function ContextSummaryRow({ item }: { item: ContextSummaryItem }) {
   </Collapsible.Root>;
 }
 
+/** 执行「formatTokens」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function formatTokens(value: number): string {
   if (value < 1_000) return String(value);
   const scaled = value / 1_000;
   return `${scaled >= 10 ? scaled.toFixed(0) : scaled.toFixed(1)}k`;
 }
 
+/** 执行「trustLabel」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function trustLabel(value: ContextSummaryItem["trust"]): string | null {
   if (value === "approved") return "已授权";
   if (value === "untrusted") return "外部数据";

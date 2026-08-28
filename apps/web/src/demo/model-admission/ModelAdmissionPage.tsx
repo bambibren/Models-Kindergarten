@@ -65,23 +65,30 @@ const providerCopy: Record<ModelAdmissionProviderId, {
 
 const providerIds: ModelAdmissionProviderId[] = ["ollama", "siliconflow", "custom_responses"];
 
+/** 渲染「ModelAdmissionPage」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ModelAdmissionPage() {
-  const [draft, setDraft] = useState<ModelAdmissionDraft>(() => createAdmissionDraft("ollama"));
+  const [draft, setDraft] = useState<ModelAdmissionDraft>(/** 执行「[draft, setDraft]」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => createAdmissionDraft("ollama"));
   const [phase, setPhase] = useState<AdmissionPhase>("editing");
   const [models, setModels] = useState<DiscoveredDemoModel[]>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [error, setError] = useState("");
   const [showKey, setShowKey] = useState(false);
   const timerRef = useRef<number | null>(null);
-  const selectedModel = models.find((model) => model.id === selectedModelId);
-  const validation = useMemo(() => validateAdmissionDraft(draft), [draft]);
+  const selectedModel = models.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(model) => model.id === selectedModelId);
+  const validation = useMemo(/** 缓存「validation」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
+() => validateAdmissionDraft(draft), [draft]);
   const busy = phase === "testing" || phase === "probing" || phase === "saving";
 
-  useEffect(() => () => {
+  useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => /** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
+() => {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
   }, []);
 
-  function resetResult() {
+  /** 执行「resetResult」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function resetResult() {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     timerRef.current = null;
     setModels([]);
@@ -90,26 +97,34 @@ export function ModelAdmissionPage() {
     setPhase("editing");
   }
 
-  function chooseProvider(providerId: ModelAdmissionProviderId) {
-    setDraft((current) => switchAdmissionProvider(current, providerId));
+  /** 执行「chooseProvider」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function chooseProvider(providerId: ModelAdmissionProviderId) {
+    setDraft(/** 执行「chooseProvider」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(current) => switchAdmissionProvider(current, providerId));
     setShowKey(false);
     resetResult();
   }
 
-  function changeDraft(patch: Partial<Omit<ModelAdmissionDraft, "providerId">>) {
-    setDraft((current) => updateAdmissionDraft(current, patch));
+  /** 执行「changeDraft」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function changeDraft(patch: Partial<Omit<ModelAdmissionDraft, "providerId">>) {
+    setDraft(/** 执行「changeDraft」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(current) => updateAdmissionDraft(current, patch));
     resetResult();
   }
 
-  function changeName(name: string) {
-    setDraft((current) => updateAdmissionDraft(current, { name }));
+  /** 执行「changeName」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function changeName(name: string) {
+    setDraft(/** 执行「changeName」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(current) => updateAdmissionDraft(current, { name }));
   }
 
-  function testConnection() {
+  /** 执行「testConnection」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function testConnection() {
     if (!validation.valid || busy) return;
     setError("");
     setPhase("testing");
-    timerRef.current = window.setTimeout(() => {
+    timerRef.current = window.setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => {
       timerRef.current = null;
       const result = simulateAdmissionTest(draft);
       if (!result.ok) {
@@ -123,21 +138,25 @@ export function ModelAdmissionPage() {
     }, 760);
   }
 
-  function probeModel() {
+  /** 执行「probeModel」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function probeModel() {
     if (!selectedModel || busy) return;
     setPhase("probing");
-    timerRef.current = window.setTimeout(() => {
+    timerRef.current = window.setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => {
       timerRef.current = null;
       setPhase("ready");
     }, 820);
   }
 
-  function finishAdmission() {
+  /** 执行「finishAdmission」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+function finishAdmission() {
     if (phase !== "ready" || !selectedModel) return;
     setPhase("saving");
     const student = buildDemoModelStudent(draft, selectedModel);
     saveModelStudent(sessionStorage, student);
-    setDraft((current) => ({ ...current, apiKey: "" }));
+    setDraft(/** 执行「finishAdmission」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(current) => ({ ...current, apiKey: "" }));
     location.href = "/demo/model-home?admitted=1";
   }
 
@@ -161,15 +180,18 @@ export function ModelAdmissionPage() {
       </nav>
 
       <div className="mk-admission-layout">
-        <form className="mk-admission-form" onSubmit={(event) => { event.preventDefault(); phase === "selecting_model" ? probeModel() : testConnection(); }}>
+        <form className="mk-admission-form" onSubmit={/** 处理「onSubmit」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => { event.preventDefault(); phase === "selecting_model" ? probeModel() : testConnection(); }}>
           <section className="mk-admission-section">
             <header><div><strong>选择接入方式</strong><small>V1 只规划下面三种，不做通用供应商大全。</small></div><span>1 / 3</span></header>
             <div className="mk-admission-provider-list" role="radiogroup" aria-label="模型接入方式">
-              {providerIds.map((providerId) => {
+              {providerIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(providerId) => {
                 const copy = providerCopy[providerId];
                 const Icon = copy.icon;
                 const selected = draft.providerId === providerId;
-                return <button aria-checked={selected} className={`mk-admission-provider ${selected ? "selected" : ""}`} key={providerId} role="radio" type="button" onClick={() => chooseProvider(providerId)}>
+                return <button aria-checked={selected} className={`mk-admission-provider ${selected ? "selected" : ""}`} key={providerId} role="radio" type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => chooseProvider(providerId)}>
                   <span><Icon size={17} /></span><div><strong>{copy.title}</strong><small>{copy.description}</small></div><em>{copy.protocol}</em>{selected && <Check size={14} />}
                 </button>;
               })}
@@ -179,20 +201,32 @@ export function ModelAdmissionPage() {
           <section className="mk-admission-section">
             <header><div><strong>连接信息</strong><small>{draft.providerId === "ollama" ? "检测本地服务和已安装模型。" : "API Key 像密码一样，只用于本次 Demo 内存状态。"}</small></div><span>2 / 3</span></header>
             <div className="mk-admission-fields">
-              {draft.providerId === "ollama" && <label><span>Ollama 服务地址</span><div className="mk-admission-input"><Server size={14} /><input aria-label="Ollama 服务地址" inputMode="url" value={draft.baseUrl} onChange={(event) => changeDraft({ baseUrl: event.target.value })} /></div><small>默认是当前设备的 11434 端口；真实 Remote 部署后必须说明 localhost 指向哪里。</small></label>}
+              {draft.providerId === "ollama" && <label><span>Ollama 服务地址</span><div className="mk-admission-input"><Server size={14} /><input aria-label="Ollama 服务地址" inputMode="url" value={draft.baseUrl} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => changeDraft({ baseUrl: event.target.value })} /></div><small>默认是当前设备的 11434 端口；真实 Remote 部署后必须说明 localhost 指向哪里。</small></label>}
 
               {draft.providerId === "siliconflow" && <>
-                <label><span>API Key</span><SecretField label="硅基流动 API Key" show={showKey} value={draft.apiKey} onChange={(apiKey) => changeDraft({ apiKey })} onToggle={() => setShowKey((value) => !value)} /></label>
-                <button className="mk-admission-demo-key" type="button" onClick={() => changeDraft({ apiKey: "sk-demo-12345678" })}>使用演示 Key</button>
+                <label><span>API Key</span><SecretField label="硅基流动 API Key" show={showKey} value={draft.apiKey} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(apiKey) => changeDraft({ apiKey })} onToggle={/** 处理「onToggle」事件，校验归属后再推进状态且避免重复提交。 */
+() => setShowKey(/** 处理「onToggle」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => !value)} /></label>
+                <button className="mk-admission-demo-key" type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => changeDraft({ apiKey: "sk-demo-12345678" })}>使用演示 Key</button>
                 <details className="mk-admission-advanced"><summary>高级设置 · 已使用官方预设地址<ChevronDown size={13} /></summary><div className="mk-admission-fixed-field"><Link2 size={14} /><code>{draft.baseUrl}</code></div></details>
               </>}
 
               {draft.providerId === "custom_responses" && <>
-                <label><span>连接名称</span><div className="mk-admission-input"><Cloud size={14} /><input aria-label="连接名称" placeholder="例如：我的 Responses 代理" value={draft.connectionName} onChange={(event) => changeDraft({ connectionName: event.target.value })} /></div><small>用于区分以后可能添加的其他代理或账号，不会发送给模型。</small></label>
-                <label><span>Base URL</span><div className="mk-admission-input"><Link2 size={14} /><input aria-label="Responses Base URL" inputMode="url" placeholder="https://example.com/v1" value={draft.baseUrl} onChange={(event) => changeDraft({ baseUrl: event.target.value })} /></div><small>后续真实适配器会向此地址的 <code>/responses</code> 发请求；云端地址只接受 HTTPS。</small></label>
-                <label><span>API Key</span><SecretField label="Responses API Key" show={showKey} value={draft.apiKey} onChange={(apiKey) => changeDraft({ apiKey })} onToggle={() => setShowKey((value) => !value)} /></label>
-                <button className="mk-admission-demo-key" type="button" onClick={() => changeDraft({ apiKey: "sk-demo-12345678" })}>使用演示 Key</button>
-                <label><span>模型 ID</span><div className="mk-admission-input"><Sparkles size={14} /><input aria-label="Responses 模型 ID" placeholder="例如：gpt-5.5" value={draft.modelId} onChange={(event) => changeDraft({ modelId: event.target.value })} /></div><small>与你截图中的 <code>model</code> 对应；这里不读取 Codex 的 config.toml。</small></label>
+                <label><span>连接名称</span><div className="mk-admission-input"><Cloud size={14} /><input aria-label="连接名称" placeholder="例如：我的 Responses 代理" value={draft.connectionName} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => changeDraft({ connectionName: event.target.value })} /></div><small>用于区分以后可能添加的其他代理或账号，不会发送给模型。</small></label>
+                <label><span>Base URL</span><div className="mk-admission-input"><Link2 size={14} /><input aria-label="Responses Base URL" inputMode="url" placeholder="https://example.com/v1" value={draft.baseUrl} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => changeDraft({ baseUrl: event.target.value })} /></div><small>后续真实适配器会向此地址的 <code>/responses</code> 发请求；云端地址只接受 HTTPS。</small></label>
+                <label><span>API Key</span><SecretField label="Responses API Key" show={showKey} value={draft.apiKey} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(apiKey) => changeDraft({ apiKey })} onToggle={/** 处理「onToggle」事件，校验归属后再推进状态且避免重复提交。 */
+() => setShowKey(/** 处理「onToggle」事件，校验归属后再推进状态且避免重复提交。 */
+(value) => !value)} /></label>
+                <button className="mk-admission-demo-key" type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => changeDraft({ apiKey: "sk-demo-12345678" })}>使用演示 Key</button>
+                <label><span>模型 ID</span><div className="mk-admission-input"><Sparkles size={14} /><input aria-label="Responses 模型 ID" placeholder="例如：gpt-5.5" value={draft.modelId} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => changeDraft({ modelId: event.target.value })} /></div><small>与你截图中的 <code>model</code> 对应；这里不读取 Codex 的 config.toml。</small></label>
               </>}
             </div>
           </section>
@@ -200,9 +234,12 @@ export function ModelAdmissionPage() {
           {models.length > 0 && <section className="mk-admission-section">
             <header><div><strong>选择要入园的模型</strong><small>读取模型列表不等于模型可用，选中后还要发起最小生成与 Tool Call 体检。</small></div><span>3 / 3</span></header>
             <div className="mk-admission-model-list" role="radiogroup" aria-label="发现的模型">
-              {models.map((model) => <label className={selectedModelId === model.id ? "selected" : ""} key={model.id}><input checked={selectedModelId === model.id} name="model" type="radio" value={model.id} onChange={() => { setSelectedModelId(model.id); if (phase === "ready") setPhase("selecting_model"); }} /><span><strong>{model.id}</strong><small>{model.description}</small></span><em>{model.capabilities.toolCalls === "supported" ? "Tool 已发现" : "待确认"}</em></label>)}
+              {models.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(model) => <label className={selectedModelId === model.id ? "selected" : ""} key={model.id}><input checked={selectedModelId === model.id} name="model" type="radio" value={model.id} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+() => { setSelectedModelId(model.id); if (phase === "ready") setPhase("selecting_model"); }} /><span><strong>{model.id}</strong><small>{model.description}</small></span><em>{model.capabilities.toolCalls === "supported" ? "Tool 已发现" : "待确认"}</em></label>)}
             </div>
-            <label className="mk-admission-field"><span>入园昵称（可选）</span><div className="mk-admission-input"><MessageSquareText size={14} /><input aria-label="模型学生昵称" placeholder={selectedModel?.name ?? "例如：千问 8B 小朋友"} value={draft.name} onChange={(event) => changeName(event.target.value)} /></div></label>
+            <label className="mk-admission-field"><span>入园昵称（可选）</span><div className="mk-admission-input"><MessageSquareText size={14} /><input aria-label="模型学生昵称" placeholder={selectedModel?.name ?? "例如：千问 8B 小朋友"} value={draft.name} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => changeName(event.target.value)} /></div></label>
           </section>}
 
           <footer className="mk-admission-actions">
@@ -226,14 +263,18 @@ export function ModelAdmissionPage() {
   </main>;
 }
 
+/** 渲染「Step」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function Step({ active, detail, done, number, title }: { active: boolean; detail: string; done: boolean; number: string; title: string }) {
   return <div className={`mk-admission-step ${active ? "active" : ""} ${done ? "done" : ""}`}><span>{done ? <Check size={12} /> : number}</span><div><strong>{title}</strong><small>{detail}</small></div></div>;
 }
 
+/** 渲染「SecretField」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function SecretField({ label, onChange, onToggle, show, value }: { label: string; onChange: (value: string) => void; onToggle: () => void; show: boolean; value: string }) {
-  return <div className="mk-admission-secret"><KeyRound size={14} /><input aria-label={label} autoComplete="off" placeholder="只在本页临时输入" type={show ? "text" : "password"} value={value} onChange={(event) => onChange(event.target.value)} /><button aria-label={show ? "隐藏 API Key" : "显示 API Key"} type="button" onClick={onToggle}>{show ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>;
+  return <div className="mk-admission-secret"><KeyRound size={14} /><input aria-label={label} autoComplete="off" placeholder="只在本页临时输入" type={show ? "text" : "password"} value={value} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+(event) => onChange(event.target.value)} /><button aria-label={show ? "隐藏 API Key" : "显示 API Key"} type="button" onClick={onToggle}>{show ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>;
 }
 
+/** 渲染「AdmissionResult」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function AdmissionResult({ capabilities, model, probed, provider }: { capabilities: DemoModelCapabilities; model: DiscoveredDemoModel; probed: boolean; provider: string }) {
   const items = [
     { id: "streaming", label: "流式输出", detail: "增量文本可稳定返回", icon: Activity },
@@ -243,7 +284,8 @@ function AdmissionResult({ capabilities, model, probed, provider }: { capabiliti
   ] as const;
   return <div className="mk-admission-result">
     <div className="mk-admission-result-summary"><span>{probed ? <Check size={16} /> : <Server size={15} />}</span><div><strong>{model.id}</strong><small>{provider} · {probed ? "模型体检通过" : "连接成功，等待体检"}</small></div></div>
-    <ul className="mk-admission-capabilities">{items.map((item) => {
+    <ul className="mk-admission-capabilities">{items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => {
       const Icon = item.icon;
       const state = capabilities[item.id];
       return <li key={item.id}><span><Icon size={12} /></span><div><strong>{item.label}</strong><small>{item.detail}</small></div><em>{probed ? capabilityLabel(state) : "待体检"}</em></li>;
@@ -251,6 +293,7 @@ function AdmissionResult({ capabilities, model, probed, provider }: { capabiliti
   </div>;
 }
 
+/** 执行「capabilityLabel」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function capabilityLabel(state: DemoModelCapabilities[keyof DemoModelCapabilities]): string {
   if (state === "supported") return "已通过";
   if (state === "unsupported") return "不支持";

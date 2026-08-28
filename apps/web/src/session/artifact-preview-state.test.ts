@@ -9,8 +9,10 @@ import {
   fileReferenceIdsAfter,
 } from "./artifact-preview-state.js";
 
-describe("artifact preview state", () => {
-  it("closed 状态收到文件更新仍保持关闭，只由 preview/open 打开", () => {
+describe("artifact preview state", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("closed 状态收到文件更新仍保持关闭，只由 preview/open 打开", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const updated = artifactPreviewReducer(closedArtifactPreview, {
       type: "references/resolved",
       expectedFileReferenceId: "file_old_reference",
@@ -29,7 +31,8 @@ describe("artifact preview state", () => {
     });
   });
 
-  it("会话变化时关闭旧会话预览，渲染层也不暴露跨会话状态", () => {
+  it("会话变化时关闭旧会话预览，渲染层也不暴露跨会话状态", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const selected = artifactPreviewReducer(closedArtifactPreview, {
       type: "preview/open",
       sessionId: "session-a",
@@ -41,7 +44,8 @@ describe("artifact preview state", () => {
       .toEqual({ phase: "closed" });
   });
 
-  it("只接受当前选择对应的文件元数据", () => {
+  it("只接受当前选择对应的文件元数据", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const selected = artifactPreviewReducer(closedArtifactPreview, {
       type: "preview/open",
       sessionId: "session-a",
@@ -62,7 +66,8 @@ describe("artifact preview state", () => {
     })).toMatchObject({ file: { relativePath: "index.html" } });
   });
 
-  it("当前路径产生新引用时跟随最后一个版本，不跟随同名或其他会话文件", () => {
+  it("当前路径产生新引用时跟随最后一个版本，不跟随同名或其他会话文件", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const old = file("file_old_reference", "session-a", "pages/index.html");
     const opened = artifactPreviewReducer(closedArtifactPreview, {
       type: "preview/open",
@@ -89,7 +94,8 @@ describe("artifact preview state", () => {
     });
   });
 
-  it("预览已打开但更新属于其他路径时保持当前版本", () => {
+  it("预览已打开但更新属于其他路径时保持当前版本", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const old = file("file_old_reference", "session-a", "pages/index.html");
     const opened = artifactPreviewReducer(closedArtifactPreview, {
       type: "preview/open",
@@ -105,7 +111,8 @@ describe("artifact preview state", () => {
     })).toBe(selected);
   });
 
-  it("从已归约的聊天条目按出现顺序收集文件引用，并只返回当前引用之后的版本", () => {
+  it("从已归约的聊天条目按出现顺序收集文件引用，并只返回当前引用之后的版本", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
     const history = collection(tool("tool-old", "file_old_reference"));
     const streaming = collection(
       tool("tool-other", "file_other_reference"),
@@ -124,6 +131,7 @@ describe("artifact preview state", () => {
   });
 });
 
+/** 构造「file」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function file(fileReferenceId: string, sessionId: string, relativePath: string): FileReference {
   return {
     schemaVersion: 1,
@@ -141,6 +149,7 @@ function file(fileReferenceId: string, sessionId: string, relativePath: string):
   };
 }
 
+/** 构造「tool」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function tool(id: string, fileReferenceId: string): ToolCallEntry {
   return {
     id: `tool:${id}`,
@@ -163,9 +172,12 @@ function tool(id: string, fileReferenceId: string): ToolCallEntry {
   };
 }
 
+/** 构造「collection」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function collection(...entries: ToolCallEntry[]): EntryCollection {
   return {
-    order: entries.map((entry) => entry.id),
-    byId: Object.fromEntries(entries.map((entry) => [entry.id, entry])),
+    order: entries.map(/** 构造「order」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(entry) => entry.id),
+    byId: Object.fromEntries(entries.map(/** 构造「byId」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(entry) => [entry.id, entry])),
   };
 }

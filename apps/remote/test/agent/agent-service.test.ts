@@ -7,10 +7,14 @@ import { AgentService } from "../../src/agent/agent-service.js";
 
 const dirs: string[] = [];
 
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
+async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
+(dir) => rm(dir, { recursive: true, force: true }))));
 
-describe("AgentService", () => {
-  it("创建、查询、全量覆盖并以内部分支合并 Skill", async () => {
+describe("AgentService", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
+() => {
+  it("创建、查询、全量覆盖并以内部分支合并 Skill", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const service = await makeService();
     const created = await service.create(input("初始 Agent"));
     expect(created.agentId).toBeTruthy();
@@ -27,7 +31,8 @@ describe("AgentService", () => {
     expect(merged.skills).toEqual([{ skillInstallationId: "skill-1", enabled: true }]);
   });
 
-  it("拒绝不存在的 built-in、Skill 和 MCP capability 引用", async () => {
+  it("拒绝不存在的 built-in、Skill 和 MCP capability 引用", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const service = await makeService();
     await expect(service.create({ ...input("bad"), builtinTools: [{ toolId: "unknown", enabled: true, permission: "allow" }] }))
       .rejects.toThrow("CAPABILITY_REFERENCE_INVALID");
@@ -44,7 +49,8 @@ describe("AgentService", () => {
     })).rejects.toThrow("CAPABILITY_REFERENCE_INVALID");
   });
 
-  it("列表支持搜索、cursor 分页且后一次成功保存生效", async () => {
+  it("列表支持搜索、cursor 分页且后一次成功保存生效", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const service = await makeService();
     await service.create(input("代码助手"));
     await service.create(input("研究助手"));
@@ -58,7 +64,8 @@ describe("AgentService", () => {
     expect(second.items[0]?.agentId).not.toBe(first.items[0]?.agentId);
   });
 
-  it("保存 Agent 时不改写前端提交的写文件权限", async () => {
+  it("保存 Agent 时不改写前端提交的写文件权限", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const service = await makeService();
     const created = await service.create({
       ...input("权限配置"),
@@ -77,7 +84,8 @@ describe("AgentService", () => {
     ]);
   });
 
-  it("拒绝仍携带 Agent 推理默认值的旧记录", async () => {
+  it("拒绝仍携带 Agent 推理默认值的旧记录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-agents-legacy-"));
     dirs.push(dir);
     const file = join(dir, "agents.json");
@@ -100,16 +108,21 @@ describe("AgentService", () => {
   });
 });
 
+/** 构造「makeService」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async function makeService(): Promise<AgentService> {
   const dir = await mkdtemp(join(tmpdir(), "mk-agents-"));
   dirs.push(dir);
   return new AgentService(new AgentRepository(join(dir, "agents.json")), {
-    builtinToolIds: () => ["read_file", "write_file"],
-    readySkillInstallationIds: () => ["skill-1"],
-    mcpCapabilities: () => [{ installationId: "mcp-1", tools: ["search"], resources: ["docs://index"] }],
+    builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => ["read_file", "write_file"],
+    readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => ["skill-1"],
+    mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => [{ installationId: "mcp-1", tools: ["search"], resources: ["docs://index"] }],
   });
 }
 
+/** 构造「input」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function input(name: string) {
   return {
     name,

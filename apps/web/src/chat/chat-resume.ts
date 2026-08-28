@@ -10,6 +10,7 @@ export function sessionResumeMeta(chat: ChatState, turnId: string): SessionResum
   return { schemaVersion: 1, turnId, messages, thoughts };
 }
 
+/** 执行「collect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function collect(
   entries: EntryCollection,
   chat: ChatState,
@@ -28,6 +29,7 @@ function collect(
   }
 }
 
+/** 执行「cursor」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function cursor(messageId: string, length: number, chat: ChatState): SessionResumeTextCursor {
   let nextChunkIndex = 0;
   for (const chunk of chat.streaming?.seenChunks ?? []) {
@@ -39,6 +41,8 @@ function cursor(messageId: string, length: number, chat: ChatState): SessionResu
   return { textLength: length, nextChunkIndex };
 }
 
+/** 执行「textLength」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function textLength(content: Array<{ type: string; text?: string }>): number {
-  return content.reduce((total, item) => total + (item.type === "text" && typeof item.text === "string" ? item.text.length : 0), 0);
+  return content.reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
+(total, item) => total + (item.type === "text" && typeof item.text === "string" ? item.text.length : 0), 0);
 }

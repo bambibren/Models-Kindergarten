@@ -3,6 +3,7 @@ import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { Readable } from "node:stream";
 
+/** 描述「ResolvedHttpAddress」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ResolvedHttpAddress {
   address: string;
   family: 4 | 6;
@@ -17,10 +18,12 @@ export interface ResolvedHttpEndpoint {
   addresses: readonly ResolvedHttpAddress[];
 }
 
+/** 描述「HttpEndpointResolver」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type HttpEndpointResolver = (
   url: URL,
 ) => ResolvedHttpEndpoint | Promise<ResolvedHttpEndpoint>;
 
+/** 描述「OutboundHttpRequest」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface OutboundHttpRequest {
   method: string;
   headers?: Readonly<Record<string, string>>;
@@ -36,7 +39,8 @@ export interface OutboundHttpTransport {
 
 /** 只供不需要地址约束的本地 fixture；生产自定义端点应使用 PinnedHttpTransport。 */
 export class GlobalFetchHttpTransport implements OutboundHttpTransport {
-  request(url: URL, request: OutboundHttpRequest): Promise<Response> {
+  /** 执行「request」主流程，传播取消与失败并在结束时清理临时资源。 */
+request(url: URL, request: OutboundHttpRequest): Promise<Response> {
     return fetch(url, {
       method: request.method,
       ...(request.headers ? { headers: { ...request.headers } } : {}),
@@ -53,9 +57,11 @@ export class GlobalFetchHttpTransport implements OutboundHttpTransport {
  * 每次请求禁用共享 Agent，避免复用其他解析票据建立的旧 socket。
  */
 export class PinnedHttpTransport implements OutboundHttpTransport {
-  constructor(private readonly resolveEndpoint: HttpEndpointResolver) {}
+  /** 初始化「PinnedHttpTransport」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(private readonly resolveEndpoint: HttpEndpointResolver) {}
 
-  async request(url: URL, request: OutboundHttpRequest): Promise<Response> {
+  /** 执行「request」主流程，传播取消与失败并在结束时清理临时资源。 */
+async request(url: URL, request: OutboundHttpRequest): Promise<Response> {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       throw new TypeError("PinnedHttpTransport 只支持 HTTP(S) URL");
     }
@@ -67,6 +73,7 @@ export class PinnedHttpTransport implements OutboundHttpTransport {
   }
 }
 
+/** 执行「requestWithPinnedLookup」主流程，传播取消与失败并在结束时清理临时资源。 */
 function requestWithPinnedLookup(
   ticket: ResolvedHttpEndpoint,
   outbound: OutboundHttpRequest,
@@ -74,7 +81,8 @@ function requestWithPinnedLookup(
   const requestImpl = ticket.url.protocol === "https:" ? httpsRequest : httpRequest;
   const lookup = pinnedLookup(ticket);
 
-  return new Promise<Response>((resolve, reject) => {
+  return new Promise<Response>(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
+(resolve, reject) => {
     const request = requestImpl(ticket.url, {
       method: outbound.method,
       ...(outbound.headers ? { headers: { ...outbound.headers } } : {}),
@@ -82,7 +90,8 @@ function requestWithPinnedLookup(
       lookup,
       // 连接不得跨安全策略解析票据复用，否则旧 socket 会绕过本次地址审核。
       agent: false,
-    }, (incoming) => {
+    }, /** 执行「request」主流程，传播取消与失败并在结束时清理临时资源。 */
+(incoming) => {
       const status = incoming.statusCode;
       if (status === undefined) {
         incoming.destroy();
@@ -108,24 +117,28 @@ function requestWithPinnedLookup(
   });
 }
 
+/** 执行「pinnedLookup」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function pinnedLookup(ticket: ResolvedHttpEndpoint): LookupFunction {
   const hostname = canonicalHostname(ticket.url.hostname);
-  const addresses = ticket.addresses.map(({ address, family }) => ({ address, family }));
-  return (requestedHostname, options, callback) => {
+  const addresses = ticket.addresses.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+({ address, family }) => ({ address, family }));
+  return /** 执行「pinnedLookup」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */ (requestedHostname, options, callback) => {
     if (canonicalHostname(requestedHostname) !== hostname) {
       callback(lookupError("已审核 URL 与 socket hostname 不一致"), "", 0);
       return;
     }
     const family = options.family === 4 || options.family === 6 ? options.family : undefined;
     const eligible = family
-      ? addresses.filter((address) => address.family === family)
+      ? addresses.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(address) => address.family === family)
       : addresses;
     if (eligible.length === 0) {
       callback(lookupError("已审核地址不支持请求的 IP family"), "", 0);
       return;
     }
     if (options.all) {
-      callback(null, eligible.map((address) => ({ ...address })));
+      callback(null, eligible.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(address) => ({ ...address })));
       return;
     }
     const selected = eligible[0];
@@ -137,6 +150,7 @@ function pinnedLookup(ticket: ResolvedHttpEndpoint): LookupFunction {
   };
 }
 
+/** 校验并规范化「assertTicketMatches」输入，非法数据直接返回明确错误。 */
 function assertTicketMatches(requested: URL, ticket: ResolvedHttpEndpoint): void {
   if (!(ticket.url instanceof URL) || ticket.url.href !== requested.href) {
     throw new Error("端点解析票据与请求 URL 不一致");
@@ -151,6 +165,7 @@ function assertTicketMatches(requested: URL, ticket: ResolvedHttpEndpoint): void
   }
 }
 
+/** 执行「responseHeaders」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function responseHeaders(rawHeaders: readonly string[]): Headers {
   const headers = new Headers();
   for (let index = 0; index < rawHeaders.length; index += 2) {
@@ -161,6 +176,7 @@ function responseHeaders(rawHeaders: readonly string[]): Headers {
   return headers;
 }
 
+/** 判断「canonicalHostname」对应条件，只返回判定结果且不修改输入状态。 */
 function canonicalHostname(value: string): string {
   const withoutBrackets = value.startsWith("[") && value.endsWith("]")
     ? value.slice(1, -1)
@@ -168,6 +184,7 @@ function canonicalHostname(value: string): string {
   return withoutBrackets.replace(/\.$/, "").toLowerCase();
 }
 
+/** 执行「lookupError」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function lookupError(message: string): NodeJS.ErrnoException {
   const error = new Error(message) as NodeJS.ErrnoException;
   error.code = "EAI_FAIL";

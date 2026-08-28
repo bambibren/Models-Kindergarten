@@ -1,6 +1,7 @@
 export const SCHEMA_VERSION = 1 as const;
 export const META_KEY = "modelKindergarten" as const;
 
+/** 描述「PublicErrorCode」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type PublicErrorCode =
   | "VALIDATION_FAILED"
   | "NOT_FOUND"
@@ -9,6 +10,7 @@ export type PublicErrorCode =
   | "ORIGIN_NOT_ALLOWED"
   | "SESSION_BINDING_INVALID"
   | "SESSION_BUSY"
+  | "REMOTE_BUSY"
   | "CAPABILITY_REFERENCE_INVALID"
   | "CAPABILITY_STALE"
   | "SKILL_SOURCE_NOT_ALLOWED"
@@ -48,6 +50,7 @@ export type PublicErrorCode =
   | "ARTIFACT_BLOB_CORRUPT"
   | "INTERNAL_ERROR";
 
+/** 描述「PublicErrorRef」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PublicErrorRef {
   code: PublicErrorCode;
   message: string;
@@ -55,16 +58,19 @@ export interface PublicErrorRef {
   retryable: boolean;
 }
 
+/** 描述「ApiSuccess」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ApiSuccess<T> {
   data: T;
   requestId: string;
 }
 
+/** 描述「CursorPage」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface CursorPage<T> {
   items: T[];
   nextCursor?: string;
 }
 
+/** 描述「ApiProblem」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ApiProblem {
   type: string;
   title: string;
@@ -76,10 +82,12 @@ export interface ApiProblem {
   fieldErrors?: Array<{ path: string; message: string }>;
 }
 
+/** 判断「isRecord」对应条件，只返回判定结果且不修改输入状态。 */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** 校验并取得「requiredString」所需对象；缺失或归属不符时立即抛出明确错误。 */
 export function requiredString(
   record: Record<string, unknown>,
   key: string,
@@ -96,6 +104,7 @@ export function requiredString(
   return result;
 }
 
+/** 执行「optionalString」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function optionalString(
   record: Record<string, unknown>,
   key: string,
@@ -109,16 +118,20 @@ export function optionalString(
   return value.length > 0 ? value : undefined;
 }
 
+/** 执行「stableJson」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function stableJson(value: unknown): string {
   return JSON.stringify(sortJson(value));
 }
 
+/** 执行「sortJson」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function sortJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortJson);
   if (!isRecord(value)) return value;
   return Object.fromEntries(
     Object.entries(value)
-      .toSorted(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => [key, sortJson(item)]),
+      .toSorted(/** 执行「map」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+([left], [right]) => left.localeCompare(right))
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+([key, item]) => [key, sortJson(item)]),
   );
 }

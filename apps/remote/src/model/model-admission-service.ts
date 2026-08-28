@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   parseModelStudentInstallInput,
   parseModelStudentCandidateInput,
+  PRODUCT_CONFIG,
   type ModelProviderPresetView,
   type ModelStudentSummary,
   type ModelStudentTestRecord,
@@ -27,6 +28,7 @@ import { ModelProviderPresetRegistry } from "./model-provider-preset-registry.js
 
 const DEFAULT_TEST_TTL_MS = 15 * 60_000;
 
+/** 描述「ModelAdmissionServiceOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelAdmissionServiceOptions {
   testTtlMs?: number;
   now?: () => Date;
@@ -38,11 +40,14 @@ export class ModelAdmissionService {
   private readonly candidates = new Map<string, ResolvedModelStudentCandidate>();
   private readonly candidateExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly installationClaims = new Set<string>();
+  /** 只统计正在执行端点主动探针的请求，所有退出路径在 finally 中归还。 */
+  private activeTests = 0;
   private readonly testTtlMs: number;
   private readonly now: () => Date;
   private readonly modelInUse: (modelStudentId: string) => boolean | Promise<boolean>;
 
-  constructor(
+  /** 初始化「ModelAdmissionService」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly repository: ModelAdmissionRepository,
     private readonly secrets: WritableSecretStore,
     private readonly adapters: ModelAdmissionAdapterRegistry,
@@ -52,14 +57,18 @@ export class ModelAdmissionService {
     options: ModelAdmissionServiceOptions = {},
   ) {
     this.testTtlMs = options.testTtlMs ?? DEFAULT_TEST_TTL_MS;
-    this.now = options.now ?? (() => new Date());
-    this.modelInUse = options.modelInUse ?? (() => false);
+    this.now = options.now ?? (/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => new Date());
+    this.modelInUse = options.modelInUse ?? (/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+() => false);
   }
 
-  async restoreInstalled(): Promise<ModelStudentSummary[]> {
+  /** 执行「restoreInstalled」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async restoreInstalled(): Promise<ModelStudentSummary[]> {
     await this.repository.persistMigrations();
     const restored: ModelStudentSummary[] = [];
-    const rows = (await this.repository.installed()).toSorted((left, right) =>
+    const rows = (await this.repository.installed()).toSorted(/** 执行「rows」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(left, right) =>
       left.student.createdAt.localeCompare(right.student.createdAt) ||
       left.student.modelStudentId.localeCompare(right.student.modelStudentId));
     const seenTests = new Set<string>();
@@ -78,11 +87,33 @@ export class ModelAdmissionService {
         student = await this.repository.setSnapshot(student.modelStudentId, student.ownerId, reboundSnapshot);
       }
       if (this.catalog.get(student.modelStudentId)) continue;
+      if (
+        student.lifecycle === "capacity_blocked" ||
+        this.catalog.runtimeProviderCount >= PRODUCT_CONFIG.capacity.maxModelStudents
+      ) {
+        if (student.lifecycle !== "capacity_blocked") {
+          student = await this.repository.setLifecycle(
+            student.modelStudentId,
+            student.ownerId,
+            "capacity_blocked",
+          );
+        }
+        restored.push(this.catalog.registerCapacityBlocked(
+          studentMetadata(student, connection),
+          {
+            deletable: true,
+            lastCheckedAt: student.snapshot.testedAt,
+            supports: supportsFrom(student.snapshot),
+          },
+        ));
+        continue;
+      }
       let reconciliationMessage: string | undefined;
       const lifecycle = student.lifecycle ?? "active";
       if (lifecycle === "rollback_pending" || lifecycle === "deleting") {
         const removeCredential = (await this.repository.listStudents(student.ownerId))
-          .filter((item) => item.connectionId === connection.connectionId).length <= 1;
+          .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.connectionId === connection.connectionId).length <= 1;
         const completed = await this.resumeRemoval(
           student,
           connection,
@@ -99,7 +130,8 @@ export class ModelAdmissionService {
         } catch {
           student = await this.repository.setLifecycle(student.modelStudentId, student.ownerId, "rollback_pending");
           const removeCredential = (await this.repository.listStudents(student.ownerId))
-            .filter((item) => item.connectionId === connection.connectionId).length <= 1;
+            .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.connectionId === connection.connectionId).length <= 1;
           const completed = await this.resumeRemoval(student, connection, removeCredential);
           if (completed) continue;
           reconciliationMessage = "上次入园未完成且回滚待收口，当前模型不会参与运行";
@@ -140,13 +172,33 @@ export class ModelAdmissionService {
     return restored;
   }
 
-  async test(raw: unknown, ownerId = "local-admin"): Promise<ModelStudentTestRecord> {
+  /** 在进程并发与 Candidate 容量内执行入园体检；超限立即 503，不创建等待任务。 */
+async test(raw: unknown, ownerId = "local-admin"): Promise<ModelStudentTestRecord> {
     let candidate: ResolvedModelStudentCandidate;
     try {
       candidate = this.presets.resolve(parseModelStudentCandidateInput(raw));
     } catch (error) {
       throw new ApiProblemError(400, "VALIDATION_FAILED", publicMessage(error), false);
     }
+    if (this.activeTests >= PRODUCT_CONFIG.capacity.maxConcurrentModelAdmissionTests) {
+      throw new ApiProblemError(503, "REMOTE_BUSY", "正在执行的模型连接体检已达到容量上限", true);
+    }
+    if (this.candidates.size + this.activeTests >= PRODUCT_CONFIG.capacity.maxRetainedModelCandidates) {
+      throw new ApiProblemError(503, "REMOTE_BUSY", "等待安装的模型 Candidate 已达到容量上限，请先安装或等待过期", true);
+    }
+    this.activeTests += 1;
+    try {
+      return await this.testCandidate(candidate, ownerId);
+    } finally {
+      this.activeTests -= 1;
+    }
+  }
+
+  /** 执行一次已取得容量名额的端点探针，并把持久化记录收敛到 succeeded 或 failed。 */
+  private async testCandidate(
+    candidate: ResolvedModelStudentCandidate,
+    ownerId: string,
+  ): Promise<ModelStudentTestRecord> {
     try {
       await this.urlPolicy.assert(candidate.baseUrl);
     } catch (error) {
@@ -200,11 +252,13 @@ export class ModelAdmissionService {
     }
   }
 
-  providerPresets(): ModelProviderPresetView[] {
+  /** 执行「providerPresets」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+providerPresets(): ModelProviderPresetView[] {
     return this.presets.views();
   }
 
-  async getTest(testId: string, ownerId = "local-admin"): Promise<ModelStudentTestRecord> {
+  /** 读取「getTest」所需数据，并遵守作用域、分页与容量边界。 */
+async getTest(testId: string, ownerId = "local-admin"): Promise<ModelStudentTestRecord> {
     const test = await this.repository.getTest(testId);
     if (!test || test.ownerId !== ownerId) {
       throw new ApiProblemError(404, "NOT_FOUND", "模型连接测试不存在", false);
@@ -218,25 +272,36 @@ export class ModelAdmissionService {
     return test;
   }
 
-  async install(raw: unknown, ownerId = "local-admin"): Promise<ModelStudentSummary> {
+  /** 执行「install」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async install(raw: unknown, ownerId = "local-admin"): Promise<ModelStudentSummary> {
     let input: ReturnType<typeof parseModelStudentInstallInput>;
     try {
       input = parseModelStudentInstallInput(raw);
     } catch (error) {
       throw new ApiProblemError(400, "VALIDATION_FAILED", publicMessage(error), false);
     }
+    // claim 必须在第一个 await 之前取得；否则两个并发调用都能越过检查，后发请求可能反而抢先安装。
     if (this.installationClaims.has(input.testId)) {
       throw new ApiProblemError(409, "CONFLICT", "该模型测试正在执行入园，不能重复提交", true);
     }
     this.installationClaims.add(input.testId);
     try {
+      if ((await this.repository.listStudents(ownerId)).length >= PRODUCT_CONFIG.capacity.maxModelStudents - 1) {
+        throw new ApiProblemError(
+          409,
+          "CONFLICT",
+          `ModelStudent 已达到 ${PRODUCT_CONFIG.capacity.maxModelStudents} 条运行目录容量上限`,
+          false,
+        );
+      }
       return await this.installClaimed(input, ownerId);
     } finally {
       this.installationClaims.delete(input.testId);
     }
   }
 
-  private async installClaimed(
+  /** 执行「installClaimed」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async installClaimed(
     input: ReturnType<typeof parseModelStudentInstallInput>,
     ownerId: string,
   ): Promise<ModelStudentSummary> {
@@ -259,12 +324,15 @@ export class ModelAdmissionService {
 
     const displayName = input.displayName ?? candidate.displayName;
     const installed = await this.repository.listStudents(ownerId);
-    if (installed.some((item) => item.displayName === displayName)) {
+    if (installed.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.displayName === displayName)) {
       throw new ApiProblemError(409, "CONFLICT", "已经存在同名 ModelStudent", false);
     }
     const connections = await this.repository.listConnections(ownerId);
-    if (installed.some((student) =>
-      student.model === candidate.model && connections.some((connection) =>
+    if (installed.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(student) =>
+      student.model === candidate.model && connections.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(connection) =>
         connection.connectionId === student.connectionId &&
         connection.baseUrl === candidate.baseUrl &&
         connection.protocol === candidate.protocol,
@@ -329,7 +397,8 @@ export class ModelAdmissionService {
       return summary;
     } catch (error) {
       if (repositoryPrepared) {
-        await this.repository.setLifecycle(modelStudentId, ownerId, "rollback_pending").catch(() => undefined);
+        await this.repository.setLifecycle(modelStudentId, ownerId, "rollback_pending").catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
         let credentialRemoved = false;
         try {
           await this.secrets.delete(credentialRef);
@@ -338,7 +407,8 @@ export class ModelAdmissionService {
           // rollback_pending 会在下次启动继续清理，且不会注册为 ready。
         }
         if (credentialRemoved) {
-          await this.repository.removeStudent(modelStudentId, ownerId).catch(() => undefined);
+          await this.repository.removeStudent(modelStudentId, ownerId).catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => undefined);
         }
       }
       if (error instanceof ApiProblemError) throw error;
@@ -349,12 +419,16 @@ export class ModelAdmissionService {
     }
   }
 
-  async list(ownerId = "local-admin"): Promise<ModelStudentSummary[]> {
-    const ownedIds = new Set((await this.repository.listStudents(ownerId)).map((item) => item.modelStudentId));
-    return this.catalog.all().filter((item) => !item.deletable || ownedIds.has(item.modelStudentId));
+  /** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
+async list(ownerId = "local-admin"): Promise<ModelStudentSummary[]> {
+    const ownedIds = new Set((await this.repository.listStudents(ownerId)).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.modelStudentId));
+    return this.catalog.all().filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => !item.deletable || ownedIds.has(item.modelStudentId));
   }
 
-  async get(modelStudentId: string, ownerId = "local-admin"): Promise<ModelStudentSummary> {
+  /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */
+async get(modelStudentId: string, ownerId = "local-admin"): Promise<ModelStudentSummary> {
     const summary = this.catalog.get(modelStudentId);
     if (!summary) throw new ApiProblemError(404, "NOT_FOUND", "ModelStudent 不存在", false);
     if (summary.deletable) {
@@ -364,7 +438,8 @@ export class ModelAdmissionService {
     return summary;
   }
 
-  async remove(modelStudentId: string, ownerId = "local-admin"): Promise<{ modelStudentId: string }> {
+  /** 释放或删除「remove」对应资源，重复调用仍保持安全。 */
+async remove(modelStudentId: string, ownerId = "local-admin"): Promise<{ modelStudentId: string }> {
     const summary = await this.get(modelStudentId, ownerId);
     if (!summary.deletable) {
       throw new ApiProblemError(409, "CONFLICT", "系统内置 ModelStudent 不可删除", false);
@@ -376,7 +451,8 @@ export class ModelAdmissionService {
     if (!stored || stored.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "ModelStudent 不存在", false);
     const connection = await this.repository.getConnection(stored.connectionId);
     if (!connection) throw new ApiProblemError(500, "INTERNAL_ERROR", "ModelStudent 缺少 ProviderConnection", true);
-    const connectionShared = (await this.repository.listStudents(ownerId)).some((item) =>
+    const connectionShared = (await this.repository.listStudents(ownerId)).some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) =>
       item.modelStudentId !== modelStudentId && item.connectionId === stored.connectionId);
     await this.repository.setLifecycle(modelStudentId, ownerId, "deleting");
     let credentialRemoved = connectionShared;
@@ -390,7 +466,9 @@ export class ModelAdmissionService {
     } catch {
       if (!credentialRemoved) {
         const restored = await this.repository.setLifecycle(modelStudentId, ownerId, "active")
-          .then(() => true, () => false);
+          .then(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => true, /** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+() => false);
         if (!restored) {
           this.catalog.setStatus(modelStudentId, "unavailable", "删除事务状态待恢复，当前模型不会参与运行");
         }
@@ -403,7 +481,8 @@ export class ModelAdmissionService {
     return { modelStudentId };
   }
 
-  private async resumeRemoval(
+  /** 执行「resumeRemoval」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async resumeRemoval(
     student: ManagedModelStudentRecord,
     connection: ProviderConnectionRecord,
     removeCredential: boolean,
@@ -417,16 +496,22 @@ export class ModelAdmissionService {
     }
   }
 
+  /** 执行「retainCandidate」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
   private retainCandidate(testId: string, candidate: ResolvedModelStudentCandidate, expiresAt: string): void {
     this.forgetCandidate(testId);
+    if (this.candidates.size >= PRODUCT_CONFIG.capacity.maxRetainedModelCandidates) {
+      throw new Error(`等待安装的模型 Candidate 已达到 ${PRODUCT_CONFIG.capacity.maxRetainedModelCandidates} 条容量上限`);
+    }
     this.candidates.set(testId, candidate);
     const delay = Math.max(0, Date.parse(expiresAt) - this.now().getTime());
-    const timer = setTimeout(() => this.forgetCandidate(testId), delay);
+    const timer = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => this.forgetCandidate(testId), delay);
     timer.unref?.();
     this.candidateExpiryTimers.set(testId, timer);
   }
 
-  private forgetCandidate(testId: string): void {
+  /** 执行「forgetCandidate」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private forgetCandidate(testId: string): void {
     this.candidates.delete(testId);
     const timer = this.candidateExpiryTimers.get(testId);
     if (timer) clearTimeout(timer);
@@ -434,6 +519,7 @@ export class ModelAdmissionService {
   }
 }
 
+/** 判断「supportsFrom」对应条件，只返回判定结果且不修改输入状态。 */
 function supportsFrom(snapshot: ProviderCapabilitySnapshot) {
   return {
     streaming: snapshot.streaming,
@@ -444,6 +530,28 @@ function supportsFrom(snapshot: ProviderCapabilitySnapshot) {
   };
 }
 
+/** 从持久化安全字段构造被容量阻断模型的元数据，不实例化含连接能力的 Provider。 */
+function studentMetadata(
+  student: ManagedModelStudentRecord,
+  connection: ProviderConnectionRecord,
+): import("./model-provider.js").ModelStudent {
+  return {
+    id: student.modelStudentId,
+    name: student.displayName,
+    sizeClass: student.sizeClass,
+    ...(student.contextWindowTokens === undefined
+      ? {}
+      : { contextWindowTokens: student.contextWindowTokens }),
+    provider: {
+      kind: connection.presetId === "siliconflow" ? "siliconflow" : "openai-compatible",
+      model: student.model,
+      baseUrl: connection.baseUrl,
+    },
+    generationDefaults: structuredClone(student.generationDefaults),
+  };
+}
+
+/** 执行「publicCandidate」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function publicCandidate(candidate: ResolvedModelStudentCandidate) {
   return {
     presetId: candidate.presetId,
@@ -454,18 +562,22 @@ function publicCandidate(candidate: ResolvedModelStudentCandidate) {
   };
 }
 
+/** 执行「credentialHint」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function credentialHint(value: string): string {
   return value.length <= 4 ? "••••" : `••••${value.slice(-4)}`;
 }
 
+/** 执行「id」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function id(prefix: string): string {
   return `${prefix}_${randomUUID().replaceAll("-", "")}`;
 }
 
+/** 执行「publicMessage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function publicMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 执行「redactPublicMessage」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function redactPublicMessage(error: unknown, secret: string): string {
   let message = publicMessage(error);
   if (secret) message = message.split(secret).join("[REDACTED]");
@@ -473,6 +585,7 @@ function redactPublicMessage(error: unknown, secret: string): string {
   return message.slice(0, 500) || "模型接口体检失败";
 }
 
+/** 执行「urlProblem」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function urlProblem(error: unknown): ApiProblemError {
   if (error instanceof RemoteModelUrlPolicyError) {
     return error.reason === "not_allowed"

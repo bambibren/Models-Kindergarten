@@ -8,13 +8,15 @@ import { stageSkillResourceBundle } from "./skill-resource-bundle.js";
 
 /** 安装器在隔离目录完成校验后再原子发布；不会执行 Skill 自带脚本。 */
 export class SkillInstaller {
-  constructor(
+  /** 初始化「SkillInstaller」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+constructor(
     private readonly installRoot: string,
     private readonly lock: SkillLockStore,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async install(
+  /** 执行「install」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async install(
     request: SkillInstallRequest,
     options: { replaceExisting?: boolean } = {},
   ): Promise<SkillInstallRecord> {
@@ -65,13 +67,15 @@ export class SkillInstaller {
     }
   }
 
-  async uninstall(name: string): Promise<void> {
+  /** 执行「uninstall」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async uninstall(name: string): Promise<void> {
     assertSafeSkillName(name);
     await rm(resolve(this.installRoot, name), { recursive: true, force: true });
     await this.lock.remove(name);
   }
 
-  private async stageLocal(path: string, quarantine: string) {
+  /** 执行「stageLocal」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async stageLocal(path: string, quarantine: string) {
     const source = await realpath(path);
     const target = resolve(quarantine, basename(source));
     await cp(source, target, { recursive: true, errorOnExist: true, preserveTimestamps: false });
@@ -81,7 +85,8 @@ export class SkillInstaller {
     };
   }
 
-  private async stageGit(
+  /** 执行「stageGit」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async stageGit(
     source: Extract<SkillInstallRequest["source"], { kind: "git" }>,
     quarantine: string,
   ) {
@@ -103,7 +108,8 @@ export class SkillInstaller {
       recursive: true,
       errorOnExist: true,
       preserveTimestamps: false,
-      filter: (item) => !relative(repo, item).split(sep).includes(".git"),
+      filter: /** 执行「filter」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => !relative(repo, item).split(sep).includes(".git"),
     });
     await rm(repo, { recursive: true, force: true });
     return {
@@ -117,7 +123,8 @@ export class SkillInstaller {
     };
   }
 
-  private async stageResource(url: string, quarantine: string) {
+  /** 执行「stageResource」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+private async stageResource(url: string, quarantine: string) {
     const staged = await stageSkillResourceBundle(url, quarantine, this.fetchImpl);
     return {
       path: staged.path,
@@ -126,12 +133,14 @@ export class SkillInstaller {
   }
 }
 
+/** 校验并规范化「assertInside」输入，非法数据直接返回明确错误。 */
 function assertInside(root: string, target: string): void {
   const rel = relative(root, target);
   if (rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel))) return;
   throw new Error("Git Skill subdir 越界");
 }
 
+/** 执行「exists」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async function exists(path: string): Promise<boolean> {
   try {
     await realpath(path);
@@ -142,6 +151,7 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/** 执行「skillSubdirectory」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function skillSubdirectory(value: string | undefined): string {
   const subdirectory = value?.trim() || ".";
   const normalized = posix.normalize(subdirectory).replace(/^\.\//, "");
@@ -151,6 +161,7 @@ function skillSubdirectory(value: string | undefined): string {
   return normalized;
 }
 
+/** 执行「withoutInstructions」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function withoutInstructions<T extends { instructions: string }>(value: T): Omit<T, "instructions"> {
   const { instructions: _instructions, ...record } = value;
   return record;
