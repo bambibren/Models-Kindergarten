@@ -10,8 +10,8 @@
 
 - `apps/web/src/demo/DemoApp.tsx` 实际注册的全部 `/demo` 路由；
 - `apps/web/src/demo/pages`、`components`、`data`、`state` 中的页面、交互与演示状态；
-- `apps/evaluation-web/src/demo` 中与 Context Lab 跨应用连接的页面；
-- `apps/web/src`、`apps/remote/src`、`apps/evaluation-*`、`packages/*` 的非 Demo 实现；
+- `apps/web/src/evaluation` 中与 Context Lab 连接的页面；
+- `apps/web/src`、`apps/remote/src`、`packages/*` 的非 Demo 实现；
 - `docs/` 下与 Demo、ACP、MCP、Skill、Context、Token、Evaluation 和错误处理相关的设计与计划；
 - 外部参考 TRD 及 appendix。
 
@@ -43,11 +43,7 @@
 
 ### 2.2 Evaluation Demo
 
-Context Lab 的 Demo 将结果导航到：
-
-- `http://127.0.0.1:5175/evaluation/demo/agent-comparison`
-
-evaluation-web 已有真实 Turn 详情：
+Context Lab 与 Evaluation 使用同一个 Web 应用。Evaluation 已有真实 Turn 详情：
 
 - `/evaluation/sessions/:sessionId/turns/:turnId`
 
@@ -55,7 +51,7 @@ evaluation-web 已有真实 Turn 详情：
 
 - `/evaluation/experiments/:experimentId`
 
-端口必须来自环境配置，不能复制 Demo 的 `5175` 常量。用户给出的 `5174` 是本地 Vite 实际占用端口，不是架构合同。
+开发和生产都使用 Web 当前同源地址，Evaluation 页面不占用第二个前端端口。
 
 ## 3. 全局产品语义
 
@@ -70,7 +66,7 @@ evaluation-web 已有真实 Turn 详情：
 - 顶部导航在首页、会话、Context Lab、Agent、我的、MCP 页面保持一致。
 - 生产 URL 可刷新、前进/后退、直接打开；路由参数和 query 只保存资源引用，不保存完整业务对象。
 - 页面跳转不得依赖另一个页面先写 `sessionStorage`。
-- evaluation-web 地址由 route helper 生成，并携带资源 ID，不携带原始回答、上下文或 Secret。evaluation-web 是本仓库内专门显示实验/评测详情的另一个前端应用，不是第三方网站；新页面拿 ID 再向 Remote 查询数据。
+- Evaluation 路由由同一 Web 的 route helper 生成，并携带资源 ID，不携带原始回答、上下文或 Secret；页面拿 ID 再向 Remote 查询数据。
 
 ### 3.3 三层状态，不混成一个状态机
 
@@ -234,7 +230,7 @@ evaluation-web 已有真实 Turn 详情：
 - 运行按钮使用 Idempotency-Key；双击不会创建重复 lane。
 - 页面关闭后重新打开可读取 lane 状态；running lane 根据 ACP Session/Turn 事实恢复。
 - 一个 lane 失败不取消其他 lane；结果页明确显示 partial failure。
-- 运行完成后跳转 evaluation-web 的 experimentId 路由。
+- 运行完成后跳转同一 Web 的 Evaluation experimentId 路由。
 
 ### 7.5 验收
 

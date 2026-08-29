@@ -57,7 +57,7 @@ static async open(
     onClose: () => void,
   ) {
     const sessionTests = new Map<string, { experimentId: string; testId: string }>();
-    const app = acp.client({ name: "model-kindergarten-evaluation-web" })
+    const app = acp.client({ name: "models-kindergarten-web-evaluation" })
       .onNotification(acp.methods.client.session.update, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
 ({ params }) => update(params))
       .onRequest(acp.methods.client.session.requestPermission, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
@@ -114,7 +114,7 @@ async (content) => {
     await connection.agent.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: { elicitation: { form: {} } },
-      clientInfo: { name: "models-kindergarten-evaluation-web", version: "0.2.0" },
+      clientInfo: { name: "models-kindergarten-web-evaluation", version: "0.2.0" },
     });
     void connection.closed.then(onClose);
     return new ExperimentAcpClient(connection, update, sessionTests);

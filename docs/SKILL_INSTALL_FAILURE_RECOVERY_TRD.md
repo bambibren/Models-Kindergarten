@@ -807,7 +807,7 @@ Git/文件/校验原始错误
 
 ### 阶段 6：真实链路验证
 
-1. 启动 Remote/Web/Evaluation 全部服务。
+1. 启动 Remote 和 Web；Evaluation 模块随 Remote 初始化。
 2. 用四个真实来源创建新 Session，其中两个来自同一 `open-design` 仓库。
 3. 记录 Git 分组调用次数，确认 `open-design` 每个 Job 只 checkout 一次。
 4. 人为配置不可达代理或 mock Git 超时，确认页面显示网络错误、保留 Job 且 Turn 正常结束。

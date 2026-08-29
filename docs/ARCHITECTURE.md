@@ -25,22 +25,21 @@ ACP Agent Adapter
               ├─ RetryExecutor
               └─ ToolExecutor → Sandboxes
           └─ RuntimeObservationSink
-              → EvaluationTraceExporter → HTTP
-
-Independent Evaluation Web
-  ⇄ Remote Control API（Experiment/标注工作表/Scorecard）
+              → Evaluation 模块后台队列
+                  ├─ Runtime Metrics
+                  └─ Turn Trace Repository
 
 Remote Control API
-  → Agent / Skill / MCP / Session / Experiment / FileReference
+  → Agent / Skill / MCP / Session / Experiment / Evaluation / FileReference
   → 本地持久化与长任务协调
 
-Evaluation Exporter
-  → Independent Evaluation Service
-      → Runtime Metrics
-      → Turn Trace Repository
+React Web
+  → /evaluation/*
+      → /api/evaluation/v1
+          → Evaluation 模块
 ```
 
-ACP Adapter 不实现模型循环或工具安全；Model Provider 不依赖 ACP；ToolRuntime 不依赖 Ollama；Chat Web 不保存 Runtime 状态。Evaluation 通过只读端口旁路观察主链，上传失败不能改变 Agent 结果。
+ACP Adapter 不实现模型循环或工具安全；Model Provider 不依赖 ACP；ToolRuntime 不依赖 Ollama；Web 不保存 Runtime 状态。Evaluation 保持独立模块职责，通过有界后台队列观察主链；评分或持久化失败不能改变 Agent 结果。
 
 ## 单一事实源与投影
 
@@ -79,7 +78,7 @@ Agent system prompt、Skills、MCP 和历史策略形成模型无关的语义上
 - `toRunFailure`：把无法继续执行的 Provider/Runtime 异常转换成 Prompt Turn 失败；
 - 用户取消通过 AbortSignal 立即传播；模型不再调用 Tool 时，Prompt Turn 正常结束。
 
-单个 Prompt Turn 不再设置模型请求轮次上限，Runtime 由模型正常结束、用户取消、Session close、Provider/Tool 致命错误或既有的小模型无效参数守卫收敛。Schema 参数错误始终以同一结构返回模型；只有 `ModelStudent.sizeClass=small` 时，启动入口才装配 `RepeatedInvalidToolCallGuard`：同一 Turn 的三个不同模型轮若提交工具名、参数名和参数值完全相同的无效调用（对象字段顺序忽略），第三次结束 Turn。同一模型轮的并行调用只计一次，不同参数分别计数。大模型不装配该节点，因此不会因这项策略被 Runtime 提前终止；本次没有修改该守卫。
+单个 Prompt Turn 不设置模型请求轮次上限，Runtime 由模型正常结束、用户取消、Session close 或 Provider/Tool 致命错误收敛。Schema 参数错误始终以同一结构返回模型，由模型决定是否修正后继续；Runtime 不按模型大小增加专属终止策略。
 
 Turn 生命周期是 `active | completed | failed | cancelled | interrupted`；只有 active 才携带 `accepted | preparing_context | model_streaming | tool_execution | finalizing` 阶段。等待授权和等待回答是 `tool_execution` 下的并发计数，不是另一组生命周期状态。Repository 是唯一状态转换入口，ACP/Web 只投影已经持久化的事实；实时通知失败不会阻止终态提交。
 

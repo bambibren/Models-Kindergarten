@@ -28,10 +28,19 @@ describe("FileMasterKeySource", () => {
     const target = join(dir, "target");
     const link = join(dir, "link");
     await writeFile(target, `${Buffer.alloc(32, 1).toString("base64")}\n`, { mode: 0o644 });
-    await expect(new FileMasterKeySource(target).read()).rejects.toThrow("0600");
+    await expect(new FileMasterKeySource(target).read()).rejects.toThrow("0400 或 0600");
 
     await symlink(target, link);
     await expect(new FileMasterKeySource(link).read()).rejects.toThrow("普通文件");
+  });
+
+  it("接受容器只读挂载常用的 0400 主密钥", async () => {
+    const dir = await tempDir();
+    const file = join(dir, "master-key-readonly");
+    const expected = Buffer.alloc(32, 5);
+    await writeFile(file, `${expected.toString("base64")}\n`, { mode: 0o400 });
+
+    await expect(new FileMasterKeySource(file).read()).resolves.toEqual(expected);
   });
 
   it("初始化生成 0600 文件且绝不覆盖既有主密钥", async () => {

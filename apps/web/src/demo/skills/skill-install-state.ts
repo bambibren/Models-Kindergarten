@@ -1,20 +1,17 @@
 import { demoSkills } from "../demo-data.js";
 import type { DemoAgentStrategy } from "../demo-types.js";
 import { updateSelectedItems } from "../context-lab/context-lab-state.js";
+import { publicSkillUrl } from "../../skills/public-skill-url.js";
 
 export const demoSkillStorageKey = "models-kindergarten.demo-skills";
 
 export const websiteSkillSources = [
-  "https://github.com/anthropics/skills/tree/main/skills/frontend-design",
-  "https://github.com/nexu-io/open-design/tree/main/skills/design-brief",
-  "https://github.com/nexu-io/open-design/tree/main/skills/impeccable-design-polish",
+  publicSkillUrl("website-design-fast"),
 ] as const;
 
-export const websiteDevelopmentPrompt = `请先调用 ensure_agent_skills，把以下 3 个 Skills 安装到当前 Agent 并自动启用，安装全部就绪后再开始任务：
+export const websiteDevelopmentPrompt = `请先调用 ensure_agent_skills，把以下 Skill 安装到当前 Agent 并自动启用，安装就绪后再开始任务：
 
 - ${websiteSkillSources[0]}
-- ${websiteSkillSources[1]}
-- ${websiteSkillSources[2]}
 
 任务：为 Model Kindergarten 设计并生成一个静态课程介绍网站，输出可在浏览器中预览的 HTML，并列出页面结构。`;
 
@@ -54,6 +51,7 @@ export interface DemoSkillStorage {
 }
 
 const sourceDescriptions: Record<string, string> = {
+  "website-design-fast": "MK 网站快速设计 Skill",
   "frontend-design": "Anthropic 官方前端设计 Skill",
   "design-brief": "Open Design 设计简报 Skill",
   "impeccable-design-polish": "Open Design 视觉打磨 Skill",
@@ -76,10 +74,16 @@ export function parseDemoSkillSource(sourceUrl: string): Omit<DemoSkillRecord, "
   try {
     parsed = new URL(sourceUrl.trim());
   } catch {
-    throw new Error("请输入完整的 GitHub Skill 地址");
+    throw new Error("请输入完整的 Skill 地址");
+  }
+  if (parsed.origin === new URL(publicSkillUrl("website-design-fast")).origin) {
+    const match = parsed.pathname.match(/^\/skills\/([a-z0-9-]+)\/?$/);
+    if (!match || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error("Skill 资源地址必须使用 /skills/{name}");
+    const name = match[1]!;
+    return { name, description: sourceDescriptions[name] ?? "MK 静态资源 Skill", sourceUrl: `${parsed.origin}/skills/${name}` };
   }
   if (parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new Error("Demo 只接受公开 GitHub HTTPS 地址");
+    throw new Error("请输入当前 MK 的 Skill 资源地址或公开 GitHub HTTPS 地址");
   }
   const parts = parsed.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   const isRepositoryRoot = parts.length === 2;

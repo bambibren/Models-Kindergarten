@@ -11,6 +11,7 @@
 - `load` 完整回放；`resume` 默认零回放，携带当前 Turn 游标时只补齐断线增量；
 - Remote 不保存 Web 投影，Web 不保存 Runtime 状态；
 - Model Provider 不依赖 ACP；Remote 允许零模型启动，Ollama 与线上 API 都必须走统一入园；
+- Evaluation 是独立职责模块但不建立独立进程、端口或容器；评测持久化失败不得改变 Agent Turn 结果；
 - UI 组件不解释 Raw ACP；
 - 每个 session 同时最多一个 prompt；
 - 新增协议行为必须有测试。

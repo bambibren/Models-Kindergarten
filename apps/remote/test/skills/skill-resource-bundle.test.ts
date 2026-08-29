@@ -36,6 +36,27 @@ async () => new Response(JSON.stringify(bundle), {
     expect(await readFile(join(root, "skills", "demo-skill", "SKILL.md"), "utf8")).toContain("name: demo-skill");
   });
 
+  it("保留公开来源记录并通过内部基址下载", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mk-resource-fetch-base-"));
+    dirs.push(root);
+    const bundle = makeBundle({ "SKILL.md": "---\nname: demo-skill\ndescription: demo\n---\nbody" });
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(bundle), {
+      headers: { "content-type": "application/vnd.mk.skill+json" },
+    }));
+    const installer = new SkillInstaller(
+      join(root, "skills"),
+      new SkillLockStore(join(root, "lock.json")),
+      fetchImpl,
+      "http://mk-web",
+    );
+
+    const publicUrl = "https://mk.example.com/skills/demo-skill";
+    const installed = await installer.install({ approved: true, source: { kind: "resource", url: publicUrl } });
+
+    expect(fetchImpl).toHaveBeenCalledWith("http://mk-web/skills/demo-skill", expect.any(Object));
+    expect(installed.source).toMatchObject({ kind: "resource", url: publicUrl });
+  });
+
   it("拒绝路径越界的资源包", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const root = await mkdtemp(join(tmpdir(), "mk-resource-invalid-"));

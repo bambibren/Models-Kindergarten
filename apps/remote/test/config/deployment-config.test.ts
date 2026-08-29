@@ -12,7 +12,6 @@ describe("deployment config", () => {
       host: "127.0.0.1",
       port: 7331,
       dataDir: "/tmp/mk-config-test/.data",
-      evaluationUrl: "http://127.0.0.1:7441",
       authMode: "development",
       masterKeyFile: "/tmp/mk-workspace/.local/secrets/mk_master_key",
       credentialVaultFile: "/tmp/mk-config-test/.data/secure/credentials.enc",

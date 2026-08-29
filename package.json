@@ -8,15 +8,16 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter @kindergarten/remote --filter @kindergarten/web --filter @kindergarten/evaluation-service dev",
+    "dev": "pnpm --parallel --filter @kindergarten/remote --filter @kindergarten/web --filter @kindergarten/resource dev",
     "dev:remote": "pnpm --filter @kindergarten/remote dev",
     "dev:web": "pnpm --filter @kindergarten/web dev",
-    "dev:evaluation": "pnpm --parallel --filter @kindergarten/evaluation-service --filter @kindergarten/web dev",
-    "start:dist": "pnpm --parallel --filter @kindergarten/evaluation-service --filter @kindergarten/remote start:dist",
+    "dev:resource": "pnpm --filter @kindergarten/resource dev",
+    "start:dist": "pnpm --filter @kindergarten/remote start:dist",
     "secret:init": "pnpm --filter @kindergarten/remote secret:init",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
     "audit:comments": "node scripts/documentation/audit-chinese-comments.mjs"
   },
   "devDependencies": {

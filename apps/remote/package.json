@@ -16,7 +16,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
     "@kindergarten/contracts": "workspace:*",
-    "@kindergarten/evaluation-exporter": "workspace:*",
+    "@kindergarten/evaluation-contract": "workspace:*",
     "@kindergarten/runtime-observation": "workspace:*",
     "@modelcontextprotocol/client": "2.0.0",
     "ajv": "8.17.1",

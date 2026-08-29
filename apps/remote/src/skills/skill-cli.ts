@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { SkillInstaller } from "./skill-installer.js";
 import { SkillLockStore } from "./skill-lock-store.js";
-import { configuredSkillResourceOrigins, SkillSourceUrlPolicy } from "./skill-source-url.js";
+import { configuredSkillResourceFetchBase, configuredSkillResourceOrigins, SkillSourceUrlPolicy } from "./skill-source-url.js";
 import type { SkillInstallRequest } from "./skill-types.js";
 
 const args = parseArgs(process.argv.slice(2));
@@ -9,6 +9,8 @@ const dataDir = resolve(process.env.DATA_DIR ?? ".data");
 const installer = new SkillInstaller(
   resolve(process.env.USER_SKILLS_DIR ?? `${dataDir}/skills`),
   new SkillLockStore(resolve(process.env.SKILLS_LOCK_FILE ?? `${dataDir}/skills-lock.json`)),
+  fetch,
+  configuredSkillResourceFetchBase(process.env.SKILL_RESOURCE_FETCH_BASE),
 );
 const sourcePolicy = new SkillSourceUrlPolicy(configuredSkillResourceOrigins(process.env.SKILL_RESOURCE_ORIGINS));
 const request = installRequest(args, sourcePolicy);

@@ -67,7 +67,7 @@ export default function App() {
   if (route?.kind === "agent-evaluation-demo") return <AgentEvaluationDemoPage />;
   if (route?.kind === "experiment") return <ExperimentEvaluationPage experimentId={route.experimentId} />;
   if (state.phase === "loading") return <CenteredState title="正在读取本轮评测" detail="等待 Runtime Trace 完成上传…" />;
-  if (state.phase === "not_found") return <CenteredState title="尚未生成本轮评测" detail="该 Turn 可能仍在上传，或 Remote 未连接 Evaluation Service。" />;
+  if (state.phase === "not_found") return <CenteredState title="尚未生成本轮评测" detail="该 Turn 可能仍在后台写入，或 Evaluation 模块当前不可用。" />;
   if (state.phase === "error") return <CenteredState title="无法打开评测" detail={state.message} failed />;
   return <TurnEvaluationPage record={state.record} />;
 }

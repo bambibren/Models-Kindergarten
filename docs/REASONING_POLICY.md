@@ -264,7 +264,7 @@ Session 只保留可选的具体 `reasoningOverride`；字段缺失表示跟随 
 
 不要在执行披露中记录或推导 Agent 默认值；也不要只记录 `xhigh`，因为它无法表达用户选择和跨 Provider 语义。
 
-当前 `/turns/:turnId/context` 通过 Session Turn facts 提供 resolved reasoning、每轮 provider input 和完整 usage。独立 `RuntimeObservationEvent → EvaluationTraceExporter` 也保存 Turn/round 的 resolved reasoning，并投影 cached input 与 reasoning output 明细；两条观察链共享同形快照，但 Evaluation 包不反向依赖领域包。
+当前 `/turns/:turnId/context` 通过 Session Turn facts 提供 resolved reasoning、每轮 provider input 和完整 usage。`RuntimeObservationEvent → Evaluation 模块` 也保存 Turn/round 的 resolved reasoning，并投影 cached input 与 reasoning output 明细；两条观察链共享同形快照，但 Evaluation 合同不反向依赖领域包。
 
 ### 9.3 Token
 
@@ -312,7 +312,7 @@ Turn 的 reasoning、capability 和 model-round execution facts 会在运行中 
 - Session V4 具体覆盖值的持久化与 ACP `thought_level` 设置；
 - 首轮创建后、Prompt 前设置覆盖的 Web 流程；
 - Turn 边界解析、Provider 原生映射、running checkpoint 和终态 execution facts；
-- 独立 Evaluation Trace 的 Turn/round reasoning snapshot 与 cached/reasoning usage；
+- Evaluation Trace 的 Turn/round reasoning snapshot 与 cached/reasoning usage；
 - Ollama `fast/balanced` 映射；
 - ModelStudent 入园默认值、首页和 Session Composer 控件；Agent 编辑页不再提供推理控件；
 - Responses effort/summary、SSE 增量、usage 和终态的 Adapter 核心；

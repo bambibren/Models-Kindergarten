@@ -18,7 +18,8 @@ export interface ExplicitSkillSourceUrl {
   canonicalUrl: string;
 }
 
-export const DEFAULT_SKILL_RESOURCE_ORIGIN = "http://127.0.0.1:7342";
+export const DEFAULT_SKILL_RESOURCE_ORIGIN = "http://127.0.0.1:5173";
+export const DEFAULT_SKILL_RESOURCE_FETCH_BASE = "http://127.0.0.1:7342";
 
 /** 执行「configuredSkillResourceOrigins」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 export function configuredSkillResourceOrigins(value: string | undefined): string[] {
@@ -27,6 +28,20 @@ export function configuredSkillResourceOrigins(value: string | undefined): strin
     .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.trim())
     .filter(Boolean);
+}
+
+/** 读取 Resource 的内部下载基址；它由部署者配置，不接受用户消息覆盖。 */
+export function configuredSkillResourceFetchBase(value: string | undefined): string {
+  return normalizeFetchBase(value ?? DEFAULT_SKILL_RESOURCE_FETCH_BASE);
+}
+
+/** 公开 URL 只用于授权和记录；实际下载替换为受信内部基址并保留规范 Skill 路径。 */
+export function skillResourceFetchUrl(publicUrl: string, fetchBase: string): string {
+  const source = new URL(publicUrl);
+  if (!/^\/skills\/[a-z0-9-]+\/?$/.test(source.pathname) || source.search || source.hash) {
+    throw new Error(`SKILL_SOURCE_NOT_ALLOWED: Skill 资源 URL 必须使用 /skills/{name}`);
+  }
+  return new URL(source.pathname.replace(/\/$/, ""), `${normalizeFetchBase(fetchBase)}/`).href;
 }
 
 /** 来源策略统一控制对话可见 URL 与服务端安装 URL，避免模型扩写或切换来源。 */
@@ -109,6 +124,18 @@ function normalizeResourceOrigin(value: string): string {
   const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
   if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
     throw new Error(`Skill 资源源站只允许 HTTPS，或本机回环 HTTP: ${value}`);
+  }
+  return url.origin;
+}
+
+/** 内部下载基址来自受控部署配置，可使用 Docker 内网 HTTP 服务名。 */
+function normalizeFetchBase(value: string): string {
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error(`SKILL_RESOURCE_FETCH_BASE 包含无效 URL: ${value}`); }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password || url.search || url.hash ||
+    (url.pathname !== "/" && url.pathname !== "")) {
+    throw new Error(`SKILL_RESOURCE_FETCH_BASE 只能配置 HTTP(S) origin: ${value}`);
   }
   return url.origin;
 }

@@ -102,7 +102,7 @@ export interface TurnEvaluationRecord {
   createdAt: string;
 }
 
-/** HTTP 边界只接受完整的终态 Trace；更细的字段由受信任 Exporter 生成。 */
+/** Evaluation 模块只接受 Runtime 生成的完整终态 Trace。 */
 export function isTurnTraceDocument(value: unknown): value is TurnTraceDocument {
   if (!isRecord(value)) return false;
   return (
@@ -158,7 +158,7 @@ export interface LegacyTurnTraceDocumentV1 {
   errors: RuntimeErrorTrace[];
 }
 
-/** 旧数据迁移入口只做外层形状识别，字段摘要在 Evaluation Service 内生成。 */
+/** V1 数据迁移入口只做外层形状识别，字段摘要由 Evaluation 模块生成。 */
 export function isLegacyTurnTraceDocumentV1(value: unknown): value is LegacyTurnTraceDocumentV1 {
   if (!isRecord(value)) return false;
   return (

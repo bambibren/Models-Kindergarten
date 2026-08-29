@@ -24,31 +24,24 @@ interface PendingTrace {
   errors: RuntimeErrorTrace[];
 }
 
-type FetchLike = typeof fetch;
+type SaveTrace = (document: TurnTraceDocument) => Promise<void>;
+
 const MAX_COMPLETED_TRACES = 8;
 const MAX_TRACE_BYTES = 1024 * 1024;
-const MAX_CONCURRENT_UPLOADS = 4;
+const MAX_CONCURRENT_WRITES = 4;
 
 /**
- * 把 Runtime 的同步观察事件收集成一个终态文档，再异步发送到独立服务。
- * 网络失败只影响评测可用性，不能反向改变 Agent 的执行结果。
+ * 把 Runtime 观察事件组装成终态 Trace，再交给 Evaluation 模块异步保存。
+ * 保存失败、容量限制和评测降级都不能反向改变已经完成的 Agent Turn。
  */
-export class EvaluationTraceExporter implements RuntimeObservationSink {
+export class TraceCollector implements RuntimeObservationSink {
   private readonly pending = new Map<string, PendingTrace>();
-  private readonly uploads = new Set<Promise<void>>();
-  private readonly endpoint: URL;
+  private readonly writes = new Set<Promise<void>>();
   private readonly completed = new Map<string, TurnTraceDocument>();
 
-  /** 初始化「EvaluationTraceExporter」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-constructor(
-    baseUrl: string,
-    private readonly fetcher: FetchLike = fetch,
-  ) {
-    this.endpoint = new URL("/api/v1/turn-evaluations", ensureTrailingSlash(baseUrl));
-  }
+  constructor(private readonly save: SaveTrace) {}
 
-  /** 按 runId 聚合有限 Observation；收到 Turn 终态后先删除 pending，再生成并上传 Trace V2。 */
-emit(event: RuntimeObservationEvent): void {
+  emit(event: RuntimeObservationEvent): void {
     if (event.type === "turn_started") {
       this.pending.set(event.runId, {
         traceId: event.runId,
@@ -123,8 +116,7 @@ emit(event: RuntimeObservationEvent): void {
       return;
     }
     if (event.type === "tool_call_completed") {
-      const call = trace.toolCalls.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.toolCallId === event.toolCallId);
+      const call = trace.toolCalls.find((item) => item.toolCallId === event.toolCallId);
       if (!call) return;
       call.status = event.status;
       call.completedAt = event.completedAt;
@@ -151,27 +143,24 @@ emit(event: RuntimeObservationEvent): void {
       console.warn(`Turn Trace 超过 ${MAX_TRACE_BYTES} 字节，已丢弃评测副本：${document.sessionId}/${document.turnId}`);
       return;
     }
+
     this.rememberCompleted(document);
-    if (this.uploads.size >= MAX_CONCURRENT_UPLOADS) {
+    if (this.writes.size >= MAX_CONCURRENT_WRITES) {
       console.warn(
-        `Turn 评测上传并发已达到 ${MAX_CONCURRENT_UPLOADS}，跳过非关键评测副本：${document.sessionId}/${document.turnId}`,
+        `Evaluation 写入并发已达到 ${MAX_CONCURRENT_WRITES}，跳过非关键评测副本：${document.sessionId}/${document.turnId}`,
       );
       return;
     }
-    const upload = this.upload(document, serialized).finally(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
-() => this.uploads.delete(upload));
-    this.uploads.add(upload);
+    const write = this.persist(document).finally(() => this.writes.delete(write));
+    this.writes.add(write);
   }
 
-  /** 测试和进程关闭时可等待在途上传；正常 Prompt 不等待这个 Promise。 */
+  /** 等待已经开始的评测写入；Agent Turn 正常流程不会等待。 */
   async flush(): Promise<void> {
-    await Promise.all([...this.uploads]);
+    await Promise.all([...this.writes]);
   }
 
-  /**
-   * 本地 Trace 只用于 Evaluation Service 尚未可查时的短暂兜底。
-   * 读取即转移所有权，避免实验完成后仍在 Remote 中重复常驻。
-   */
+  /** 最近 Trace 只用于 Experiment 完成瞬间读取，读取后立即释放。 */
   takeTrace(sessionId: string, turnId: string): TurnTraceDocument | undefined {
     const key = turnKey(sessionId, turnId);
     const value = this.completed.get(key);
@@ -179,8 +168,7 @@ emit(event: RuntimeObservationEvent): void {
     return value ? structuredClone(value) : undefined;
   }
 
-  /** 维护最近 8 条本地兜底 Trace；重复键刷新顺序，超限删除最老记录。 */
-private rememberCompleted(document: TurnTraceDocument): void {
+  private rememberCompleted(document: TurnTraceDocument): void {
     const key = turnKey(document.sessionId, document.turnId);
     this.completed.delete(key);
     this.completed.set(key, structuredClone(document));
@@ -191,43 +179,25 @@ private rememberCompleted(document: TurnTraceDocument): void {
     }
   }
 
-  /** 在 3 秒超时内提交评测副本；失败只记录警告，不改变已经完成的 Agent Turn。 */
-private async upload(document: TurnTraceDocument, serialized: string): Promise<void> {
+  private async persist(document: TurnTraceDocument): Promise<void> {
     try {
-      const response = await this.fetcher(this.endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: serialized,
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      await this.save(structuredClone(document));
     } catch (error) {
       console.warn(
-        `Turn 评测上传失败（${document.sessionId}/${document.turnId}）：${errorText(error)}`,
+        `Evaluation 写入失败（${document.sessionId}/${document.turnId}）：${errorText(error)}`,
       );
     }
   }
 }
 
-/** 由规范字段生成稳定的「turnKey」标识，供索引精确定位且不保留原始大对象。 */
 function turnKey(sessionId: string, turnId: string): string {
   return `${sessionId}\u0000${turnId}`;
 }
 
-/** 读取「findRound」所需数据，并遵守作用域、分页与容量边界。 */
 function findRound(trace: PendingTrace, roundId: string): ModelRoundTrace | undefined {
-  return trace.modelRounds.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.id === roundId);
+  return trace.modelRounds.find((item) => item.id === roundId);
 }
 
-/** 校验并取得「ensureTrailingSlash」所需对象；缺失或归属不符时立即抛出明确错误。 */
-function ensureTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value : `${value}/`;
-}
-
-/** 把未知异常转换为「errorText」文本，避免错误序列化过程再次抛出。 */
 function errorText(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
 }

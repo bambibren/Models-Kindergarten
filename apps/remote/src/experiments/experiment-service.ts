@@ -18,9 +18,8 @@ import type { AgentService } from "../agent/agent-service.js";
 import type { SessionRepository } from "../repository/session-repository.js";
 import { ApiProblemError } from "../server/api-problem.js";
 import type { ModelStudentCatalog } from "../model/model-student-catalog.js";
-import type { EvaluationTraceExporter } from "@kindergarten/evaluation-exporter";
 import type { ExperimentRepository } from "./experiment-repository.js";
-import type { EvaluationRecordReader } from "./evaluation-record-client.js";
+import type { EvaluationAccess } from "../evaluation/evaluation-module.js";
 import type { AnnotationWorksheetGenerator } from "./annotation-worksheet-generator.js";
 import type { ContextPreviewService } from "./context-preview-service.js";
 
@@ -32,8 +31,7 @@ constructor(
     private readonly agents: AgentService,
     private readonly sessions: SessionRepository,
     private readonly models: ModelStudentCatalog,
-    private readonly evaluations: EvaluationRecordReader,
-    private readonly exporter?: EvaluationTraceExporter,
+    private readonly evaluation: EvaluationAccess,
     private readonly worksheetGenerator?: AnnotationWorksheetGenerator,
     private readonly previews?: ContextPreviewService,
   ) {}
@@ -487,8 +485,8 @@ private async executionMetrics(
     sessionId: string,
     turnId: string,
   ): Promise<ExecutionMetricsSnapshot> {
-    await this.exporter?.flush();
-    const record = await this.evaluations.get(sessionId, turnId);
+    await this.evaluation.flush();
+    const record = await this.evaluation.get(sessionId, turnId);
     const result = record?.result;
     if (!result) throw new ApiProblemError(409, "TURN_SNAPSHOT_UNAVAILABLE", "该 Turn 没有可验证的 Runtime 指标", false);
     return {
@@ -512,7 +510,7 @@ private async executionMetrics(
 
   /** 生成「traceRuntimeFacts」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
 private traceRuntimeFacts(sessionId: string, turnId: string): import("@kindergarten/contracts").ExperimentRunRuntimeFacts | undefined {
-    const trace = this.exporter?.takeTrace(sessionId, turnId);
+    const trace = this.evaluation.takeTrace(sessionId, turnId);
     if (!trace) return undefined;
     return {
       capabilityGenerations: trace.variant.capabilities ? 1 : 0,

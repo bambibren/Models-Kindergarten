@@ -2,7 +2,7 @@
 
 Models Kindergarten 是一个面向模型、Agent 与上下文效果验证的 AI 实验与创作工作台。
 
-本机开发默认运行 Web、Remote 和 Evaluation Service；模型统一从“模型入园”配置。线上模型 API 与可选的本机 Ollama 都是可删除的普通模型，产品不再内置或强制创建本地小模型。
+本机开发通过一个命令运行 Web、Remote 和 Resource；Evaluation 是与 Agent Runtime 同进程、独立职责的模块。模型统一从“模型入园”配置，线上模型 API 与可选的本机 Ollama 都是可删除的普通模型。
 
 “模型幼儿园”最终想解决的问题，是让同一个任务在不同模型、Agent 和上下文配置下重复运行、观察和比较，帮助人理解模型为什么表现不同，以及怎样组合提示词、工具、Skills、MCP 和历史上下文才能得到更好的结果。
 
@@ -26,7 +26,7 @@ Models Kindergarten 是一个面向模型、Agent 与上下文效果验证的 AI
 
 ### 2. 生成 PPTX
 
-从首页选择“PPT 制作”，系统会填入 `http://127.0.0.1:7342/skills/pptx` Skill 和示例任务。Agent 激活 Skill 后，通过受控工具链生成可编辑 `.pptx`，再发布为 Artifact。
+从首页选择“PPT 制作”，系统会根据当前页面源站填入 `/skills/pptx` 的完整地址和示例任务。源码开发时公开地址是 `http://127.0.0.1:5173/skills/pptx`；Agent 激活 Skill 后，通过受控工具链生成可编辑 `.pptx`，再发布为 Artifact。
 
 PPTX 支持两级预览：
 
@@ -93,23 +93,32 @@ Bearer Token 与 HTTP Basic Auth 是两种不同方式。本项目底层支持 B
 
 ## 系统结构
 
-```mermaid
-flowchart LR
-    Web[React Web] <-->|ACP over WebSocket| Remote[Remote ACP Adapter]
-    Remote --> Runtime[Agent Runtime]
-    Runtime <--> Model[Model Providers]
-    Runtime --> Tools[ToolRuntime]
-    Tools --> Builtin[Built-in Tools]
-    Builtin --> Search[web_search]
-    Search --> Exa[Exa Remote MCP]
-    Tools --> ManagedMCP[Agent-bound MCP Tools]
-    Tools --> Skills[Agent Skills]
-    Tools --> Sandbox[File / Process / Network Sandbox]
-    Tools --> Store[Artifact Store]
-    Runtime --> Context[ContextAssembler]
-    Context --> Resources[Skill Catalog / MCP Resources / History]
-    Store --> Preview[HTML / PPTX / File Preview]
-    Preview -. optional .-> Office[ONLYOFFICE]
+```text
+React Web
+│
+│ ACP over WebSocket + 同源 HTTP API
+▼
+Remote
+├─ ACP Adapter
+├─ Agent Runtime
+│  ├─ Model Providers
+│  ├─ ContextAssembler
+│  ├─ ToolRuntime
+│  │  ├─ Built-in Tools
+│  │  ├─ Agent-bound MCP
+│  │  ├─ Agent Skills
+│  │  └─ File / Process / Network Sandbox
+│  └─ RuntimeObservationEvent
+│          │
+│          ▼
+├─ Evaluation 模块
+│  ├─ Trace 收集
+│  ├─ 客观指标计算
+│  ├─ 后台持久化
+│  └─ /api/evaluation/v1
+└─ Artifact Store
+   ├─ HTML / PPTX / File Preview
+   └─ 可选 ONLYOFFICE
 ```
 
 主要边界：
@@ -117,6 +126,7 @@ flowchart LR
 - Browser 与 Remote 只通过官方 ACP 通信；
 - 一个浏览器页面只有一个 ACP connection owner；
 - Runtime 状态保留在 Remote，Web 只保存 UI 投影；
+- Evaluation 通过进程内后台队列观察 Runtime，评测失败不改变 Agent Turn 结果；
 - MCP Tool、文件、终端、网络与脚本执行经过 ToolRuntime、权限策略和对应沙箱；
 - MCP/Skill 配置、Secret、运行状态和能力快照分离，Secret 不进入日志、Session 或评测 Trace；
 - 每个 Session 同时最多执行一个 Prompt。
@@ -139,9 +149,10 @@ API Key 等动态凭据由 Remote 使用主密钥加密后写入 `DATA_DIR/secur
 
 - 主 Web：`http://127.0.0.1:5173`；
 - 主 Web 同源入口：`/api`、`/acp`、`/evaluation/*`；
+- Skills 同源入口：`http://127.0.0.1:5173/skills/*`；
 - Remote（仅服务调试）：`http://127.0.0.1:7331`；
-- Evaluation API（仅服务调试）：`http://127.0.0.1:7441`；
-- PPTX Skill 资源服务：`http://127.0.0.1:7342`；
+- Evaluation API：`http://127.0.0.1:7331/api/evaluation/v1`；
+- Resource 实际监听端口（仅服务调试）：`http://127.0.0.1:7342`；
 - 可选 ONLYOFFICE：`http://127.0.0.1:8080`。
 
 环境变量模板见 [.env.example](.env.example)。
@@ -152,6 +163,8 @@ API Key 等动态凭据由 Remote 使用主密钥加密后写入 `DATA_DIR/secur
 pnpm typecheck
 pnpm test
 pnpm build
+# 或一次完成全部检查
+pnpm check
 ```
 
 ## 进一步阅读

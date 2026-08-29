@@ -13,7 +13,7 @@ import {
 
 describe("demo skill installation", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {
-  it("keeps the three public sources in the website development prompt", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+  it("keeps the same-origin resource source in the website development prompt", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     expect(isWebsiteDevelopmentRequest(websiteDevelopmentPrompt)).toBe(true);
     for (const source of websiteSkillSources) expect(websiteDevelopmentPrompt).toContain(source);
@@ -25,7 +25,7 @@ describe("demo skill installation", /** 组织这一组相关测试，统一建�
     for (let index = 0; index < 4; index += 1) batch = advanceDemoSkillInstallBatch(batch);
     expect(isDemoSkillInstallComplete(batch)).toBe(true);
     expect(batch.items.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(item) => item.name)).toEqual(["frontend-design", "design-brief", "impeccable-design-polish"]);
+(item) => item.name)).toEqual(["website-design-fast"]);
   });
 
   it("binds installed skills to the same Agent record", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */

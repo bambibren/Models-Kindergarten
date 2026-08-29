@@ -1,7 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stat } from "node:fs/promises";
-import { EvaluationTraceExporter } from "@kindergarten/evaluation-exporter";
 import { KindergartenAgent } from "./acp/kindergarten-agent.js";
 import { AgentRepository } from "./agent/agent-repository.js";
 import { registerAgentRoutes } from "./agent/agent-routes.js";
@@ -42,7 +41,6 @@ import { LegacyOllamaMigration } from "./model/legacy-ollama-migration.js";
 import { SessionRepository } from "./repository/session-repository.js";
 import { AgentRuntime } from "./runtime/agent-runtime.js";
 import { RemoteServer } from "./server/http-server.js";
-import { EvaluationApiProxy } from "./server/evaluation-api-proxy.js";
 import { ControlApi } from "./server/control-api.js";
 import { SessionBindingService } from "./session/session-binding-service.js";
 import { registerSessionRoutes } from "./session/session-routes.js";
@@ -54,7 +52,7 @@ import { SkillDiscovery } from "./skills/skill-discovery.js";
 import { SkillInstaller } from "./skills/skill-installer.js";
 import { SkillInstallationRepository } from "./skills/skill-installation-repository.js";
 import { SkillInstallationService } from "./skills/skill-installation-service.js";
-import { configuredSkillResourceOrigins, SkillSourceUrlPolicy } from "./skills/skill-source-url.js";
+import { configuredSkillResourceFetchBase, configuredSkillResourceOrigins, SkillSourceUrlPolicy } from "./skills/skill-source-url.js";
 import { registerSkillRoutes } from "./skills/skill-routes.js";
 import { FileReferenceRepository } from "./files/file-reference-repository.js";
 import { FileReferenceService } from "./files/file-reference-service.js";
@@ -62,7 +60,7 @@ import { registerFileRoutes } from "./files/file-routes.js";
 import { FileSandbox } from "./tools/sandbox.js";
 import { ExperimentRepository } from "./experiments/experiment-repository.js";
 import { ExperimentService } from "./experiments/experiment-service.js";
-import { EvaluationRecordClient } from "./experiments/evaluation-record-client.js";
+import { EvaluationModule } from "./evaluation/evaluation-module.js";
 import { registerExperimentRoutes } from "./experiments/experiment-routes.js";
 import { ContextPreviewService } from "./experiments/context-preview-service.js";
 import { AnnotationWorksheetGenerator } from "./experiments/annotation-worksheet-generator.js";
@@ -91,6 +89,8 @@ const { port, host, dataDir, sandboxDir, userSkillsDir } = deployment;
 const modelStudents = new ModelStudentCatalog();
 const sandbox = new FileSandbox(sandboxDir);
 await sandbox.initialize();
+const evaluation = new EvaluationModule(resolve(dataDir, "evaluation"));
+await evaluation.initialize();
 const artifacts = new ArtifactService(
   new ArtifactRepository(resolve(dataDir, "artifacts.json")),
   new ArtifactBlobStore(resolve(dataDir, "artifact-blobs")),
@@ -180,7 +180,12 @@ const agentService = new AgentService(agentRepository, {
 skillInstallations = new SkillInstallationService(
   skillInstallationRepository,
   new SkillDiscovery(userSkillsDir),
-  new SkillInstaller(userSkillsDir, skillLock),
+  new SkillInstaller(
+    userSkillsDir,
+    skillLock,
+    fetch,
+    configuredSkillResourceFetchBase(process.env.SKILL_RESOURCE_FETCH_BASE),
+  ),
   skills,
   agentService,
   skillSourcePolicy,
@@ -298,8 +303,6 @@ for (const restored of restoredModels) {
     console.warn(`ModelStudent ${restored.displayName} 暂不可用：${restored.statusMessage ?? "未知原因"}`);
   }
 }
-const evaluationServiceUrl = deployment.evaluationUrl;
-const evaluation = new EvaluationTraceExporter(evaluationServiceUrl);
 const resolver = new RuntimeCapabilityResolver(
   agentService,
   modelStudents,
@@ -315,7 +318,6 @@ const experimentService = new ExperimentService(
   agentService,
   sessions,
   modelStudents,
-  new EvaluationRecordClient(evaluationServiceUrl),
   evaluation,
   new AnnotationWorksheetGenerator(modelStudents),
   contextPreviews,
@@ -360,7 +362,7 @@ const agent = new KindergartenAgent(sessions, runtime, bindings, experimentServi
 const server = new RemoteServer(agent, {
   configuredModels: String(modelStudents.all().length),
   readyModels: String(modelStudents.all().filter((item) => item.status === "ready").length),
-}, control, new EvaluationApiProxy(evaluationServiceUrl), {
+}, control, evaluation, {
   dataDirectory: true,
   modelCatalog: true,
   secretStore: true,
@@ -372,6 +374,7 @@ console.log(`Kindergarten Remote: ws://${host}:${port}/acp`);
 console.log(`Deployment profile: ${deployment.profile}`);
 console.log(`ModelStudents: ${modelStudents.all().length} configured`);
 console.log(`Sandbox: ${sandbox.root}`);
+console.log(`Evaluation: ${evaluation.available ? "ready" : "degraded"}`);
 console.log(`Skills: ${capabilityConfig.agentCapabilities.skills.join(", ") || "无"}`);
 for (const state of mcp.serverStates()) {
   console.log(`MCP ${state.serverId}: ${state.status}${state.protocolEra ? ` (${state.protocolEra})` : ""}`);

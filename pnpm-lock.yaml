@@ -15,22 +15,6 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.13.3)(vite@8.2.0(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.7)(yaml@2.8.1))
 
-  apps/evaluation-service:
-    dependencies:
-      '@kindergarten/evaluation-contract':
-        specifier: workspace:*
-        version: link:../../packages/evaluation-contract
-    devDependencies:
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      esbuild:
-        specifier: 0.28.1
-        version: 0.28.1
-      tsx:
-        specifier: 4.23.7
-        version: 4.23.7
-
   apps/remote:
     dependencies:
       '@agentclientprotocol/sdk':
@@ -39,9 +23,9 @@ importers:
       '@kindergarten/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@kindergarten/evaluation-exporter':
+      '@kindergarten/evaluation-contract':
         specifier: workspace:*
-        version: link:../../packages/evaluation-exporter
+        version: link:../../packages/evaluation-contract
       '@kindergarten/runtime-observation':
         specifier: workspace:*
         version: link:../../packages/runtime-observation
@@ -134,20 +118,9 @@ importers:
         specifier: workspace:*
         version: link:../runtime-observation
 
-  packages/evaluation-exporter:
-    dependencies:
-      '@kindergarten/evaluation-contract':
-        specifier: workspace:*
-        version: link:../evaluation-contract
-      '@kindergarten/runtime-observation':
-        specifier: workspace:*
-        version: link:../runtime-observation
-    devDependencies:
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-
   packages/runtime-observation: {}
+
+  resource: {}
 
 packages:
 

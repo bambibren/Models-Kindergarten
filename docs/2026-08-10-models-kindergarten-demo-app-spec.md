@@ -16,13 +16,13 @@
 | 模型上下文实验页 | `/demo/context-lab` | `apps/web/src/demo/context-lab/` | 写死 |
 | Agent 编辑页 | `/demo/agent-editor` | `apps/web/src/demo/agent-editor/` | `sessionStorage` 模拟 |
 | 我的 | `/demo/me` | `apps/web/src/demo/me/` | 写死 |
-| 对比实验结果观测页 | `/evaluation/demo/agent-comparison` | `apps/evaluation-web/src/demo/agent-evaluation/` | 写死 |
+| 对比实验结果观测页 | `/evaluation/demo/agent-comparison` | `apps/web/src/evaluation/demo/agent-evaluation/` | 写死 |
 
 - Web Demo 共享壳层、Mock 数据和通用组件全部放在 `apps/web/src/demo/`。
-- Evaluation Demo 的新增代码继续放在现有 `apps/evaluation-web/src/demo/`。
+- Evaluation Demo 的新增代码放在 `apps/web/src/evaluation/demo/`。
 - 真实聊天 `apps/web/src/App.tsx`、ACP Client、Store、ChatEntry reducer 和真实会话组件不承担 Demo 状态。
 - Web 入口只增加一个按 `/demo/*` 分流的薄路由门；非 Demo Route 仍挂载原来的 `App`。
-- Demo 不请求 Remote、Evaluation Service 或 Ollama，不创建第二个 ACP connection owner。
+- Demo 不请求 Remote 或 Ollama，不创建第二个 ACP connection owner。
 
 ### 0.2 视觉基线
 

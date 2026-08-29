@@ -8,11 +8,12 @@ import { isWebsiteDevelopmentRequest, websiteDevelopmentPrompt, websiteSkillSour
 import { DemoTopNav } from "../shared/DemoTopNav.js";
 import { ReasoningProfileSelect } from "../../components/reasoning/ReasoningProfileSelect.js";
 import { saveDemoSessionReasoning } from "../reasoning/demo-reasoning-state.js";
+import { publicSkillUrl } from "../../skills/public-skill-url.js";
 import "./model-home.css";
 
 const prompts = {
   site: websiteDevelopmentPrompt,
-  pptx: `运用 http://127.0.0.1:7342/skills/pptx skill
+  pptx: `运用 ${publicSkillUrl("pptx")} skill
 
 帮我给旺仔QQ糖只做一篇全口味宣传的PPT，要从同年回忆小故事、口味联想、情绪价值和针对受众群体喜好的宣传活动。`,
 };

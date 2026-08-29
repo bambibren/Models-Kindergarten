@@ -12,7 +12,6 @@ export interface DeploymentConfig {
   dataDir: string;
   sandboxDir: string;
   userSkillsDir: string;
-  evaluationUrl: string;
   authMode: AuthMode;
   masterKeyFile: string;
   credentialVaultFile: string;
@@ -52,7 +51,6 @@ export function readDeploymentConfig(
     dataDir,
     sandboxDir: resolve(cwd, env.SANDBOX_DIR ?? `${dataDir}/sandbox`),
     userSkillsDir: resolve(cwd, env.USER_SKILLS_DIR ?? `${dataDir}/skills`),
-    evaluationUrl: origin(env.EVALUATION_SERVICE_URL ?? "http://127.0.0.1:7441", "EVALUATION_SERVICE_URL"),
     authMode: oneOf(env.AUTH_MODE ?? "development", ["development", "required"] as const, "AUTH_MODE"),
     masterKeyFile,
     credentialVaultFile: resolve(cwd, env.CREDENTIAL_VAULT_FILE ?? `${dataDir}/secure/credentials.enc`),

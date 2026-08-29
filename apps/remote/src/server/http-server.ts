@@ -6,12 +6,15 @@ import type { AgentApp } from "@agentclientprotocol/sdk";
 import { Readable } from "node:stream";
 import type { ControlApi } from "./control-api.js";
 import { PRODUCT_CONFIG } from "@kindergarten/contracts";
-import type { EvaluationApiProxy } from "./evaluation-api-proxy.js";
 
 const MAX_ACP_INCOMING_PAYLOAD_BYTES = 1024 * 1024;
 
+export interface HttpFeature {
+  fetch(request: Request): Promise<Response | undefined>;
+}
+
 /**
- * Remote 的网络壳：HTTP 提供健康检查、控制 API 和固定评测代理，Agent 交互走官方 ACP WebSocket。
+ * Remote 的网络壳：HTTP 提供健康检查、控制 API 和 Evaluation 读取，Agent 交互走官方 ACP WebSocket。
  * 这个类也集中拥有三个网络资源，确保退出时不会残留连接。
  */
 export class RemoteServer {
@@ -24,7 +27,7 @@ export class RemoteServer {
     agent: AgentApp,
     private readonly modelInfo: Record<string, string> = {},
     private readonly controlApi?: ControlApi,
-    private readonly evaluationApiProxy?: EvaluationApiProxy,
+    private readonly evaluationApi?: HttpFeature,
     private readonly readiness: Record<string, boolean> = { server: true },
   ) {
     this.acp = new AcpServer({ agent });
@@ -61,9 +64,9 @@ async (req, res) => {
           return;
         }
         const request = toRequest(req);
-        const proxied = await this.evaluationApiProxy?.fetch(request);
-        if (proxied) {
-          await sendResponse(res, proxied);
+        const evaluationResponse = await this.evaluationApi?.fetch(request);
+        if (evaluationResponse) {
+          await sendResponse(res, evaluationResponse);
           return;
         }
         const response = await this.controlApi?.fetch(request);

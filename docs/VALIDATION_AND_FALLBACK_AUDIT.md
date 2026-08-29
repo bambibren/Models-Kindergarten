@@ -17,7 +17,7 @@
 | A-03 | `packages/contracts/src/experiments.ts` | Runtime 100 分公式、各指标权重 `30/25/15/15/5/10`、失败最高 59 分、同组相对速度排名均为固定代码。 | 用户只要求 Runtime metrics 参与第四维，没有确认这套具体权重和相对评分算法。 | 把公式作为待确认产品规则并配置化；确认前页面展示原始指标或明确标“暂定公式”。 |
 | A-04 | `apps/remote/src/tools/tool-runtime.ts` | 同一 Turn 内只要工具名和参数相同，后续调用一律作为重复调用阻止，并复用第一次结果。 | `read_file` 在 `write_file` 后再次读取、网络状态变化后重试等都可能是合理调用；当前去重键没有状态版本。 | 只对明确幂等且无状态变化的调用去重，或只阻止仍在运行的完全重复调用。 |
 | A-05 | `apps/remote/src/capability/runtime-capability-resolver.ts` | `recent_turns=N` 被换算为最多 `N * 8 + 1` 条消息。 | 一个 Turn 不等于固定 8 条消息；工具多时会截断，工具少时又会带入超过 N 个 Turn 的内容。 | 按 `turnId` 选择最近 N 个完整 Turn，再让 ContextAssembler 按 Token 预算裁剪。 |
-| A-06 | `apps/evaluation-web/src/experiment-acp-client.ts` | 实验运行遇到权限请求时，客户端自动选择 `allow_once`；表单询问也会自动用第一个字段提交预设答案。 | 实验在无人确认时替用户授权，且可能改变被测 Agent 的真实行为。 | 实验策略显式定义权限处理；需要人工时暂停 lane，不要暗中代答。 |
+| A-06 | `apps/web/src/evaluation/experiment-acp-client.ts` | 实验运行遇到权限请求时，客户端自动选择 `allow_once`；表单询问也会自动用第一个字段提交预设答案。 | 实验在无人确认时替用户授权，且可能改变被测 Agent 的真实行为。 | 实验策略显式定义权限处理；需要人工时暂停 lane，不要暗中代答。 |
 | A-07 | `apps/web/src/product/HomePage.tsx` | 生产首页用提示词是否包含 `ensure_agent_skills` 和 `frontend-design` 判断“网站开发任务”。 | 这是 Demo 文案耦合，不是业务状态；用户改写提示词后 UI 行为会漂移。 | 模板点击时写显式 UI 状态，或完全不需要识别任务类型。 |
 
 ## B. 缺少需求依据的固定限制或默认策略

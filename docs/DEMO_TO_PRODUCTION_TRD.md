@@ -151,7 +151,7 @@ Demo 中的 Memory 模块本轮仅允许保存 `mode: "off"`。UI 应禁用并�
 ### 4.2 关键现状结论
 
 1. `apps/web/src/demo/DemoApp.tsx` 才是 `/demo` 实际路由真相；模型入园路由按本轮裁决移除后，共有 `model-home`、`session`、`context-lab`、`agent-editor`、`me`、`mcp` 六个入口。
-2. Context Lab 结果链接跨到 evaluation-web 的 `/evaluation/demo/agent-comparison`；真实详情路由另有 `/evaluation/sessions/:sessionId/turns/:turnId`。
+2. Context Lab 结果进入同一 Web 的 `/evaluation/demo/agent-comparison`；真实详情路由另有 `/evaluation/sessions/:sessionId/turns/:turnId`。
 3. `apps/remote/src/index.ts` 组装的是一个全局 ModelStudent、一个全局 Skill/MCP 能力集合和一个全局 FileSandbox；这与 Demo 的 Agent 选择、MCP 绑定和文件隔离语义不一致。
 4. `AgentRunner` 在 Turn 开始时复制一次工具定义与能力快照；对话内安装 Skill 后，同 Turn 无法自然看见新能力。
 5. Session V3 只保存会话元数据和 entries，没有 owner、Agent、模型、Turn 快照或文件引用。
@@ -165,20 +165,23 @@ Demo 中的 Memory 模块本轮仅允许保存 `mode: "off"`。UI 应禁用并�
 
 ### 5.1 内部依赖
 
-```mermaid
-flowchart LR
-  Contracts["packages/contracts"] --> Remote["apps/remote"]
-  Contracts --> Web["apps/web"]
-  Contracts --> EvalWeb["apps/evaluation-web"]
-  Remote --> SessionRepo["Session / Agent / Capability Stores"]
-  Remote --> Runtime["AgentRunner + ContextAssembler"]
-  Runtime --> Model["ModelProvider"]
-  Runtime --> Tool["ToolRuntime"]
-  Tool --> Skills["SkillInstallationService"]
-  Tool --> Mcp["McpConnectionSupervisor"]
-  Tool --> Files["SessionFileSandbox"]
-  Remote --> Observation["runtime-observation"]
-  Observation --> EvalService["evaluation-service"]
+```text
+packages/contracts
+├─ apps/web
+└─ apps/remote
+   ├─ Session / Agent / Capability Stores
+   ├─ AgentRunner + ContextAssembler
+   │  ├─ ModelProvider
+   │  ├─ ToolRuntime
+   │  │  ├─ SkillInstallationService
+   │  │  ├─ McpConnectionSupervisor
+   │  │  └─ SessionFileSandbox
+   │  └─ runtime-observation
+   │          │
+   │          ▼
+   └─ Evaluation 模块
+      ├─ 客观指标计算
+      └─ Turn Trace Repository
 ```
 
 ### 5.2 外部依赖
@@ -212,7 +215,7 @@ flowchart LR
 | `/agents/new`、`/agents/:agentId` | `/demo/agent-editor` | Agent 新建/编辑和能力绑定 |
 | `/me` | `/demo/me` | 实验、Agent、只读模型、MCP、Skill 资源管理 |
 | `/mcps/new`、`/mcps/:mcpId` | `/demo/mcp` | 无认证 Remote MCP 测试、安装、详情与生命周期 |
-| evaluation-web `/evaluation/experiments/:experimentId` | `/evaluation/demo/agent-comparison` | 原始回答、上下文事实、运行事实、人工评分与结果图表 |
+| Evaluation 页面 `/evaluation/experiments/:experimentId` | `/evaluation/demo/agent-comparison` | 原始回答、上下文事实、运行事实、人工评分与结果图表 |
 
 `/demo/*` 在迁移期保留为视觉回归基线，不与生产数据混用。达到模块验收后逐路由关闭 fallback。
 
@@ -225,7 +228,7 @@ flowchart LR
 5. 只有当前用户消息明确给出受支持的 Skill 来源地址时，模型才可调用 `ensure_agent_skills`。Remote 还会校验地址确实来自该条用户消息；模糊的“帮我设计网页”只能使用 Agent 已绑定的 Skills，不能触发搜索或安装。整批成功后绑定 Agent，并在同 Turn 下一模型轮次重新解析能力。
 6. 若模型写出文件，工具结果包含标准 `resource_link`；Web 打开受控预览面板。
 7. 用户可从 Context Summary 进入 Context Lab，对本次真实 Turn 的上下文策略做 A/B/C 比较。
-8. 实验 B/C 各创建一个 purpose=`experiment` 的 ACP Session，并走正式 `session/prompt`；结果写入 ExperimentRepository，evaluation-web 只读展示。
+8. 实验 B/C 各创建一个 purpose=`experiment` 的 ACP Session，并走正式 `session/prompt`；结果写入 ExperimentRepository，同一 Web 的 Evaluation 页面只读展示。
 
 详细交互见[完整需求](./DEMO_TO_PRODUCTION_REQUIREMENTS_AND_GAPS.md)。
 
@@ -334,7 +337,7 @@ flowchart TB
 - 引入正式 Router，生产页面与 `/demo/*` 分开注册。
 - `AcpConnectionProvider` 在单个 Web 页面中只构造一个 `AcpWebClient`；页面组件通过 hooks 使用，不自行 new connection。
 - 建立 `AcpSessionUpdateRouter`，按 `sessionId` 将 update 路由到 chat collector 或 experiment collector，避免全局 reducer 把实验输出混入当前聊天。
-- URL、Remote Control API、evaluation-web 地址全部从环境配置和 route helper 生成，禁止硬编码 5175 或 Vite 自动选中的 5174。
+- URL、Remote Control API、Evaluation 路由全部从同源配置和 route helper 生成，Evaluation 页面不占用第二个前端端口。
 
 ### 8.2 Agent 管理
 
@@ -404,7 +407,7 @@ Context Lab 只编辑服务端 ExperimentDraft：
 - 策略模块为 system/tools/MCP/skills/history；memory 显示禁用。
 - 预览通过 Remote 调用真实 ContextAssembler 和 ModelProvider serializer，返回估算 token 与实际 raw provider input；不保留前端硬编码 token map。
 
-运行时，Web 为 B/C lane 创建带 namespaced experiment reference 的 ACP Session，再调用标准 `session/prompt`。这些是真实的 ACP Session/Turn，但 `purpose="experiment"`，只关联在实验记录中，普通聊天列表不展示。Remote 从 ExperimentRepository 读取并校验变体，不相信浏览器传入完整能力定义。A 的 `reuse_snapshot` 不请求模型。全部完成后跳到 evaluation-web 对比页。
+运行时，Web 为 B/C lane 创建带 namespaced experiment reference 的 ACP Session，再调用标准 `session/prompt`。这些是真实的 ACP Session/Turn，但 `purpose="experiment"`，只关联在实验记录中，普通聊天列表不展示。Remote 从 ExperimentRepository 读取并校验变体，不相信浏览器传入完整能力定义。A 的 `reuse_snapshot` 不请求模型。全部完成后跳到同一 Web 的 Evaluation 对比页。
 
 结果页显示回答、上下文差异、工具/usage/停止原因、状态与保存标记，并实现 Demo 表达的四维评分。全部 lane 完成后，Remote 每次实验调用当前 ModelStudent 生成并持久化一份标注工作表：从原任务和各 lane 信息合并公共需求项，从回答和 Tool 过程提取各 lane Workflow，并给出各回答的结果段语义与文本单元边界建议。该结构化整理调用关闭 Provider 推理模式；模型输出不含 verdict 或分数。Remote 按模型给出的段落顺序规范化可能的边界跳号/重叠/越界，自行生成首尾相接、无重叠无遗漏的字符区间与 hash。用户显式重新生成时旧 Scorecard 失效。
 
@@ -473,7 +476,7 @@ erDiagram
 
 这里所谓“Remote 受管”只是指：MCP 连接由产品后端统一安装、保存和授权，不由浏览器为每个会话临时创建。于是 Web 的 ACP `session/new.mcpServers` 必须是空数组；若浏览器传入任何服务器配置，Remote 明确拒绝。MCP 的工具定义由 Runtime 放入模型请求的 `tools` 字段，获准预载的 MCP 资源内容才由 ContextAssembler 放入上下文；两者都不是把服务器 URL/Secret 拼进聊天系统提示词。
 
-`evaluation-web` 不是第三方网站，而是仓库内已有的另一个前端应用，专门展示评测/实验详情。“外部”只表示从主 Web 跨应用跳转。route helper 只在 URL 带 `experimentId`；新页面再用该 ID 向 Remote 读取回答、上下文、运行指标和评分，跳转 URL 不携带这些正文或 Secret。
+Evaluation 是同一 Web 应用中的页面模块，不是第三方网站或独立前端。route helper 只在 URL 带 `experimentId`；新页面再用该 ID 向 Remote 读取回答、上下文、运行指标和评分，跳转 URL 不携带这些正文或 Secret。
 
 ### 10.2 Control API 资源
 
@@ -536,7 +539,7 @@ erDiagram
 - 所有 JSON Store 使用 temp + fsync + rename，并保留上一个可读备份；启动执行 schema 校验。
 - 进程重启后：running Skill Job → interrupted；connecting MCP → disconnected；running Experiment lane 根据 Session/Turn 事实恢复为 completed 或 interrupted。
 - MCP reconnect 使用有上限的指数退避和手动重试；禁用立即停止自动重连。
-- Evaluation exporter 失败不影响聊天完成；原始 Turn 事实仍保存在 Remote。
+- Evaluation 后台评分或写入失败不影响聊天完成；原始 Turn 事实仍保存在 Remote。
 
 ---
 
@@ -665,5 +668,5 @@ Flag 必须是服务端和前端共同可见的 capability，不允许只在前�
 | --- | --- | --- |
 | 2026-08-13 | 1.3 | 完成 D2P-1 首轮实现；明确每个实验的标注工作表必须由该实验绑定的 ModelStudent 实时生成需求合并项、Workflow 与结果分段语义，生成结果持久化后由人作答；补充失败重试、边界规范化、强制重新生成使旧 Scorecard 失效和端到端验证记录。 |
 | 2026-08-12 | 1.2 | 恢复不可点击的小说创作调研卡片；固定理解/规划/输出三维人工注释 + Runtime 执行分的四维评分，四维共同参与等权总分、雷达图、排名和 winner；明确无自动评分调用。 |
-| 2026-08-12 | 1.1 | 按评审反馈简化为本地单用户最后写入；移除模型入园路由、Agent 归档/迁移和会话内身份切换；限定 Skill 显式来源与更新规则；纳入人工评分、总分、雷达图、排名和 winner；澄清 ACP、MCP、文件预览、evaluation-web 与三层状态。 |
+| 2026-08-12 | 1.1 | 按评审反馈简化为本地单用户最后写入；移除模型入园路由、Agent 归档/迁移和会话内身份切换；限定 Skill 显式来源与更新规则；纳入人工评分、总分、雷达图、排名和 winner；澄清 ACP、MCP、文件预览、Evaluation 页面与三层状态。 |
 | 2026-08-11 | 1.0 | 依据实际 Demo 路由、非 Demo 代码和现有设计文档，形成统一产品化方案；明确四项调研留白。 |

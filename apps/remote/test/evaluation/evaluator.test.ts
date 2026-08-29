@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LegacyTurnTraceDocumentV1 } from "@kindergarten/evaluation-contract";
-import { evaluateTurn } from "../src/evaluator.js";
-import { normalizeTurnTrace } from "../src/trace-migration.js";
+import { evaluateTurn } from "../../src/evaluation/evaluator.js";
+import { normalizeTurnTrace } from "../../src/evaluation/trace-migration.js";
 
 describe("Minimal Evaluator", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {

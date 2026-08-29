@@ -20,7 +20,7 @@ export class FileMasterKeySource {
       throw new Error("主密钥必须是普通文件，不能是目录或符号链接");
     }
     if (process.platform !== "win32" && (metadata.mode & 0o077) !== 0) {
-      throw new Error("主密钥文件权限必须是 0600，不能允许组或其他用户访问");
+      throw new Error("主密钥文件只能由运行 MK 的系统账号读取（0400 或 0600），不能允许组或其他用户访问");
     }
     const encoded = (await readFile(this.file, "utf8")).trim();
     if (!BASE64_KEY_PATTERN.test(encoded)) throw new Error("主密钥必须是 32 字节 base64");

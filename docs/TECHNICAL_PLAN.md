@@ -16,9 +16,9 @@ User → React Chat → ACP Client ⇄ Remote ACP Agent
                                        │       ├→ MCP Host
                                        │       └→ Agent Skills
                                        ├→ Session Repository
-                                       └→ Observation Port → Evaluation Exporter
+                                       └→ Observation Port → Evaluation 模块后台队列
 
-Evaluation Web ⇄ Evaluation Service ⇄ Turn Trace Repository
+Web /evaluation/* ⇄ Remote /api/evaluation/v1 ⇄ Turn Trace Repository
 ```
 
 V1.6 仍是单用户、单 Agent、本地模型实验作品。Browser 与 Remote 只使用 ACP；MCP 是 Remote 到外部能力的协议，不替代 ACP，也不增加 Java/RCS、SSE、EventBus 或第二套 Runtime Event 协议。
@@ -37,8 +37,8 @@ V1.6 仍是单用户、单 Agent、本地模型实验作品。Browser 与 Remote
 | Resilience | 有限重试、指数退避、jitter、外部依赖熔断 |
 | Web Chat Projection | ACP Update 归约为历史/流式 ChatEntry，按 ID 原位更新 |
 | Runtime Observation Port | 只读发布本轮执行事实，不依赖 HTTP、存储或评测规则 |
-| Evaluation Service | 独立进程接收终态 Trace、计算最小客观指标并持久化 |
-| Evaluation Web | 独立页面按 Session/Turn 查询并展示执行树与评分结果 |
+| Evaluation 模块 | 进程内异步接收终态 Trace、计算最小客观指标并持久化；失败不改变 Agent Turn |
+| Evaluation 页面 | Web 内的 `/evaluation/*` 页面，按 Session/Turn 查询并展示执行树与评分结果 |
 | MCP Host | 管理 stdio/Streamable HTTP Client、鉴权引用、发现、调用和 Resource |
 | Agent Skills | 安装校验、作用域发现、渐进激活与资源读取 |
 
@@ -62,7 +62,7 @@ UI 投影层
 
 ## 4. Runtime 循环与去重
 
-Runtime 不使用模型请求轮数、Tool 次数或运行时长等笼统预算截断正常工作。用户取消通过 AbortSignal 立即停止；模型不再提出 Tool 时，以模型 finish reason 完成。当前只保留既有的小模型无效参数重复调用守卫，不再设置单 Turn 的模型请求轮次上限。
+Runtime 不使用模型请求轮数、Tool 次数或运行时长等笼统预算截断正常工作。用户取消通过 AbortSignal 立即停止；模型不再提出 Tool 时，以模型 finish reason 完成。Schema 参数错误以结构化结果返回模型，Runtime 不按模型大小增加专属终止策略。
 
 ToolCallLedger 使用 `toolName + canonicalJson(arguments)` 作为精确 `dedupeKey`：首次调用执行；后续相同调用不重复产生副作用，而是把先前状态和输出结构化返回给模型。网络瞬时重试只发生在同一次 Tool/Provider 调用内部。
 
@@ -82,9 +82,9 @@ Plan 能力完全不做：没有 `update_plan`、PlanState、PlanStore、ACP Pla
 
 ## 6. Turn Evaluation 与 Context Experiment
 
-AgentRunner 在关键执行边界向只读 Observation Port 发布事件。Exporter 按 `runId` 聚合终态 Trace，并异步通过 HTTP 发送给 Evaluation Service。Chat Web 只在 Turn 完成后生成带 `sessionId + turnId` 的导航链接，不读取评测数据。
+AgentRunner 在关键执行边界向只读 Observation Port 发布事件。Evaluation 模块按 `runId` 聚合终态 Trace，通过有界后台队列计算并保存评测；队列或存储失败只记录警告，不改变 Agent Turn。Web 在 Turn 完成后生成带 `sessionId + turnId` 的导航链接，再通过同源只读接口查询评测数据。
 
-Evaluation Service 计算客观 Runtime metrics：完成状态、Model Round、Tool 调用与成败、重复调用、上下文与输出 Token、上下文截断、首 Token 延迟、总耗时、错误及权限违规。
+Evaluation 模块计算客观 Runtime metrics：完成状态、Model Round、Tool 调用与成败、重复调用、上下文与输出 Token、上下文截断、首 Token 延迟、总耗时、错误及权限违规。
 
 D2P-1 用这些事实确定性计算“执行”分，并由人工分别标注理解、规划和输出。每次实验全部 lane 完成后，Remote 调用当前 ModelStudent 生成一次 `annotation_worksheet_v1`：合并需求项、从每条回答及 Tool 过程提取 Workflow、把每条结果切成稳定分段。该调用关闭 Provider 推理模式，只做结构化整理，不返回 verdict、分数、排名或 winner；服务器会校验分段覆盖和原文 hash。四维等权形成总分、雷达图、排名和 winner；任一人工维度未完成时 scorecard 保持 draft。不得引入 Dataset Judge 或让模型替用户评分。
 
@@ -117,7 +117,7 @@ D2P-1 用这些事实确定性计算“执行”分，并由人工分别标注�
 2. Agent 与固定绑定 Session、每 Turn 动态能力解析；
 3. Skill/MCP/FileReference 产品域；
 4. Context Experiment、人工量表和 Runtime execution score；
-5. 正式 Web/Evaluation Web 路由、跨应用 E2E 和逐路由切换。
+5. 单 Web 的 Evaluation 路由、同源接口和端到端验证。
 
 OpenAI 官方、自定义 Responses 与硅基流动 Chat Completions 已接入统一 ProviderPreset/ProtocolAdapter 入园闭环；Ollama 管理入园、Anthropic Messages 和模型目录发现仍留白。小说真实创作、Bearer Token 小说 MCP 和自动评分继续留白，首页只保留不可点击的小说调研卡片。
 

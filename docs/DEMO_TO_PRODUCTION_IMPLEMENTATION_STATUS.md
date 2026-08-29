@@ -14,7 +14,7 @@ Demo 中除明确调研留白外的主功能已经接入真实 Remote、ACP Runt
 
 这里的“人工标注”分为模型出题和人工判断两步，模型不会替人打分。
 
-1. A/B/C lane 全部结束后，evaluation-web 请求 `POST /experiments/{experimentId}/annotation-worksheet`。
+1. A/B/C lane 全部结束后，同一 Web 的 Evaluation 页面请求 `POST /experiments/{experimentId}/annotation-worksheet`。
 2. Remote 从持久化 Experiment 读取原始问题、各 lane 最终回答和 Runtime Tool 事件，并由服务器先把每条原回答拆成带稳定编号的文本单元。
 3. Remote 每个新 Experiment 都调用该实验绑定的 ModelStudent 一次，要求它返回严格 JSON：
    - `requirements`：分析原始任务并合并重复需求，生成公共人工判断项；
@@ -39,16 +39,16 @@ Demo 中除明确调研留白外的主功能已经接入真实 Remote、ACP Runt
 | FileReference | `write_file` 产物复制为 Session 范围的不可变文件引用；聊天用 opaque ID 打开安全预览，拒绝路径、符号链接和跨 Session 越权。 |
 | Context Lab | fresh/history 两种实验；服务端生成真实 Provider 输入预览；history A 复用原 Turn 且不重跑，B/C 通过隐藏 ACP Session 使用正式 Runtime。 |
 | Evaluation | 真实回答、运行事实、模型生成标注工作表、三维人工判断、Runtime 执行分、四维总分/雷达/排名/winner 全部可持久恢复。 |
-| 产品页面 | 首页、固定身份 Session、Agent 编辑、“我的”资源中心、MCP 管理、Context Lab 与独立 evaluation-web 生产路由。 |
+| 产品页面 | 首页、固定身份 Session、Agent 编辑、“我的”资源中心、MCP 管理、Context Lab 与单 Web 的 `/evaluation/*` 路由。 |
 | 安全与恢复 | loopback/Origin 限制、统一 Problem Detail/requestId、版本化 JSON Store、原子落盘与重启恢复、实验运行失败/取消终态。 |
 
 ## 4. 验证结果
 
 ### 4.1 自动化
 
-- `pnpm -r typecheck`：8 个工作区项目全部通过。
-- `pnpm -r test`：37 个测试文件、116 个测试全部通过。
-- `pnpm -r build`：Contracts、Runtime、Remote、Web、Evaluation Service、Evaluation Web 等全部构建成功。
+- `pnpm -r typecheck`：5 个可执行工作区项目全部通过。
+- `pnpm -r test`：115 个测试文件、503 个测试全部通过。
+- `pnpm -r build`：共享 Contracts、Remote Node bundle 与单 Web 静态产物全部构建成功；Evaluation 随 Remote 构建。
 - 覆盖重点包括 ACP load/resume/Prompt、Tool 顺序、Session 绑定、Agent 能力解析、Skill/MCP 生命周期、FileReference 越权、Experiment fresh/history、模型工作表与四维 Scorecard。
 
 ### 4.2 真实浏览器和真实本地模型
@@ -58,7 +58,7 @@ Demo 中除明确调研留白外的主功能已经接入真实 Remote、ACP Runt
 - 从历史回答打开 Context Lab，页面正确固定原问题、模型和 A 的原始快照，A 明确标记“不重跑”。
 - fresh 实验的 A/B 均通过真实隔离 ACP Session 调用 `qwen3:8b` 完成。
 - lane 完成后由 `qwen3:8b` 生成并持久化需求项、逐 lane Workflow 和逐 lane 结果分段；人工完成三维判断后得到 A=100、B=98，排名与 winner 由服务端计算。
-- 刷新 evaluation-web 后，原始回答、工作表、人工标注、四维雷达图、总分、排名和 winner 均从服务端恢复。
+- 刷新 Evaluation 页面后，原始回答、工作表、人工标注、四维雷达图、总分、排名和 winner 均从服务端恢复。
 - 真实聊天调用 `write_file` 时展示权限确认；允许后生成 `mk-file://` opaque 引用，并在产品内打开 Markdown 安全预览。产物分栏从约 486px 拖到 646px、再拖到 300px 下限，边界稳定且松手后清理拖动态。
 - 修正自定义 ACP 通知 parser 后，新标签页加载已有会话无页面运行错误。
 

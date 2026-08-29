@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ContextPreviewResponseV2, ExperimentDraftV2 } from "@kindergarten/contracts";
 import { AgentRepository } from "../../src/agent/agent-repository.js";
 import { AgentService } from "../../src/agent/agent-service.js";
-import type { EvaluationRecordReader } from "../../src/experiments/evaluation-record-client.js";
+import type { EvaluationAccess } from "../../src/evaluation/evaluation-module.js";
 import { ExperimentRepository } from "../../src/experiments/experiment-repository.js";
 import { ExperimentService } from "../../src/experiments/experiment-service.js";
 import type { ContextPreviewService } from "../../src/experiments/context-preview-service.js";
@@ -130,13 +130,14 @@ async function setup(options: { dir?: string; ignoreHistory?: boolean } = {}) {
   });
   const source = await agents.create(agentInput("source"));
   const sessions = new SessionRepository(dir);
-  const evaluation: EvaluationRecordReader = { get: /** 构造「get」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+  const evaluation: EvaluationAccess = { get: /** 构造「get」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => ({ result: {
     normallyCompleted: true, firstTokenLatencyMs: 20, totalDurationMs: 100,
     toolSuccessCount: 0, toolFailureCount: 0, errorCount: 0,
     permissionViolationCount: 0, hasRepeatedToolCall: false,
     modelRoundCount: 1, toolCallCount: 0, totalContextTokens: 10, totalOutputTokens: 3,
-  } }) };
+    truncatedContextItemCount: 0,
+  } }), flush: async () => undefined, takeTrace: () => undefined };
   const fixture = new FixtureProvider();
   const previews = { previewTest: /** 构造「previewTest」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async (_prompt: string, test: ExperimentDraftV2["tests"][number]) =>
@@ -144,7 +145,7 @@ async (_prompt: string, test: ExperimentDraftV2["tests"][number]) =>
   const service = new ExperimentService(
     new ExperimentRepository(join(dir, "experiments.json"), join(dir, "scorecards.json")),
     agents, sessions, new ModelStudentCatalog(fixture, "ready"), evaluation,
-    undefined, undefined, previews,
+    undefined, previews,
   );
   return { service, agents, sessions, source };
 }

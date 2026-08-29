@@ -5,6 +5,7 @@ import type { SkillLockStore } from "./skill-lock-store.js";
 import type { SkillInstallRecord, SkillInstallRequest } from "./skill-types.js";
 import { assertSafeSkillName, validateSkillDirectory } from "./skill-validator.js";
 import { stageSkillResourceBundle } from "./skill-resource-bundle.js";
+import { DEFAULT_SKILL_RESOURCE_FETCH_BASE, skillResourceFetchUrl } from "./skill-source-url.js";
 
 /** 安装器在隔离目录完成校验后再原子发布；不会执行 Skill 自带脚本。 */
 export class SkillInstaller {
@@ -13,6 +14,7 @@ constructor(
     private readonly installRoot: string,
     private readonly lock: SkillLockStore,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly resourceFetchBase = DEFAULT_SKILL_RESOURCE_FETCH_BASE,
   ) {}
 
   /** 执行「install」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -125,7 +127,7 @@ private async stageGit(
 
   /** 执行「stageResource」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 private async stageResource(url: string, quarantine: string) {
-    const staged = await stageSkillResourceBundle(url, quarantine, this.fetchImpl);
+    const staged = await stageSkillResourceBundle(skillResourceFetchUrl(url, this.resourceFetchBase), quarantine, this.fetchImpl);
     return {
       path: staged.path,
       source: { kind: "resource" as const, url, contentHash: staged.contentHash },
