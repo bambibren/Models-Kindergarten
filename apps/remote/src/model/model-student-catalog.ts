@@ -36,15 +36,13 @@ interface CatalogItem {
 /** 当前进程所有可选择模型的运行目录；内置与用户入园模型走同一解析路径。 */
 export class ModelStudentCatalog {
   private readonly items = new Map<string, CatalogItem>();
-  private readonly defaultId: string;
 
-  /** 初始化「ModelStudentCatalog」所需依赖，不在构造阶段启动不可回收的后台任务。 */
+  /** 测试可显式传入单个 Provider；生产启动使用空构造，不存在隐式默认模型。 */
 constructor(
-    provider: ModelProvider,
+    provider?: ModelProvider,
     initialStatus: ModelStudentSummary["status"] = "unknown",
   ) {
-    this.defaultId = provider.student.id;
-    this.register(provider, { initialStatus, deletable: false });
+    if (provider) this.register(provider, { initialStatus, deletable: true });
   }
 
   /** 执行「register」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -115,8 +113,21 @@ register(provider: ModelProvider, options: ModelStudentRegistration = {}): Model
     return this.summary(item);
   }
 
+  /** 归档模型只保留安全元数据，不实例化或持有任何 Provider。 */
+registerUnavailable(
+    student: ModelStudent,
+    statusMessage: string,
+    options: Omit<ModelStudentRegistration, "initialStatus" | "statusMessage"> = {},
+  ): ModelStudentSummary {
+    const summary = this.registerCapacityBlocked(student, options);
+    const item = this.requireItem(student.id);
+    item.status = "unavailable";
+    item.statusMessage = statusMessage;
+    return { ...summary, status: "unavailable", statusMessage };
+  }
+
   /** 执行「verify」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async verify(id = this.defaultId): Promise<ModelStudentSummary> {
+async verify(id: string): Promise<ModelStudentSummary> {
     const item = this.requireItem(id);
     if (!item.provider) return this.summary(item);
     try {
@@ -170,11 +181,6 @@ requireProvider(id: string): ModelProvider {
     return item.provider;
   }
 
-  /** 执行「defaultProvider」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-defaultProvider(): ModelProvider {
-    return this.requireProvider(this.defaultId);
-  }
-
   /** 判断「isReady」对应条件，只返回判定结果且不修改输入状态。 */
 isReady(id: string): boolean {
     return this.items.get(id)?.status === "ready";
@@ -200,6 +206,18 @@ unregister(id: string): ModelProvider | undefined {
     if (!item.deletable) throw new Error("系统内置 ModelStudent 不可删除");
     this.items.delete(id);
     return item.provider;
+  }
+
+  /** 停用模型时保留可展示元数据，但释放 Provider 并禁止新 Turn 使用。 */
+deactivate(id: string, statusMessage: string): ModelProvider | undefined {
+    const item = this.requireItem(id);
+    const provider = item.provider;
+    delete item.provider;
+    item.status = "unavailable";
+    item.statusMessage = statusMessage;
+    item.lastCheckedAt = new Date().toISOString();
+    item.deletable = true;
+    return provider;
   }
 
   /** 校验并取得「requireItem」所需对象；缺失或归属不符时立即抛出明确错误。 */

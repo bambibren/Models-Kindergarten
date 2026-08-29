@@ -8,6 +8,7 @@ coverage/
 
 # 本地运行产生的会话、沙箱和持久化数据
 .data/
+.local/secrets/
 *.db
 *.db-*
 *.sqlite

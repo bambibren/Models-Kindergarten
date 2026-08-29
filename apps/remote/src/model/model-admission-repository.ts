@@ -3,6 +3,7 @@ import {
   readProviderCapabilitySnapshot,
   type ConcreteReasoningProfile,
   type ProviderCapabilitySnapshot,
+  type ProviderProtocol,
   type ReadyModelProviderPresetId,
   type ModelStudentTestRecord,
   type ProviderConnectionView,
@@ -17,10 +18,10 @@ export interface ProviderConnectionRecord {
   connectionId: string;
   ownerId: string;
   presetId: ReadyModelProviderPresetId;
-  protocol: "openai_responses" | "openai_chat_completions";
+  protocol: Exclude<ProviderProtocol, "anthropic_messages">;
   baseUrl: string;
-  credentialRef: SecretRef;
-  credentialHint: string;
+  credentialRef?: SecretRef;
+  credentialHint?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -34,10 +35,10 @@ export interface ManagedModelStudentRecord {
   connectionId: string;
   displayName: string;
   model: string;
-  sizeClass: "large";
+  sizeClass: "small" | "large";
   contextWindowTokens?: number;
   /** 旧记录缺省视为 active；新事务必须显式写入。 */
-  lifecycle?: "installing" | "active" | "capacity_blocked" | "rollback_pending" | "deleting";
+  lifecycle?: "installing" | "active" | "archived" | "capacity_blocked" | "rollback_pending" | "deleting";
   installationTestId?: string;
   generationDefaults: {
     reasoningProfile: ConcreteReasoningProfile;
@@ -85,6 +86,13 @@ async putTest(value: ModelStudentTestRecord): Promise<void> {
     await this.catalog.update(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (records) => records.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => {
+      if (item.recordKind === "provider_connection" && item.credentialRef?.provider === "keychain") {
+        return {
+          ...item,
+          credentialRef: { provider: "managed" as const, key: item.credentialRef.key },
+          updatedAt: new Date().toISOString(),
+        };
+      }
       if (item.recordKind !== "model_student") return item;
       const legacy = item as ManagedModelStudentRecord & {
         generationDefaults?: ManagedModelStudentRecord["generationDefaults"];
@@ -309,8 +317,8 @@ connectionView(value: ProviderConnectionRecord): ProviderConnectionView {
       protocol: value.protocol,
       presetId: value.presetId,
       baseUrl: value.baseUrl,
-      credentialConfigured: true,
-      credentialHint: value.credentialHint,
+      credentialConfigured: value.credentialRef !== undefined,
+      ...(value.credentialHint ? { credentialHint: value.credentialHint } : {}),
       createdAt: value.createdAt,
       updatedAt: value.updatedAt,
     };
@@ -348,12 +356,14 @@ function isCatalogRecord(value: unknown): value is AdmissionCatalogRecord {
       (value.presetId === undefined
         ? value.protocol === "openai_responses"
         : isReadyPresetProtocol(value.presetId, value.protocol)) &&
-      typeof value.baseUrl === "string" && typeof value.credentialHint === "string" && isSecretRef(value.credentialRef);
+      typeof value.baseUrl === "string" &&
+      (value.credentialHint === undefined || typeof value.credentialHint === "string") &&
+      (value.credentialRef === undefined || isSecretRef(value.credentialRef));
   }
   if (value.recordKind !== "model_student") return false;
-  if (typeof value.modelStudentId !== "string" || typeof value.connectionId !== "string" || typeof value.displayName !== "string" || typeof value.model !== "string" || value.sizeClass !== "large") return false;
+  if (typeof value.modelStudentId !== "string" || typeof value.connectionId !== "string" || typeof value.displayName !== "string" || typeof value.model !== "string" || (value.sizeClass !== "small" && value.sizeClass !== "large")) return false;
   if (value.contextWindowTokens !== undefined && (!Number.isSafeInteger(value.contextWindowTokens) || Number(value.contextWindowTokens) <= 0)) return false;
-  if (value.lifecycle !== undefined && !["installing", "active", "capacity_blocked", "rollback_pending", "deleting"].includes(String(value.lifecycle))) return false;
+  if (value.lifecycle !== undefined && !["installing", "active", "archived", "capacity_blocked", "rollback_pending", "deleting"].includes(String(value.lifecycle))) return false;
   if (value.installationTestId !== undefined && typeof value.installationTestId !== "string") return false;
   try {
     const snapshot = readProviderCapabilitySnapshot(value.snapshot);
@@ -400,17 +410,18 @@ function normalizeStudentRecord(value: ManagedModelStudentRecord): ManagedModelS
 
 /** 判断「isReadyProtocol」对应条件，只返回判定结果且不修改输入状态。 */
 function isReadyProtocol(value: unknown): value is ProviderConnectionRecord["protocol"] {
-  return value === "openai_responses" || value === "openai_chat_completions";
+  return value === "ollama_native" || value === "openai_responses" || value === "openai_chat_completions";
 }
 
 /** 判断「isReadyPreset」对应条件，只返回判定结果且不修改输入状态。 */
 function isReadyPreset(value: unknown): value is ReadyModelProviderPresetId {
-  return value === "openai" || value === "custom_responses" || value === "siliconflow";
+  return value === "ollama" || value === "openai" || value === "custom_responses" || value === "siliconflow";
 }
 
 /** 判断「isReadyPresetProtocol」对应条件，只返回判定结果且不修改输入状态。 */
 function isReadyPresetProtocol(value: unknown, protocol: unknown): value is ReadyModelProviderPresetId {
   if (!isReadyPreset(value) || !isReadyProtocol(protocol)) return false;
+  if (value === "ollama") return protocol === "ollama_native";
   return value === "siliconflow"
     ? protocol === "openai_chat_completions"
     : protocol === "openai_responses";
@@ -418,7 +429,7 @@ function isReadyPresetProtocol(value: unknown, protocol: unknown): value is Read
 
 /** 判断「isSecretRef」对应条件，只返回判定结果且不修改输入状态。 */
 function isSecretRef(value: unknown): value is SecretRef {
-  return record(value) && (value.provider === "env" || value.provider === "keychain") && typeof value.key === "string";
+  return record(value) && (value.provider === "env" || value.provider === "managed" || value.provider === "keychain") && typeof value.key === "string";
 }
 
 /** 更新「record」对应状态，并保持写入顺序、原子性与容量约束。 */

@@ -180,26 +180,32 @@ async () => {
     expect(afterInstallCatalog.requireProvider(installed.modelStudentId).student.name).toBe("大聪明");
   });
 
-  it("保护内置模型，并阻止删除仍被 Session 引用的用户模型", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+  it("不存在内置模型；被 Session 引用的模型归档，未引用模型才硬删除", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     let inUseId: string | undefined;
     const setup = await environment({ modelInUse: /** 构造「modelInUse」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (id) => id === inUseId });
-    await expect(setup.service.remove("fixture-student")).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(setup.service.remove("fixture-student")).rejects.toMatchObject({ code: "NOT_FOUND" });
 
     const tested = await setup.service.test(candidate());
     const installed = await setup.service.install({ testId: tested.testId });
     inUseId = installed.modelStudentId;
-    await expect(setup.service.remove(installed.modelStudentId)).rejects.toMatchObject({ code: "MODEL_IN_USE" });
-    inUseId = undefined;
-    setup.secrets.failDelete = true;
-    await expect(setup.service.remove(installed.modelStudentId)).rejects.toMatchObject({ code: "MODEL_CONNECTION_FAILED" });
-    expect(setup.catalog.get(installed.modelStudentId)).toBeDefined();
-    expect(await setup.repository.getStudent(installed.modelStudentId)).toBeDefined();
-    setup.secrets.failDelete = false;
     await expect(setup.service.remove(installed.modelStudentId)).resolves.toEqual({ modelStudentId: installed.modelStudentId });
-    expect(setup.catalog.get(installed.modelStudentId)).toBeUndefined();
+    expect(setup.catalog.get(installed.modelStudentId)).toMatchObject({ status: "unavailable" });
+    expect(await setup.repository.getStudent(installed.modelStudentId)).toMatchObject({ lifecycle: "archived" });
     expect(setup.secrets.values.size).toBe(0);
+
+    const removable = await environment();
+    const removableTest = await removable.service.test(candidate());
+    const removableStudent = await removable.service.install({ testId: removableTest.testId });
+    removable.secrets.failDelete = true;
+    await expect(removable.service.remove(removableStudent.modelStudentId)).rejects.toMatchObject({ code: "MODEL_CONNECTION_FAILED" });
+    expect(removable.catalog.get(removableStudent.modelStudentId)).toBeDefined();
+    expect(await removable.repository.getStudent(removableStudent.modelStudentId)).toBeDefined();
+    removable.secrets.failDelete = false;
+    await expect(removable.service.remove(removableStudent.modelStudentId)).resolves.toEqual({ modelStudentId: removableStudent.modelStudentId });
+    expect(removable.catalog.get(removableStudent.modelStudentId)).toBeUndefined();
+    expect(removable.secrets.values.size).toBe(0);
   });
 
   it.each(["x", "xy", "xyz", "wxyz"])("1-4 字符 Key 的 credentialHint 不包含任何原文: %s", /** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
@@ -471,7 +477,7 @@ function serviceFor(
     generationDefaults: { reasoningProfile: student.generationDefaults.reasoningProfile },
   }, {
     readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => secrets.read(connection.credentialRef),
+() => secrets.read(connection.credentialRef!),
     reasoning: {
       capability: student.snapshot.reasoning.capability,
       efforts: responseEfforts(student.snapshot),
@@ -485,7 +491,10 @@ function serviceFor(
       adapterRevision: "openai-responses-v1",
       probeVersion: 1,
       probe: /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(candidate: ResolvedModelStudentCandidate) => prober.probe(candidate),
+(candidate: ResolvedModelStudentCandidate) => {
+        if (!candidate.apiKey) throw new Error("测试 Responses 候选缺少 API Key");
+        return prober.probe({ ...candidate, apiKey: candidate.apiKey });
+      },
       createProvider: createResponses,
     },
     {

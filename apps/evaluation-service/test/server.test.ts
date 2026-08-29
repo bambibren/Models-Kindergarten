@@ -21,12 +21,16 @@ describe("Evaluation API", /** 组织这一组相关测试，统一建立场景�
 async () => {
     const dir = await mkdtemp(join(tmpdir(), "kindergarten-eval-"));
     dirs.push(dir);
-    const server = new EvaluationServer(new EvaluationRepository(dir));
+    const repository = new EvaluationRepository(dir);
+    await repository.initialize();
+    const server = new EvaluationServer(repository);
     await server.listen("127.0.0.1", 0);
     const address = server.http.address();
     if (!address || typeof address === "string") throw new Error("测试端口不可用");
     const base = `http://127.0.0.1:${address.port}`;
     try {
+      expect((await fetch(`${base}/health/live`)).status).toBe(200);
+      expect((await fetch(`${base}/health/ready`)).status).toBe(200);
       const response = await fetch(`${base}/api/v1/turn-evaluations`, {
         method: "POST",
         headers: { "content-type": "application/json" },

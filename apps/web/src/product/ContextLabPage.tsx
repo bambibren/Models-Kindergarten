@@ -290,4 +290,4 @@ function previewLane(promptText: string, lane: ContextLabLane) {
 /** 把未知异常转换为「errorMessage」文本，避免错误序列化过程再次抛出。 */
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 /** 执行「evaluationExperimentUrl」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function evaluationExperimentUrl(id: string): string { return new URL(`/evaluation/experiments/${encodeURIComponent(id)}`, import.meta.env.VITE_EVALUATION_WEB_URL ?? "http://127.0.0.1:5175").toString(); }
+function evaluationExperimentUrl(id: string): string { return `/evaluation/experiments/${encodeURIComponent(id)}`; }

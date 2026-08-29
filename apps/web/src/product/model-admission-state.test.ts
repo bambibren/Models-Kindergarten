@@ -35,6 +35,18 @@ const openaiPreset: ModelProviderPresetView = {
   modelEntry: "discoverable",
 };
 
+const ollamaPreset: ModelProviderPresetView = {
+  schemaVersion: 1,
+  presetId: "ollama",
+  displayName: "本机 Ollama",
+  description: "本机 Native API",
+  protocol: "ollama_native",
+  availability: "ready",
+  baseUrl: { mode: "editable", defaultValue: "http://127.0.0.1:11434" },
+  auth: { scheme: "none", apiKeyLabel: "不需要 API Key" },
+  modelEntry: "manual",
+};
+
 const customPreset: ModelProviderPresetView = {
   schemaVersion: 1,
   presetId: "custom_responses",
@@ -113,6 +125,26 @@ const successfulTest: ModelStudentTestRecord = {
 
 describe("production model admission state", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {
+  it("本机 Ollama 不要求 API Key 且只接受回环地址", () => {
+    const draft = {
+      presetId: "ollama" as const,
+      displayName: "本机千问",
+      baseUrl: "http://127.0.0.1:11434",
+      model: "qwen3:8b",
+      apiKey: "",
+      contextWindowTokens: "",
+    };
+    expect(validateModelAdmissionDraft(draft, ollamaPreset)).toEqual({ valid: true, errors: {} });
+    expect(buildModelStudentCandidate(draft, ollamaPreset)).toEqual({
+      presetId: "ollama",
+      displayName: "本机千问",
+      baseUrl: "http://127.0.0.1:11434",
+      model: "qwen3:8b",
+    });
+    expect(validateModelAdmissionDraft({ ...draft, baseUrl: "http://192.168.1.10:11434" }, ollamaPreset).errors.baseUrl)
+      .toContain("回环");
+  });
+
   it("uses the ready presets returned by Remote instead of a Web-owned provider list", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     const initialized = initializeModelAdmissionPresets(createModelAdmissionState(), [siliconflowPreset, openaiPreset]);

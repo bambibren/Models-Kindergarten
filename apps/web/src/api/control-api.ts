@@ -28,8 +28,9 @@ import type {
   TurnTokenUsage,
 } from "@kindergarten/contracts";
 import type { ToolCallContent, ToolCallLocation, ToolCallStatus, ToolKind } from "@agentclientprotocol/sdk";
+import { CONTROL_API_URL } from "../deployment-endpoints.js";
 
-const CONTROL_URL = import.meta.env.VITE_CONTROL_API_URL ?? "http://127.0.0.1:7331/api/control/v1";
+const CONTROL_URL = CONTROL_API_URL;
 
 /** 描述「SessionSummary」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionSummary {

@@ -21,7 +21,7 @@ import type {
   McpServerConfig,
   McpToolCallResult,
 } from "../src/mcp/mcp-types.js";
-import { HostSecretStore } from "../src/mcp/secret-store.js";
+import { testSecretStore } from "./support/test-secret-store.js";
 import { SkillInstaller } from "../src/skills/skill-installer.js";
 import { SkillLockStore } from "../src/skills/skill-lock-store.js";
 import { SkillRegistry } from "../src/skills/skill-registry.js";
@@ -78,7 +78,7 @@ async () => {
     const connector = new FakeConnector();
     const manager = new McpClientManager(
       new McpConfigStore(configFile),
-      new HostSecretStore(),
+      testSecretStore(),
       connector,
     );
     await manager.initialize();
@@ -138,7 +138,7 @@ async () => {
     }), "utf8");
     const manager = new McpClientManager(
       new McpConfigStore(file),
-      new HostSecretStore(),
+      testSecretStore(),
       { connect: /** 构造「connect」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => { throw new Error("network unavailable"); } },
     );
@@ -162,7 +162,7 @@ async () => {
     }), "utf8");
     const manager = new McpClientManager(
       new McpConfigStore(file),
-      new HostSecretStore(),
+      testSecretStore(),
       {
         connect: /** 构造「connect」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async (server) => {

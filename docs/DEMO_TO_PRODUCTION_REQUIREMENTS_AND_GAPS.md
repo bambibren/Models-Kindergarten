@@ -124,7 +124,7 @@ evaluation-web 已有真实 Turn 详情：
 
 ## 5. 模型入园
 
-正式产品注册 `/models/new`，从首页和“我的 Models”进入。当前提供 OpenAI 官方、自定义公网 HTTPS Responses 接口和硅基流动三种接入方式：先按各自协议对目标模型做有界真实体检，再把 Key 写入 macOS Keychain，并原子保存 Connection + ModelStudent。能力来自逐项请求证据，不按模型名、域名或服务商品牌推断。当前三种方式均手填 Model ID；模型目录发现、Ollama 管理入园、Anthropic Messages、Key 轮换与编辑仍是后续范围。
+正式产品注册 `/models/new`，从首页和“我的 Models”进入。当前提供 OpenAI 官方、自定义公网 HTTPS Responses、硅基流动和本机 Ollama 四种接入方式：先按各自协议对目标模型做有界真实体检，再把线上 API Key 写入受管加密凭据库，并原子保存 Connection + ModelStudent；Ollama 不需要 Secret。能力来自逐项请求证据，不按模型名、域名或服务商品牌推断。模型目录发现、Anthropic Messages、Key 轮换与编辑仍是后续范围。
 
 ## 6. Session `/sessions/:sessionId`
 
@@ -318,7 +318,7 @@ evaluation-web 已有真实 Turn 详情：
 
 ### 10.1 新建流程
 
-本轮只允许页面新建 `authKind="none"`。既有环境变量/Keychain Bearer 配置可作为只读 `externally_managed_bearer` 兼容导入，但页面不能创建、修改或显示 credentialRef。新建流程为：
+本轮只允许页面新建 `authKind="none"`。既有环境变量/受管加密凭据 Bearer 配置可作为只读 `externally_managed_bearer` 兼容导入，但页面不能创建、修改或显示 credentialRef。新建流程为：
 
 1. 输入名称、HTTPS Streamable HTTP URL；开发模式允许 loopback HTTP。
 2. 点击“测试连接”创建 McpTest Job。
@@ -339,7 +339,7 @@ evaluation-web 已有真实 Turn 详情：
 | MCP-04 | 刷新发现 | 连接成功后可刷新 capability snapshot；Agent 悬空 binding 明确标红。 |
 | MCP-05 | 禁用/启用 | 禁用停止重连并使所有 Agent binding 运行时不可见；启用后重连。 |
 | MCP-06 | 卸载 | 显示受影响 Agent；确认后在一个 UnitOfWork 中移除绑定、断开连接、标记卸载。 |
-| MCP-07 | Bearer | UI、API 和 Secret 写入本轮均不实现。已有手工环境/Keychain 配置不在页面管理。 |
+| MCP-07 | Bearer | UI、API 和 Secret 写入本轮均不实现。已有手工环境/受管加密凭据配置不在页面管理。 |
 
 ### 10.3 Agent 绑定语义
 

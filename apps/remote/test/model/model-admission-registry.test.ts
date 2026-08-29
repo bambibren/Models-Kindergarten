@@ -60,14 +60,14 @@ async () => {
     expect(JSON.stringify(snapshot)).not.toContain(candidate.apiKey);
   });
 
-  it("启动时拒绝重复协议和缺失 ready 协议", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+  it("拒绝重复协议，并只发布当前进程已注册的协议", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     const responses = adapter("openai_responses");
     expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => new ModelAdmissionAdapterRegistry([responses, responses])).toThrow("重复注册");
     const onlyResponses = new ModelAdmissionAdapterRegistry([responses]);
-    expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => new ModelProviderPresetRegistry(onlyResponses)).toThrow("缺少协议适配器");
+    expect(new ModelProviderPresetRegistry(onlyResponses).views().map((item) => item.presetId))
+      .toEqual(["openai", "custom_responses"]);
   });
 });
 

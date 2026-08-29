@@ -5,6 +5,8 @@ import type { PermissionMode } from "../tools/tool-registry.js";
 /** 描述「SecretRef」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type SecretRef =
   | { provider: "env"; key: string }
+  | { provider: "managed"; key: string }
+  /** 旧持久化格式；读取和迁移兼容，新写入不得再使用。 */
   | { provider: "keychain"; key: string };
 
 /** 描述「McpStdioSandboxPolicy」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */

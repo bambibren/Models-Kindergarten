@@ -15,9 +15,10 @@ import type {
 } from "@kindergarten/contracts";
 import { experimentApi } from "../experiment-api.js";
 import { ExperimentAcpClient, type ElicitationIntervention, type ExperimentIntervention } from "../experiment-acp-client.js";
+import { acpWebSocketUrl } from "../../deployment-endpoints.js";
 import "./experiment-evaluation.css";
 
-const ACP_URL = import.meta.env.VITE_ACP_URL ?? "ws://127.0.0.1:7331/acp";
+const ACP_URL = acpWebSocketUrl();
 type Phase = "loading" | "ready" | "running" | "error";
 type Tab = "answers" | "understanding" | "planning" | "output" | "execution" | "summary";
 type AnnotationTab = "understanding" | "planning" | "output";

@@ -329,15 +329,15 @@ Provider 上游使用 SSE 不改变产品边界：Browser 与 Remote 之间仍�
 
 ## 9. Secret 与网络安全
 
-- 正式页面中，Key 只从密码输入框提交给 Remote；测试成功前仅在页面/Remote 瞬时内存中保留，确认入园后写入 macOS Keychain。
+- 正式页面中，Key 只从密码输入框提交给 Remote；测试成功前仅在页面/Remote 瞬时内存中保留，确认入园后写入 AES-256-GCM 加密凭据库。
 - Key 不得进入 ModelStudent JSON、Session、Context Summary、Token 统计、Evaluation Trace、URL、日志、`localStorage` 或 `sessionStorage`。
 - 持久层只保存 `credentialRef` 与脱敏尾号；保存后只能替换或删除，不能再次读取明文。
-- 本地部署优先使用 macOS Keychain；远程部署使用受控 Secret Store。
+- 本机源码、Docker 预演和云端使用同一个 `EncryptedFileSecretStore`；三者只通过部署档位切换主密钥文件路径。
 - 预设的硅基流动 Base URL 不允许普通用户修改。
 - 自定义云端 Base URL 必须是 HTTPS；Ollama 只对受控本机/私网连接类型允许 HTTP。
 - Provider 原始错误可能包含 Header、URL 参数或请求片段，返回 Web 前必须脱敏。
 - 生产 Adapter 默认禁止重定向；不能把可选重定向开关宣传为跨 Origin 安全能力。
-- 当前 macOS `security` 命令写入路径会让 Secret 短暂存在于子进程 argv；这是本机单用户 V1 的已知安全债，远程/多用户部署前必须改用 Security.framework 或等价原生 Secret bridge。
+- 主密钥不得进入 Git、容器镜像或业务数据卷；它与 `DATA_DIR/secure/credentials.enc` 必须分开保存。历史 Keychain 项只允许读取迁移，正式链路不再写入。
 
 ## 10. 错误投影
 

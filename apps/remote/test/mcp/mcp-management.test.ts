@@ -10,7 +10,7 @@ import { McpConfigStore } from "../../src/mcp/mcp-config-store.js";
 import { McpManagementRepository } from "../../src/mcp/mcp-management-repository.js";
 import { McpManagementService } from "../../src/mcp/mcp-management-service.js";
 import type { McpConnectedClient, McpConnector, McpServerConfig } from "../../src/mcp/mcp-types.js";
-import { HostSecretStore } from "../../src/mcp/secret-store.js";
+import { testSecretStore } from "../support/test-secret-store.js";
 
 const dirs: string[] = [];
 afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
@@ -110,7 +110,7 @@ async function setup(withBuiltin = false) {
     agentCapabilities: { mcpTools: [], skills: [], resources: [] },
   });
   const manager = new McpClientManager(
-    config, new HostSecretStore(), new FakeConnector(),
+    config, testSecretStore(), new FakeConnector(),
   );
   await manager.initialize();
   const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {

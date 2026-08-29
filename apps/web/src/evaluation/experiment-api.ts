@@ -7,8 +7,9 @@ import type {
   PlanningAnnotationFacts,
   UnderstandingAnnotationFacts,
 } from "@kindergarten/contracts";
+import { CONTROL_API_URL } from "../deployment-endpoints.js";
 
-const CONTROL_URL = import.meta.env.VITE_CONTROL_API_URL ?? "http://127.0.0.1:7331/api/control/v1";
+const CONTROL_URL = CONTROL_API_URL;
 
 export const experimentApi = {
   get: /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */

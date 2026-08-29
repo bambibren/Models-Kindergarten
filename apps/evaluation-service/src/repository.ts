@@ -34,9 +34,20 @@ interface LegacyEvaluationFile {
 export class EvaluationRepository {
   private writeQueue: Promise<void> = Promise.resolve();
   private migration?: Promise<void>;
+  private initialized = false;
 
   /** 初始化「EvaluationRepository」所需依赖，不在构造阶段启动不可回收的后台任务。 */
 constructor(private readonly dir: string) {}
+
+  /** 启动监听前验证数据目录可创建，并完成可能存在的旧格式迁移。 */
+  async initialize(): Promise<void> {
+    await mkdir(this.dir, { recursive: true });
+    await this.ensureMigrated();
+    this.initialized = true;
+  }
+
+  /** 只报告启动初始化是否完成，不以是否已有评测记录作为就绪条件。 */
+  get ready(): boolean { return this.initialized; }
 
   /** 更新「put」对应状态，并保持写入顺序、原子性与容量约束。 */
 async put(record: TurnEvaluationRecord): Promise<void> {

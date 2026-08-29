@@ -8,6 +8,29 @@ import {
 
 describe("自定义 Responses 模型入园合同", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {
+  it("接受无 API Key 的本机 Ollama 入园配置", () => {
+    expect(parseModelStudentCandidateInput({
+      presetId: "ollama",
+      displayName: "本机千问",
+      baseUrl: "http://127.0.0.1:11434",
+      model: "qwen3:8b",
+    })).toEqual({
+      presetId: "ollama",
+      displayName: "本机千问",
+      baseUrl: "http://127.0.0.1:11434",
+      model: "qwen3:8b",
+    });
+  });
+
+  it("拒绝 Ollama 借可编辑地址访问局域网", () => {
+    expect(() => parseModelStudentCandidateInput({
+      presetId: "ollama",
+      displayName: "局域网模型",
+      baseUrl: "http://192.168.1.10:11434",
+      model: "qwen3:8b",
+    })).toThrow("只允许");
+  });
+
   it("规范化 HTTPS Base URL 并保留瞬时 API Key", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     expect(parseResponsesModelCandidateInput({

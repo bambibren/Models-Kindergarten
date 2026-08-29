@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env --watch --import tsx src/index.ts",
     "start": "node --env-file-if-exists=../../.env --import tsx src/index.ts",
+    "start:dist": "node --env-file-if-exists=../../.env dist/index.js",
     "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"

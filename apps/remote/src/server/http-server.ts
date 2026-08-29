@@ -6,11 +6,12 @@ import type { AgentApp } from "@agentclientprotocol/sdk";
 import { Readable } from "node:stream";
 import type { ControlApi } from "./control-api.js";
 import { PRODUCT_CONFIG } from "@kindergarten/contracts";
+import type { EvaluationApiProxy } from "./evaluation-api-proxy.js";
 
 const MAX_ACP_INCOMING_PAYLOAD_BYTES = 1024 * 1024;
 
 /**
- * Remote 的网络壳：HTTP 只提供健康检查，Agent 交互只走官方 ACP WebSocket。
+ * Remote 的网络壳：HTTP 提供健康检查、控制 API 和固定评测代理，Agent 交互走官方 ACP WebSocket。
  * 这个类也集中拥有三个网络资源，确保退出时不会残留连接。
  */
 export class RemoteServer {
@@ -19,10 +20,12 @@ export class RemoteServer {
   private readonly ws: WebSocketServer;
 
   /** 初始化「RemoteServer」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-constructor(
+  constructor(
     agent: AgentApp,
     private readonly modelInfo: Record<string, string> = {},
     private readonly controlApi?: ControlApi,
+    private readonly evaluationApiProxy?: EvaluationApiProxy,
+    private readonly readiness: Record<string, boolean> = { server: true },
   ) {
     this.acp = new AcpServer({ agent });
     this.ws = new WebSocketServer({
@@ -35,7 +38,7 @@ constructor(
     this.http = createServer(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 async (req, res) => {
       try {
-        if (req.method === "GET" && req.url === "/health") {
+        if (req.method === "GET" && (req.url === "/health" || req.url === "/health/live")) {
           res.writeHead(200, {
             "content-type": "application/json; charset=utf-8",
           });
@@ -46,7 +49,23 @@ async (req, res) => {
           }));
           return;
         }
+        if (req.method === "GET" && req.url === "/health/ready") {
+          const ready = Object.values(this.readiness).every(Boolean);
+          res.writeHead(ready ? 200 : 503, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({
+            ok: ready,
+            service: "kindergarten-remote",
+            checks: this.readiness,
+            modelStudent: this.modelInfo,
+          }));
+          return;
+        }
         const request = toRequest(req);
+        const proxied = await this.evaluationApiProxy?.fetch(request);
+        if (proxied) {
+          await sendResponse(res, proxied);
+          return;
+        }
         const response = await this.controlApi?.fetch(request);
         if (response) {
           await sendResponse(res, response);

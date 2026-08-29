@@ -8,12 +8,13 @@ import {
 
 /** 描述「ProviderProtocol」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ProviderProtocol =
+  | "ollama_native"
   | "openai_responses"
   | "openai_chat_completions"
   | "anthropic_messages";
 
 /** 描述「ReadyModelProviderPresetId」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
-export type ReadyModelProviderPresetId = "openai" | "custom_responses" | "siliconflow";
+export type ReadyModelProviderPresetId = "ollama" | "openai" | "custom_responses" | "siliconflow";
 /** 描述「ModelProviderPresetId」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ModelProviderPresetId = ReadyModelProviderPresetId | "anthropic";
 /** 描述「ModelStudentTestState」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -31,7 +32,7 @@ export interface ModelProviderPresetView {
     | { mode: "fixed"; value: string }
     | { mode: "editable"; defaultValue?: string };
   auth: {
-    scheme: "bearer" | "api_key_header";
+    scheme: "none" | "bearer" | "api_key_header";
     apiKeyLabel: string;
   };
   modelEntry: "manual" | "discoverable";
@@ -40,25 +41,27 @@ export interface ModelProviderPresetView {
 interface CandidateCommon {
   displayName: string;
   model: string;
-  apiKey: string;
 }
 
 /** 浏览器输入合同。固定预设刻意没有 baseUrl，避免客户端把流量改送到任意地址。 */
 export type ModelStudentCandidateInput =
-  | (CandidateCommon & { presetId: "openai" })
-  | (CandidateCommon & { presetId: "siliconflow" })
-  | (CandidateCommon & { presetId: "custom_responses"; baseUrl: string });
+  | (CandidateCommon & { presetId: "ollama"; baseUrl: string })
+  | (CandidateCommon & { presetId: "openai"; apiKey: string })
+  | (CandidateCommon & { presetId: "siliconflow"; apiKey: string })
+  | (CandidateCommon & { presetId: "custom_responses"; baseUrl: string; apiKey: string });
 
 /** Remote 解析预设后的瞬时配置；只存在于一次请求及有 TTL 的内存中。 */
 export interface ResolvedModelStudentCandidate extends CandidateCommon {
   presetId: ReadyModelProviderPresetId;
   protocol: Exclude<ProviderProtocol, "anthropic_messages">;
   baseUrl: string;
+  apiKey?: string;
 }
 
 /** 兼容既有 Responses Prober 的内部输入。新控制面应使用 ModelStudentCandidateInput。 */
 export interface ResponsesModelCandidateInput extends CandidateCommon {
   baseUrl: string;
+  apiKey: string;
 }
 
 /** 可持久化、可返回浏览器的候选摘要；严禁加入 Secret 引用或明文。 */
@@ -144,8 +147,8 @@ export interface ProviderConnectionView {
   presetId: ReadyModelProviderPresetId;
   protocol: Exclude<ProviderProtocol, "anthropic_messages">;
   baseUrl: string;
-  credentialConfigured: true;
-  credentialHint: string;
+  credentialConfigured: boolean;
+  credentialHint?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -158,15 +161,15 @@ export function parseModelStudentCandidateInput(value: unknown): ModelStudentCan
   const presetId = value.presetId === undefined && typeof value.baseUrl === "string"
     ? "custom_responses"
     : boundedString(value.presetId, "presetId", 1, 80);
-  if (presetId !== "openai" && presetId !== "custom_responses" && presetId !== "siliconflow") {
-    throw new Error("presetId 当前只支持 openai、custom_responses 或 siliconflow");
+  if (presetId !== "ollama" && presetId !== "openai" && presetId !== "custom_responses" && presetId !== "siliconflow") {
+    throw new Error("presetId 当前只支持 ollama、openai、custom_responses 或 siliconflow");
   }
 
   const allowed = new Set([
     "presetId",
     "displayName",
     "model",
-    "apiKey",
+    ...(presetId === "ollama" ? ["baseUrl"] : ["apiKey"]),
     ...(presetId === "custom_responses" ? ["baseUrl"] : []),
   ]);
   const unknown = Object.keys(value).find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
@@ -175,16 +178,24 @@ export function parseModelStudentCandidateInput(value: unknown): ModelStudentCan
   const common = {
     displayName: boundedString(value.displayName, "displayName", 1, 80),
     model: boundedString(value.model, "model", 1, 200),
-    apiKey: boundedString(value.apiKey, "apiKey", 1, 8_192, false),
   };
+  if (presetId === "ollama") {
+    return {
+      presetId,
+      ...common,
+      baseUrl: normalizeLocalOllamaBaseUrl(boundedString(value.baseUrl, "baseUrl", 1, 2_048)),
+    };
+  }
+  const apiKey = boundedString(value.apiKey, "apiKey", 1, 8_192, false);
   if (presetId === "custom_responses") {
     return {
       presetId,
       ...common,
+      apiKey,
       baseUrl: normalizeModelBaseUrl(boundedString(value.baseUrl, "baseUrl", 1, 2_048)),
     };
   }
-  return { presetId, ...common };
+  return { presetId, ...common, apiKey };
 }
 
 /** @deprecated 新代码使用 parseModelStudentCandidateInput。 */
@@ -233,6 +244,7 @@ export function readProviderCapabilitySnapshot(value: unknown): ProviderCapabili
     throw new Error("Provider capability snapshot 格式无效");
   }
   if (value.protocol === "openai_responses") return readResponsesCapabilityProbe(value);
+  if (value.protocol === "ollama_native") return readGenericCapabilitySnapshot(value, "ollama_native");
   if (value.protocol !== "openai_chat_completions") {
     throw new Error("Provider capability snapshot.protocol 格式无效");
   }
@@ -289,13 +301,32 @@ export function normalizeModelBaseUrl(value: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
+/** Ollama 只允许当前 Remote 所在设备的回环地址，不能借可编辑 URL 探测局域网。 */
+export function normalizeLocalOllamaBaseUrl(value: string): string {
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error("Ollama baseUrl 必须是有效 URL"); }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Ollama baseUrl 必须使用 HTTP 或 HTTPS");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("Ollama baseUrl 不能包含凭据、查询参数或片段");
+  }
+  const hostname = url.hostname.toLowerCase();
+  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "[::1]" && hostname !== "::1") {
+    throw new Error("Ollama baseUrl 只允许 localhost、127.0.0.1 或 ::1");
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.toString().replace(/\/$/, "");
+}
+
 /** @deprecated 新代码使用 normalizeModelBaseUrl。 */
 export const normalizeResponsesBaseUrl = normalizeModelBaseUrl;
 
 /** 读取「readGenericCapabilitySnapshot」所需数据，并遵守作用域、分页与容量边界。 */
 function readGenericCapabilitySnapshot(
   value: Record<string, unknown>,
-  protocol: "openai_chat_completions",
+  protocol: "ollama_native" | "openai_chat_completions",
 ): ProviderCapabilitySnapshot {
   const common = readCapabilityCommon(value, "Provider");
   if (!isRecord(value.reasoning)) throw new Error("Provider reasoning probe 格式无效");

@@ -1,4 +1,5 @@
 import {
+  normalizeLocalOllamaBaseUrl,
   normalizeModelBaseUrl,
   type ModelProviderPresetView,
   type ModelStudentCandidateInput,
@@ -12,6 +13,17 @@ interface PresetDefinition extends ModelProviderPresetView {
 }
 
 const PRESETS: readonly PresetDefinition[] = [
+  {
+    schemaVersion: 1,
+    presetId: "ollama",
+    displayName: "本机 Ollama",
+    description: "当前设备上运行的 Ollama Native API；仅用于本地开发",
+    protocol: "ollama_native",
+    availability: "ready",
+    baseUrl: { mode: "editable", defaultValue: "http://127.0.0.1:11434" },
+    auth: { scheme: "none", apiKeyLabel: "不需要 API Key" },
+    modelEntry: "manual",
+  },
   {
     schemaVersion: 1,
     presetId: "openai",
@@ -67,9 +79,8 @@ constructor(private readonly adapters: ModelAdmissionAdapterRegistry) {
     for (const preset of PRESETS) {
       if (preset.availability !== "ready") continue;
       const protocol = preset.protocol as ReadyProviderProtocol;
-      if (!this.adapters.has(protocol)) {
-        throw new Error(`ready 模型预设缺少协议适配器: ${preset.presetId} -> ${protocol}`);
-      }
+      // 测试或裁剪部署可以只注册部分协议；对外只发布当前进程真正能创建的 Provider。
+      if (!this.adapters.has(protocol)) continue;
       if (this.ready.has(preset.presetId as ReadyModelProviderPresetId)) {
         throw new Error(`模型预设重复注册: ${preset.presetId}`);
       }
@@ -89,7 +100,7 @@ resolve(input: ModelStudentCandidateInput): ResolvedModelStudentCandidate {
     if (!preset) throw new Error(`模型预设当前不可用: ${input.presetId}`);
     const baseUrl = preset.baseUrl.mode === "fixed"
       ? preset.baseUrl.value
-      : input.presetId === "custom_responses"
+      : input.presetId === "custom_responses" || input.presetId === "ollama"
         ? input.baseUrl
         : undefined;
     if (!baseUrl) throw new Error(`模型预设缺少 Base URL: ${input.presetId}`);
@@ -97,9 +108,11 @@ resolve(input: ModelStudentCandidateInput): ResolvedModelStudentCandidate {
       presetId: input.presetId,
       protocol: preset.protocol as ReadyProviderProtocol,
       displayName: input.displayName,
-      baseUrl: normalizeModelBaseUrl(baseUrl),
+      baseUrl: input.presetId === "ollama"
+        ? normalizeLocalOllamaBaseUrl(baseUrl)
+        : normalizeModelBaseUrl(baseUrl),
       model: input.model,
-      apiKey: input.apiKey,
+      ...("apiKey" in input ? { apiKey: input.apiKey } : {}),
     };
   }
 }

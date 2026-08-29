@@ -8,7 +8,7 @@ import { RuntimeCapabilityResolver } from "../../src/capability/runtime-capabili
 import { McpClientManager } from "../../src/mcp/mcp-client-manager.js";
 import { McpConfigStore } from "../../src/mcp/mcp-config-store.js";
 import type { McpConnector } from "../../src/mcp/mcp-types.js";
-import { HostSecretStore } from "../../src/mcp/secret-store.js";
+import { testSecretStore } from "../support/test-secret-store.js";
 import { FixtureProvider } from "../../src/model/fixture-provider.js";
 import { ModelStudentCatalog } from "../../src/model/model-student-catalog.js";
 import { SkillLockStore } from "../../src/skills/skill-lock-store.js";
@@ -125,7 +125,7 @@ async function setup() {
   const agent = await service.create(agentInput("初始提示词", false));
   const mcp = new McpClientManager(
     new McpConfigStore(join(dir, "mcp.json")),
-    new HostSecretStore(),
+    testSecretStore(),
     { connect: /** 构造「connect」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => { throw new Error("不会连接"); } } satisfies McpConnector,
   );

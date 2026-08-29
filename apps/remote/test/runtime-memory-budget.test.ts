@@ -66,7 +66,6 @@ async () => {
       new ContextAssembler(),
       noopRuntimeObservationSink,
       undefined,
-      undefined,
       budget,
       admission,
     );

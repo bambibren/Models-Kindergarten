@@ -25,6 +25,7 @@ import { loadTurnEvaluation } from "./api.js";
 import { buildRuntimeTree } from "./runtime-tree.js";
 import { AgentEvaluationDemoPage } from "./demo/agent-evaluation/AgentEvaluationDemoPage.js";
 import { ExperimentEvaluationPage } from "./experiment/ExperimentEvaluationPage.js";
+import "./styles.css";
 
 type PageRoute =
   | { kind: "turn"; sessionId: string; turnId: string }

@@ -14,7 +14,6 @@ import type {
 } from "../src/model/model-provider.js";
 import type { SessionEntry } from "../src/repository/session-types.js";
 import { AgentRunner, AgentRuntime, type RunObserver } from "../src/runtime/agent-runtime.js";
-import { createSmallModelRepeatedInvalidToolCallGuard } from "../src/runtime/repeated-invalid-tool-call-guard.js";
 import { noopRuntimeObservationSink } from "@kindergarten/runtime-observation";
 import { ModelProviderError } from "../src/model/model-error.js";
 import { ProcessSandbox } from "../src/tools/process-sandbox.js";
@@ -450,34 +449,7 @@ async () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("小模型跨三个模型轮提交字段顺序不同但同值的错误参数后结束 Turn", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
-async () => {
-    const sandbox = await makeSandbox();
-    const observer = new TestObserver(true);
-    const runner = new AgentRunner(
-      new InvalidArgumentsProvider("small"),
-      new ToolRuntime(new ToolRegistry(sandbox)),
-      new ContextAssembler(),
-      noopRuntimeObservationSink,
-      undefined,
-      createSmallModelRepeatedInvalidToolCallGuard,
-    );
-
-    await expect(runner.run(
-      { text: "读取文件", sessionEntries: [] },
-      observer,
-      new AbortController().signal,
-    )).rejects.toMatchObject({
-      name: "RunFailure",
-      code: "TOOL_ARGUMENT_RETRY_LIMIT",
-      retryable: false,
-    });
-    expect(observer.outcomes).toHaveLength(3);
-    expect(observer.outcomes.every(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(item) => item.error?.code === "invalid_arguments")).toBe(true);
-  });
-
-  it("大模型收到相同参数错误提示但不启用重复调用终止节点", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+  it("模型收到重复无效参数时继续按正常轮次处理，不再按模型大小提前终止", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const sandbox = await makeSandbox();
     const observer = new TestObserver(true);
@@ -486,8 +458,6 @@ async () => {
       new ToolRuntime(new ToolRegistry(sandbox)),
       new ContextAssembler(),
       noopRuntimeObservationSink,
-      undefined,
-      createSmallModelRepeatedInvalidToolCallGuard,
     );
 
     const result = await runner.run(

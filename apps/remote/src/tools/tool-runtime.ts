@@ -23,10 +23,7 @@ export interface ToolBatchResult {
   outcomes: ToolOutcome[];
 }
 
-/**
- * 保留为运行接口的兼容参数。重复错误的累计与止损由
- * RepeatedInvalidToolCallGuard 负责；正确调用不在这里去重或复用结果。
- */
+/** 保留为运行接口的兼容参数；正确调用不在这里去重或复用结果。 */
 export class ToolCallLedger {
 }
 

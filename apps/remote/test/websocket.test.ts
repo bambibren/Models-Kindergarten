@@ -73,6 +73,8 @@ async () => undefined,
     await server.listen("127.0.0.1", 0);
 
     const address = server.http.address() as AddressInfo;
+    expect((await fetch(`http://127.0.0.1:${address.port}/health/live`)).status).toBe(200);
+    expect((await fetch(`http://127.0.0.1:${address.port}/health/ready`)).status).toBe(200);
     const updates: acp.SessionNotification[] = [];
     const app = acp
       .client({ name: "websocket-test" })

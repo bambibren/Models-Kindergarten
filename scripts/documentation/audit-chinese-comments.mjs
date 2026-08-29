@@ -9,7 +9,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const scopes = readScopes(process.argv.slice(2));
 const projects = [
   "apps/remote/tsconfig.json", "apps/web/tsconfig.json", "apps/evaluation-service/tsconfig.json",
-  "apps/evaluation-web/tsconfig.json", "packages/contracts/tsconfig.json",
+  "packages/contracts/tsconfig.json",
   "packages/runtime-observation/tsconfig.json", "packages/evaluation-contract/tsconfig.json",
   "packages/evaluation-exporter/tsconfig.json",
 ];

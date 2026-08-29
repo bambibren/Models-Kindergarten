@@ -2,7 +2,7 @@
 
 Models Kindergarten 是一个面向模型、Agent 与上下文效果验证的 AI 实验与创作工作台。
 
-当前开发和验收阶段使用本机 Web、Remote、Ollama 与 `qwen3:8b`，这只是便于低成本验证完整链路的本地测试分支，不是产品的部署定位。正式上线目标是由线上部署的 Web、Remote、模型服务、Skills/MCP 与 Artifact 服务共同提供能力，不要求用户在本机运行模型或基础设施。
+本机开发默认运行 Web、Remote 和 Evaluation Service；模型统一从“模型入园”配置。线上模型 API 与可选的本机 Ollama 都是可删除的普通模型，产品不再内置或强制创建本地小模型。
 
 “模型幼儿园”最终想解决的问题，是让同一个任务在不同模型、Agent 和上下文配置下重复运行、观察和比较，帮助人理解模型为什么表现不同，以及怎样组合提示词、工具、Skills、MCP 和历史上下文才能得到更好的结果。
 
@@ -81,7 +81,7 @@ Artifact 是已经发布、可以稳定引用的产物，不等同于 Session Wo
 
 MCP Tool 调用通过 `McpToolProvider` 进入 ToolRuntime；模型主动读取 MCP Resource 时也会经过受控能力边界。预加载 Resource 由 ContextAssembler 组装进模型上下文。
 
-[config/mcp.example.json](config/mcp.example.json) 是 Remote 底层配置模板，能力比页面安装流程更宽：可以配置已经安装好的受控 stdio MCP，也可以为远程 Streamable HTTP MCP 配置 **Bearer Token**。Bearer Token 通过 `authProfile` 引用环境变量或 macOS Keychain 中的 Secret，运行时再交给 MCP SDK，不会把明文写入 MCP 配置、Session 或 Trace。底层还允许用 SecretRef 注入非 `Authorization` 的自定义 Header，例如服务端约定的 `X-API-Key`。
+[config/mcp.example.json](config/mcp.example.json) 是 Remote 底层配置模板，能力比页面安装流程更宽：可以配置已经安装好的受控 stdio MCP，也可以为远程 Streamable HTTP MCP 配置 **Bearer Token**。Bearer Token 通过 `authProfile` 引用环境变量或受管加密凭据库中的 Secret，运行时再交给 MCP SDK，不会把明文写入 MCP 配置、Session 或 Trace。底层还允许用 SecretRef 注入非 `Authorization` 的自定义 Header，例如服务端约定的 `X-API-Key`。
 
 Bearer Token 与 HTTP Basic Auth 是两种不同方式。本项目底层支持 Bearer Token，不支持把用户名和密码写进 URL，也不支持通过通用 Header 绕过 `authProfile` 设置 `Authorization`。虽然类型中预留了 `oauth`，但当前没有完整的浏览器授权、Token 刷新和客户端注册流程，因此 README 不把 OAuth 标记为已支持。上述底层配置能力不代表都能通过当前页面安装；内置 `web_search` 使用的 Exa MCP 也不属于这条管理链。
 
@@ -123,22 +123,24 @@ flowchart LR
 
 ## 本地测试分支启动
 
-以下配置只用于当前本地开发和验收分支。`qwen3:8b` 是低成本的本地测试模型，不是正式上线版本的默认模型。要求 Node.js 22+、pnpm 11+、Ollama，以及可以运行该模型的内存。
+本地源码开发要求 Node.js 22+ 与 pnpm 11+。Remote 可以零模型启动；需要对话时，再从模型入园页配置线上 API，或把本机 Ollama 当作一个可删除的普通模型接入。
 
 ```bash
-ollama serve
-ollama pull qwen3:8b
 pnpm install
+pnpm secret:init
 pnpm dev
 ```
+
+`pnpm secret:init` 只在首次保存模型 API Key 或 MCP Token 前执行一次。它不会生成业务凭据，只创建 32 字节主密钥：本机源码开发自动写入仓库的 `.local/secrets/mk_master_key`；以后以 `docker-preview` 或 `cloud` 运行同一套代码时，自动改读容器内的 `/run/secrets/mk_master_key`。如需特殊目录，可用 `MASTER_KEY_FILE` 明确覆盖。
+
+API Key 等动态凭据由 Remote 使用主密钥加密后写入 `DATA_DIR/secure/credentials.enc`。主密钥与加密文件必须分开放置；历史 macOS Keychain 凭据会在首次使用时迁移到该文件，之后不再向 Keychain 写入。零模型启动和只使用环境变量 Secret 时，可以暂不创建主密钥。
 
 本地测试地址：
 
 - 主 Web：`http://127.0.0.1:5173`；
-- Remote / Control API：`http://127.0.0.1:7331`；
-- ACP：`ws://127.0.0.1:7331/acp`；
-- Evaluation Web：`http://127.0.0.1:5175`；
-- Evaluation API：`http://127.0.0.1:7441`；
+- 主 Web 同源入口：`/api`、`/acp`、`/evaluation/*`；
+- Remote（仅服务调试）：`http://127.0.0.1:7331`；
+- Evaluation API（仅服务调试）：`http://127.0.0.1:7441`；
 - PPTX Skill 资源服务：`http://127.0.0.1:7342`；
 - 可选 ONLYOFFICE：`http://127.0.0.1:8080`。
 

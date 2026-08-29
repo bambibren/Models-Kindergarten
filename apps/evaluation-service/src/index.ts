@@ -5,7 +5,9 @@ import { EvaluationServer } from "./server.js";
 const host = process.env.EVALUATION_HOST ?? "127.0.0.1";
 const port = integerEnv("EVALUATION_PORT", 7441);
 const dataDir = resolve(process.env.EVALUATION_DATA_DIR ?? ".data/evaluation");
-const server = new EvaluationServer(new EvaluationRepository(dataDir));
+const repository = new EvaluationRepository(dataDir);
+await repository.initialize();
+const server = new EvaluationServer(repository);
 
 await server.listen(host, port);
 console.log(`Kindergarten Evaluation API: http://${host}:${port}`);

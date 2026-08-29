@@ -261,10 +261,7 @@ async () => {
   /** 执行「reasoningCapability」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 private reasoningCapability(session: SessionRecord): ModelReasoningCapability | undefined {
     const selected = this.models?.get(session.modelStudentId);
-    if (selected) return selected.supports.reasoning;
-    return session.modelStudentId === this.runtime.model.student.id
-      ? effectiveReasoningCapability(this.runtime.model)
-      : undefined;
+    return selected?.supports.reasoning;
   }
 
   /** 为 Session 创建唯一活动 Turn、固定运行作用域，并在所有终态清理 channel/projection/AbortController。 */
@@ -295,6 +292,13 @@ async () => {
           params.sessionId,
           PRODUCT_CONFIG.agent.historyRecentTurnsMax,
         );
+        if (this.models && !this.models.isReady(current.modelStudentId)) {
+          throw new acp.RequestError(
+            -32002,
+            "该会话绑定的模型已停用、删除或当前不可用，不能继续对话",
+            { code: "SESSION_MODEL_UNAVAILABLE", retryable: false },
+          );
+        }
         if (current.purpose === "chat" && !await this.bindings.agentExists(current.agentId)) {
           throw new acp.RequestError(
             -32002,
@@ -539,15 +543,6 @@ private async requireSession(id: string, cwd: string, maxTurns?: number): Promis
     if (session.cwd !== cwd) throw new Error("会话 cwd 与请求不一致");
     return session;
   }
-}
-
-/** 执行「effectiveReasoningCapability」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function effectiveReasoningCapability(model: import("../model/model-provider.js").ModelProvider): ModelReasoningCapability | undefined {
-  if (!model.reasoningCapability) return undefined;
-  const capability = structuredClone(model.reasoningCapability);
-  const configuredDefault = model.student.generationDefaults.reasoningProfile;
-  if (configuredDefault) capability.defaultProfile = configuredDefault;
-  return capability;
 }
 
 class TurnProjection implements RunObserver {

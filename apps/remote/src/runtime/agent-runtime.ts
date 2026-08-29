@@ -47,7 +47,6 @@ import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.j
 import type { ModelContextSerialization } from "../model/model-provider.js";
 import { resolveReasoning } from "../reasoning/reasoning-resolver.js";
 import type { TurnActivePhase } from "@kindergarten/contracts";
-import type { RepeatedInvalidToolCallGuardFactory } from "./repeated-invalid-tool-call-guard.js";
 import {
   configuredSkillContextVersion,
   skillUseProtocol,
@@ -202,24 +201,22 @@ export class AgentRuntime {
   readonly runner: AgentRunner;
 
   /** 初始化「AgentRuntime」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-constructor(
-    readonly model: ModelProvider,
+  constructor(
+    private readonly fallbackModel: ModelProvider | undefined,
     readonly tools: ToolRuntime,
     private readonly context = new ContextAssembler(),
     observations: RuntimeObservationSink = noopRuntimeObservationSink,
     private readonly resolver?: RuntimeCapabilityResolverPort,
-    repeatedInvalidToolCallGuardFactory?: RepeatedInvalidToolCallGuardFactory,
     private readonly executionBudget: RuntimeExecutionBudget = PRODUCT_CONFIG.runtime,
     private readonly turnAdmission: RuntimeTurnAdmission = processTurnAdmission,
   ) {
     validateExecutionBudget(executionBudget);
     this.runner = new AgentRunner(
-      model,
+      fallbackModel,
       tools,
       context,
       observations,
       resolver,
-      repeatedInvalidToolCallGuardFactory,
       executionBudget,
     );
   }
@@ -259,7 +256,8 @@ async previewContextWindow(
     const resolved = input.scope && this.resolver
       ? await this.resolver.resolve(input.scope, "")
       : undefined;
-    const model = resolved?.model ?? this.model;
+    const model = resolved?.model ?? this.fallbackModel;
+    if (!model) return undefined;
     const tools = resolved?.tools ?? this.tools;
     return previewContextWindow({
       model,
@@ -275,13 +273,12 @@ async previewContextWindow(
 /** 描述「AgentRunner」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class AgentRunner {
   /** 初始化「AgentRunner」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-constructor(
-    private readonly model: ModelProvider,
+  constructor(
+    private readonly fallbackModel: ModelProvider | undefined,
     private readonly tools: ToolRuntime,
     private readonly context: ContextAssembler,
     private readonly observations: RuntimeObservationSink,
     private readonly resolver?: RuntimeCapabilityResolverPort,
-    private readonly repeatedInvalidToolCallGuardFactory?: RepeatedInvalidToolCallGuardFactory,
     private readonly executionBudget: RuntimeExecutionBudget = PRODUCT_CONFIG.runtime,
   ) {}
 
@@ -291,8 +288,10 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
     const startedAt = Date.now();
     await observer.phase?.("preparing_context");
     const resolved = input.scope && this.resolver ? await this.resolver.resolve(input.scope, input.text) : undefined;
-    const model = resolved?.model ?? this.model;
-    const repeatedInvalidToolCallGuard = this.repeatedInvalidToolCallGuardFactory?.(model.student);
+    const model = resolved?.model ?? this.fallbackModel;
+    if (!model) {
+      throw new RunFailure("当前 Session 绑定的 ModelStudent 不可用", "MODEL_UNAVAILABLE", false);
+    }
     const tools = resolved?.tools ?? this.tools;
     const context = resolved?.context ?? this.context;
     const agentSystemPrompt = resolved?.agent.systemPrompt ?? "";
@@ -749,22 +748,6 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
         modelInputMessageTraces.push(traceModelInputMessage(toolResultMessage, "tool_result", item.call.id));
         outcome.effects?.fileRelativePaths?.forEach(/** 只汇总工具明确声明的文件副作用，不扫描工作区猜测变化。 */
 (path) => fileRelativePaths.add(path));
-      }
-      const exhaustedCall = repeatedInvalidToolCallGuard?.inspect(
-        round,
-        prepared.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(item) => item.call),
-        batch.outcomes,
-      );
-      if (exhaustedCall) {
-        const failure = new RunFailure(
-          `工具 ${exhaustedCall.toolName} 在同一用户 Turn 的 ${exhaustedCall.attempts} 个模型轮中重复提交完全相同的无效参数，已结束当前用户 Turn`,
-          "TOOL_ARGUMENT_RETRY_LIMIT",
-          false,
-        );
-        this.runtimeError(runId, "turn", failure);
-        this.completeTurn(runId, "failed", "resource_limit");
-        throw failure;
       }
       if (input.scope && this.resolver && batch.outcomes.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.effects?.capabilitiesChanged)) {

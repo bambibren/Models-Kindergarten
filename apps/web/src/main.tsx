@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.js";
 import { RenderErrorBoundary } from "./components/errors/RenderErrorBoundary.js";
@@ -11,6 +12,9 @@ import { ArtifactDetailPage } from "./product/ArtifactDetailPage.js";
 import { ModelAdmissionPage } from "./product/ModelAdmissionPage.js";
 import "./product/product.css";
 import "./styles.css";
+
+const EvaluationApp = lazy(/** 评测页面独立分包，但仍由同一个 Web 应用和同一来源提供。 */
+() => import("./evaluation/App.js"));
 
 const root = document.getElementById("root");
 if (!root) throw new Error("找不到 #root");
@@ -40,6 +44,9 @@ const application = route();
 /** 执行「route」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function route() {
   const path = normalize(location.pathname);
+  if (path === "/evaluation" || path.startsWith("/evaluation/")) {
+    return <Suspense fallback={<main className="product-page"><section className="product-state"><strong>正在打开评测</strong></section></main>}><EvaluationApp /></Suspense>;
+  }
   if (isDemoRoute(path)) return <DemoApp />;
   if (path === "/") return <HomePage />;
   if (path === "/session") return <App />;

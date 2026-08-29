@@ -222,7 +222,7 @@ async function install() {
 
           <section>
             <header><Network size={16} /><div><strong>连接信息</strong><small>{preset ? `${protocolLabel(preset)} · ${preset.auth.apiKeyLabel}` : "等待选择接入方式"}</small></div></header>
-            {preset && <div className="product-admission-protocol"><Network size={15} /><span><strong>{preset.displayName}</strong><small>{preset.baseUrl.mode === "fixed" ? "服务地址由接入方式安全预设；模型能力仍以实际体检为准。" : "使用自定义公网 HTTPS 地址；模型能力以该目标接口的实际体检为准。"}</small></span></div>}
+            {preset && <div className="product-admission-protocol"><Network size={15} /><span><strong>{preset.displayName}</strong><small>{preset.baseUrl.mode === "fixed" ? "服务地址由接入方式安全预设；模型能力仍以实际体检为准。" : preset.presetId === "ollama" ? "只连接当前设备的回环地址；Remote 不会自动启动或下载 Ollama 模型。" : "使用自定义公网 HTTPS 地址；模型能力以该目标接口的实际体检为准。"}</small></span></div>}
             {preset?.baseUrl.mode === "editable" && <AdmissionField label="Base URL" error={errors.baseUrl} help="填写服务根地址；不能带查询参数、凭据或具体请求方法路径。" inputId="model-base-url">
               <div className="product-admission-input"><Link2 size={14} /><input
                 aria-invalid={Boolean(errors.baseUrl)}
@@ -231,7 +231,7 @@ async function install() {
                 id="model-base-url"
                 inputMode="url"
                 maxLength={2_048}
-                placeholder="https://api.example.com/v1"
+                placeholder={preset.presetId === "ollama" ? "http://127.0.0.1:11434" : "https://api.example.com/v1"}
                 value={state.draft.baseUrl}
                 onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => changeConnection({ baseUrl: event.target.value })}
@@ -268,7 +268,7 @@ async function install() {
 (current) => updateModelAdmissionContextWindowTokens(current, event.target.value))}
               /></div>
             </AdmissionField>
-            <AdmissionField label={preset?.auth.apiKeyLabel ?? "API Key"} error={errors.apiKey} help="凭据格式由服务商决定；MK 不根据前缀判断服务商或能力。" inputId="model-api-key">
+            {preset?.auth.scheme !== "none" && <AdmissionField label={preset?.auth.apiKeyLabel ?? "API Key"} error={errors.apiKey} help="凭据格式由服务商决定；MK 不根据前缀判断服务商或能力。" inputId="model-api-key">
               <div className="product-admission-secret"><KeyRound size={14} /><input
                 aria-invalid={Boolean(errors.apiKey)}
                 aria-describedby="model-api-key-description"
@@ -285,8 +285,8 @@ async function install() {
               /><button aria-label={showKey ? "隐藏 API Key" : "显示 API Key"} disabled={busy} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
 () => setShowKey(/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
 (value) => !value)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>
-            </AdmissionField>
-            <div className="product-admission-caution"><ShieldCheck size={15} /><p>点击体检会产生少量真实模型调用，可能消耗服务商额度。API Key 与探测内容只会发送到当前选择的服务；使用自定义地址时，请确认该地址可信。</p></div>
+            </AdmissionField>}
+            <div className="product-admission-caution"><ShieldCheck size={15} /><p>{preset?.presetId === "ollama" ? "体检只读取本机 Ollama 模型目录，不会上传 API Key；模型生成仍只在你主动开始会话后发生。" : "点击体检会产生少量真实模型调用，可能消耗服务商额度。API Key 与探测内容只会发送到当前选择的服务；使用自定义地址时，请确认该地址可信。"}</p></div>
           </section>
 
           <footer>
@@ -313,7 +313,7 @@ async function install() {
 (current) => updateModelAdmissionDefaultReasoningProfile(current, profile))}
             snapshot={state.test.snapshot}
           />}
-          <div className="product-admission-security"><ShieldCheck size={14} /><p>API Key 不会进入 URL、浏览器存储、聊天记录或公开模型信息。确认入园后，网页不能再次读取明文。</p></div>
+          <div className="product-admission-security"><ShieldCheck size={14} /><p>{preset?.auth.scheme === "none" ? "当前接入方式不需要凭据；连接地址和模型 ID 会作为普通模型配置保存。" : "API Key 不会进入 URL、浏览器存储、聊天记录或公开模型信息。确认入园后，网页不能再次读取明文。"}</p></div>
         </aside>
       </div>
     </div>
@@ -386,6 +386,7 @@ function actionMessage(state: ModelAdmissionViewState): string {
 
 /** 执行「protocolLabel」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function protocolLabel(preset: ModelProviderPresetView): string {
+  if (preset.protocol === "ollama_native") return "Ollama Native API";
   if (preset.protocol === "openai_responses") return "Responses API";
   if (preset.protocol === "openai_chat_completions") return "Chat Completions API";
   return "Messages API";

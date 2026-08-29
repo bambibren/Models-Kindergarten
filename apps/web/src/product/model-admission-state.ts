@@ -186,12 +186,18 @@ export function validateModelAdmissionDraft(
   else if (name.length > 80) errors.displayName = "名称不能超过 80 个字符。";
   if (!model) errors.model = "请输入上游模型 ID。";
   else if (model.length > 200) errors.model = "模型 ID 不能超过 200 个字符。";
-  if (draft.apiKey.length === 0) errors.apiKey = "请输入 API Key。";
-  else if (draft.apiKey.length > 8_192) errors.apiKey = "API Key 长度超过限制。";
+  if (preset.auth.scheme !== "none") {
+    if (draft.apiKey.length === 0) errors.apiKey = "请输入 API Key。";
+    else if (draft.apiKey.length > 8_192) errors.apiKey = "API Key 长度超过限制。";
+  }
   if (preset.baseUrl.mode === "editable") {
     try {
       const url = new URL(draft.baseUrl.trim());
-      if (url.protocol !== "https:") errors.baseUrl = "自定义云端接口必须使用 HTTPS。";
+      if (preset.presetId === "ollama") {
+        const hostname = url.hostname.toLowerCase();
+        if (url.protocol !== "http:" && url.protocol !== "https:") errors.baseUrl = "本机 Ollama 必须使用 HTTP 或 HTTPS。";
+        else if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(hostname)) errors.baseUrl = "本机 Ollama 只允许回环地址。";
+      } else if (url.protocol !== "https:") errors.baseUrl = "自定义云端接口必须使用 HTTPS。";
       else if (url.username || url.password) errors.baseUrl = "Base URL 不能包含用户名或密码。";
       else if (url.search || url.hash) errors.baseUrl = "Base URL 不能包含查询参数或片段。";
     } catch {
@@ -214,6 +220,14 @@ export function buildModelStudentCandidate(
   };
   if (preset.presetId === "custom_responses") {
     return { ...common, presetId: "custom_responses", baseUrl: draft.baseUrl.trim() };
+  }
+  if (preset.presetId === "ollama") {
+    return {
+      presetId: "ollama",
+      displayName: common.displayName,
+      model: common.model,
+      baseUrl: draft.baseUrl.trim(),
+    };
   }
   if (preset.presetId === "openai") return { ...common, presetId: "openai" };
   if (preset.presetId === "siliconflow") return { ...common, presetId: "siliconflow" };

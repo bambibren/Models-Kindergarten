@@ -87,6 +87,18 @@ async restoreInstalled(): Promise<ModelStudentSummary[]> {
         student = await this.repository.setSnapshot(student.modelStudentId, student.ownerId, reboundSnapshot);
       }
       if (this.catalog.get(student.modelStudentId)) continue;
+      if (student.lifecycle === "archived") {
+        restored.push(this.catalog.registerUnavailable(
+          studentMetadata(student, connection),
+          "模型已停用；历史 Session 可查看，但不能继续对话",
+          {
+            deletable: true,
+            lastCheckedAt: student.snapshot.testedAt,
+            supports: supportsFrom(student.snapshot),
+          },
+        ));
+        continue;
+      }
       if (
         student.lifecycle === "capacity_blocked" ||
         this.catalog.runtimeProviderCount >= PRODUCT_CONFIG.capacity.maxModelStudents
@@ -125,7 +137,7 @@ async restoreInstalled(): Promise<ModelStudentSummary[]> {
           : "上次删除尚未完成，当前模型不会参与运行";
       } else if (lifecycle === "installing") {
         try {
-          await this.secrets.read(connection.credentialRef);
+          if (connection.credentialRef) await this.secrets.read(connection.credentialRef);
           student = await this.repository.setLifecycle(student.modelStudentId, student.ownerId, "active");
         } catch {
           student = await this.repository.setLifecycle(student.modelStudentId, student.ownerId, "rollback_pending");
@@ -155,10 +167,13 @@ async restoreInstalled(): Promise<ModelStudentSummary[]> {
       let statusMessage = reconciliationMessage;
       if (!statusMessage) {
         try {
-          await this.secrets.read(connection.credentialRef);
+          if (connection.credentialRef) await this.secrets.read(connection.credentialRef);
+          if (connection.protocol === "ollama_native") await provider.verify?.();
         } catch {
           initialStatus = "unavailable";
-          statusMessage = "模型凭据不可用，请重新入园";
+          statusMessage = connection.protocol === "ollama_native"
+            ? "本机 Ollama 或目标模型当前不可用"
+            : "模型凭据不可用，请重新入园";
         }
       }
       restored.push(this.catalog.register(provider, {
@@ -200,7 +215,7 @@ async test(raw: unknown, ownerId = "local-admin"): Promise<ModelStudentTestRecor
     ownerId: string,
   ): Promise<ModelStudentTestRecord> {
     try {
-      await this.urlPolicy.assert(candidate.baseUrl);
+      if (candidate.protocol !== "ollama_native") await this.urlPolicy.assert(candidate.baseUrl);
     } catch (error) {
       throw urlProblem(error);
     }
@@ -242,7 +257,7 @@ async test(raw: unknown, ownerId = "local-admin"): Promise<ModelStudentTestRecor
           code: error instanceof RemoteModelUrlPolicyError && error.reason === "not_allowed"
             ? "MODEL_URL_NOT_ALLOWED"
             : "MODEL_CONNECTION_FAILED",
-          message: redactPublicMessage(error, candidate.apiKey),
+          message: redactPublicMessage(error, candidate.apiKey ?? ""),
           retryable: !(error instanceof RemoteModelUrlPolicyError && error.reason === "not_allowed"),
         },
         expiresAt: new Date(completed.getTime() + this.testTtlMs).toISOString(),
@@ -286,7 +301,7 @@ async install(raw: unknown, ownerId = "local-admin"): Promise<ModelStudentSummar
     }
     this.installationClaims.add(input.testId);
     try {
-      if ((await this.repository.listStudents(ownerId)).length >= PRODUCT_CONFIG.capacity.maxModelStudents - 1) {
+      if ((await this.repository.listStudents(ownerId)).length >= PRODUCT_CONFIG.capacity.maxModelStudents) {
         throw new ApiProblemError(
           409,
           "CONFLICT",
@@ -343,8 +358,8 @@ private async installClaimed(
     const now = this.now().toISOString();
     const connectionId = id("connection");
     const modelStudentId = id("student");
-    const credentialRef: SecretRef = {
-      provider: "keychain",
+    const credentialRef: SecretRef | undefined = candidate.apiKey === undefined ? undefined : {
+      provider: "managed",
       key: `models-kindergarten/provider-connections/${connectionId}`,
     };
     const connection: ProviderConnectionRecord = {
@@ -355,8 +370,8 @@ private async installClaimed(
       presetId: candidate.presetId,
       protocol: candidate.protocol,
       baseUrl: candidate.baseUrl,
-      credentialRef,
-      credentialHint: credentialHint(candidate.apiKey),
+      ...(credentialRef ? { credentialRef } : {}),
+      ...(candidate.apiKey === undefined ? {} : { credentialHint: credentialHint(candidate.apiKey) }),
       createdAt: now,
       updatedAt: now,
     };
@@ -368,7 +383,7 @@ private async installClaimed(
       connectionId,
       displayName,
       model: candidate.model,
-      sizeClass: "large",
+      sizeClass: candidate.protocol === "ollama_native" ? "small" : "large",
       ...(input.contextWindowTokens === undefined
         ? {}
         : { contextWindowTokens: input.contextWindowTokens }),
@@ -385,7 +400,9 @@ private async installClaimed(
     try {
       await this.repository.install(connection, student);
       repositoryPrepared = true;
-      await this.secrets.write(credentialRef, candidate.apiKey);
+      if (credentialRef && candidate.apiKey !== undefined) {
+        await this.secrets.write(credentialRef, candidate.apiKey);
+      }
       await this.repository.setLifecycle(modelStudentId, ownerId, "active");
       const summary = this.catalog.register(provider, {
         initialStatus: "ready",
@@ -399,9 +416,9 @@ private async installClaimed(
       if (repositoryPrepared) {
         await this.repository.setLifecycle(modelStudentId, ownerId, "rollback_pending").catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
 () => undefined);
-        let credentialRemoved = false;
+        let credentialRemoved = credentialRef === undefined;
         try {
-          await this.secrets.delete(credentialRef);
+          if (credentialRef) await this.secrets.delete(credentialRef);
           credentialRemoved = true;
         } catch {
           // rollback_pending 会在下次启动继续清理，且不会注册为 ready。
@@ -444,9 +461,6 @@ async remove(modelStudentId: string, ownerId = "local-admin"): Promise<{ modelSt
     if (!summary.deletable) {
       throw new ApiProblemError(409, "CONFLICT", "系统内置 ModelStudent 不可删除", false);
     }
-    if (await this.modelInUse(modelStudentId)) {
-      throw new ApiProblemError(409, "MODEL_IN_USE", "仍有 Session 绑定该 ModelStudent，不能删除", false);
-    }
     const stored = await this.repository.getStudent(modelStudentId);
     if (!stored || stored.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "ModelStudent 不存在", false);
     const connection = await this.repository.getConnection(stored.connectionId);
@@ -454,11 +468,24 @@ async remove(modelStudentId: string, ownerId = "local-admin"): Promise<{ modelSt
     const connectionShared = (await this.repository.listStudents(ownerId)).some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) =>
       item.modelStudentId !== modelStudentId && item.connectionId === stored.connectionId);
+    if (await this.modelInUse(modelStudentId)) {
+      await this.repository.setLifecycle(modelStudentId, ownerId, "archived");
+      try {
+        if (!connectionShared && connection.credentialRef) {
+          await this.secrets.delete(connection.credentialRef);
+        }
+      } catch {
+        await this.repository.setLifecycle(modelStudentId, ownerId, "active");
+        throw new ApiProblemError(503, "MODEL_CONNECTION_FAILED", "模型凭据删除失败，已恢复为可用状态", true);
+      }
+      this.catalog.deactivate(modelStudentId, "模型已停用；历史 Session 可查看，但不能继续对话");
+      return { modelStudentId };
+    }
     await this.repository.setLifecycle(modelStudentId, ownerId, "deleting");
     let credentialRemoved = connectionShared;
     try {
       if (!connectionShared) {
-        await this.secrets.delete(connection.credentialRef);
+        if (connection.credentialRef) await this.secrets.delete(connection.credentialRef);
         credentialRemoved = true;
       }
       const removed = await this.repository.removeStudent(modelStudentId, ownerId);
@@ -488,7 +515,7 @@ private async resumeRemoval(
     removeCredential: boolean,
   ): Promise<boolean> {
     try {
-      if (removeCredential) await this.secrets.delete(connection.credentialRef);
+      if (removeCredential && connection.credentialRef) await this.secrets.delete(connection.credentialRef);
       await this.repository.removeStudent(student.modelStudentId, student.ownerId);
       return true;
     } catch {
@@ -543,7 +570,11 @@ function studentMetadata(
       ? {}
       : { contextWindowTokens: student.contextWindowTokens }),
     provider: {
-      kind: connection.presetId === "siliconflow" ? "siliconflow" : "openai-compatible",
+      kind: connection.presetId === "ollama"
+        ? "ollama"
+        : connection.presetId === "siliconflow"
+          ? "siliconflow"
+          : "openai-compatible",
       model: student.model,
       baseUrl: connection.baseUrl,
     },

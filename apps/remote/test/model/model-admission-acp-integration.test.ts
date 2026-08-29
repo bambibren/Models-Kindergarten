@@ -70,7 +70,7 @@ async () => maxSnapshot() },
         generationDefaults: { reasoningProfile: student.generationDefaults.reasoningProfile },
       }, {
         readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => secrets.read(connection.credentialRef),
+() => secrets.read(connection.credentialRef!),
         reasoning: {
           capability: student.snapshot.reasoning.capability,
           efforts: Object.fromEntries(Object.entries(student.snapshot.reasoning.nativeByProfile)

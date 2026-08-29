@@ -80,10 +80,12 @@ async probe(
     ) {
       throw new Error("SiliconFlowCapabilityProber 只能体检 siliconflow Chat Completions 候选");
     }
+    const apiKey = candidate.apiKey;
+    if (!apiKey) throw new Error("SiliconFlow 候选缺少 API Key");
     const student = probeStudent(candidate);
     const provider = new ChatCompletionsProvider(student, {
       readBearerToken: /** 读取「readBearerToken」所需数据，并遵守作用域、分页与容量边界。 */
-() => candidate.apiKey,
+() => apiKey,
       reasoning: fixedReasoningConfiguration(),
       ...(this.endpointGuard ? { endpointGuard: this.endpointGuard } : {}),
       ...(this.endpointResolver ? { endpointResolver: this.endpointResolver } : {}),

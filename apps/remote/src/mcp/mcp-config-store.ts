@@ -195,8 +195,10 @@ function secretMap(value: unknown, label: string): Record<string, SecretRef> {
 /** 校验并规范化「parseSecretRef」输入，非法数据直接返回明确错误。 */
 function parseSecretRef(value: unknown, label: string): SecretRef {
   const record = requiredRecord(value, label);
+  const provider = oneOf(record.provider, ["env", "managed", "keychain"] as const, `${label}.provider`);
   return {
-    provider: oneOf(record.provider, ["env", "keychain"] as const, `${label}.provider`),
+    // keychain 只用于读取历史配置；进入 Runtime 和再次保存时统一成为受管加密凭据。
+    provider: provider === "keychain" ? "managed" : provider,
     key: nonEmptyString(record.key, `${label}.key`),
   };
 }

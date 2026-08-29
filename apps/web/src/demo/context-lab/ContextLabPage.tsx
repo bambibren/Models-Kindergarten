@@ -96,7 +96,7 @@ function importAgent(agentId: string) {
   /** 执行「runExperiment」主流程，传播取消与失败并在结束时清理临时资源。 */
 function runExperiment() {
     if (!runnable) return;
-    const target = new URL("http://127.0.0.1:5175/evaluation/demo/agent-comparison");
+    const target = new URL("/evaluation/demo/agent-comparison", location.href);
     target.searchParams.set("source", mode === "history_turn" ? "history-turn" : "fresh-prompt");
     if (mode === "history_turn") target.searchParams.set("turnId", turnId);
     location.href = target.toString();

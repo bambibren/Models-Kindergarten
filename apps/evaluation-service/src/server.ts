@@ -52,8 +52,16 @@ private async handle(request: IncomingMessage, response: ServerResponse): Promis
       return;
     }
     const url = new URL(request.url ?? "/", "http://localhost");
-    if (request.method === "GET" && url.pathname === "/health") {
+    if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/health/live")) {
       json(response, 200, { ok: true, service: "kindergarten-evaluation" });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/health/ready") {
+      json(response, this.repository.ready ? 200 : 503, {
+        ok: this.repository.ready,
+        service: "kindergarten-evaluation",
+        checks: { repository: this.repository.ready },
+      });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/v1/turn-evaluations") {

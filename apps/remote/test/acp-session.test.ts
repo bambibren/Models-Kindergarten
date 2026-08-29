@@ -589,6 +589,7 @@ async function makeAgent(
   const sessions = new SessionRepository(dir);
   const sandbox = new FileSandbox(join(dir, "sandbox"));
   await sandbox.initialize();
+  const modelCatalog = models ?? new ModelStudentCatalog(provider, "ready");
   return new KindergartenAgent(
     sessions,
     AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox)),
@@ -596,12 +597,12 @@ async function makeAgent(
       workspaceCwd: "/workspace",
       agentExists,
       modelStudentReady: /** 构造「modelStudentReady」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(id) => models?.isReady(id) ?? id === "student-1",
+(id) => modelCatalog.isReady(id),
       experimentBinding: /** 构造「experimentBinding」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => undefined,
     }),
     undefined,
-    models,
+    modelCatalog,
   ).createApp();
 }
 

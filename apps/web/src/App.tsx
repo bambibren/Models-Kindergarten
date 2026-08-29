@@ -26,8 +26,9 @@ import { sessionResumeMeta } from "./chat/chat-resume.js";
 import { clampArtifactWidth, defaultArtifactWidth } from "./session/artifact-split-pane.js";
 import { selectContextWindowUsage } from "./chat/context-window-usage.js";
 import { projectSessionTurnPage } from "./chat/session-history-page.js";
+import { acpWebSocketUrl, CONTROL_API_URL } from "./deployment-endpoints.js";
 
-const ACP_URL = import.meta.env.VITE_ACP_URL ?? "ws://127.0.0.1:7331/acp";
+const ACP_URL = acpWebSocketUrl();
 const REMOTE_CWD = "/workspace";
 
 /** 渲染「App」界面投影，所有业务事实仍由上层状态与服务端提供。 */
@@ -743,8 +744,7 @@ function rememberedLaunchSession(launchId: string, sessions: SessionInfo[]): Ses
 }
 /** 读取「fetchSessionIdentity」所需数据，并遵守作用域、分页与容量边界。 */
 async function fetchSessionIdentity(sessionId: string): Promise<{ modelStudentId: string; agentId: string }> {
-  const base = import.meta.env.VITE_CONTROL_API_URL ?? "http://127.0.0.1:7331/api/control/v1";
-  const response = await fetch(`${base}/sessions/${encodeURIComponent(sessionId)}`);
+  const response = await fetch(`${CONTROL_API_URL}/sessions/${encodeURIComponent(sessionId)}`);
   const value = await response.json() as { data?: { modelStudentId: string; agentId: string }; detail?: string };
   if (!response.ok || !value.data) throw new Error(value.detail ?? "Session 不存在");
   return value.data;

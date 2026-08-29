@@ -58,9 +58,12 @@ constructor(
     private readonly skillInstallations?: SkillInstallationService,
     private readonly artifacts?: ArtifactService,
   ) {
-    this.models = modelOrCatalog instanceof ModelStudentCatalog
-      ? modelOrCatalog
-      : new ModelStudentCatalog(modelOrCatalog, "ready");
+    if (modelOrCatalog instanceof ModelStudentCatalog) {
+      this.models = modelOrCatalog;
+    } else {
+      this.models = new ModelStudentCatalog();
+      this.models.register(modelOrCatalog, { initialStatus: "ready" });
+    }
   }
 
   /** 执行「resolve」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -108,7 +111,7 @@ async preview(
     ownerId: string,
     policy: ExperimentContextPolicy,
     prompt: string,
-    modelStudentId = this.models.defaultProvider().student.id,
+    modelStudentId: string,
   ): Promise<ResolvedRuntimeCapabilities> {
     const model = this.models.requireProvider(modelStudentId);
     const input = this.agents.validateContextPolicy(policy);

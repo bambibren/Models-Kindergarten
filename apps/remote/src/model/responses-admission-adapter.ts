@@ -35,6 +35,7 @@ constructor(
   /** 执行「probe」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 probe(candidate: Parameters<ModelAdmissionAdapter["probe"]>[0]): Promise<ProviderCapabilitySnapshot> {
     if (candidate.protocol !== this.protocol) throw new Error("Responses adapter 收到错误协议候选");
+    if (!candidate.apiKey) throw new Error("Responses adapter 候选缺少 API Key");
     return this.prober.probe({
       displayName: candidate.displayName,
       baseUrl: candidate.baseUrl,

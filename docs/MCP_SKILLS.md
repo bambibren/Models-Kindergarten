@@ -27,7 +27,7 @@ SkillRegistry ──read only──► builtin / project / user skills
 | 数据 | 模块 | 是否持久化 |
 | --- | --- | --- |
 | Server/Auth/Agent capability 配置 | `McpConfigStore` | 是，不含明文 Secret |
-| Secret | `HostSecretStore` | 环境或 macOS Keychain |
+| Secret | `EncryptedFileSecretStore` | 环境变量，或由文件主密钥保护的 AES-256-GCM 凭据库 |
 | Client 与连接状态 | `McpClientManager` | 否 |
 | Tool/Resource/Prompt 发现结果 | `McpCapabilitySnapshot` | 当前进程 |
 | 当前 Turn 能力版本 | `RunCapabilitySnapshot` | 随 Runtime Trace |
@@ -53,6 +53,7 @@ SkillRegistry ──read only──► builtin / project / user skills
 - Streamable HTTP 生产地址必须 HTTPS；loopback 开发地址允许 HTTP。
 - 默认拒绝私网、link-local、保留地址和自动重定向，响应上限 4 MiB。
 - Bearer/API Token 通过 `SecretRef` 读取；Authorization Header 不能用普通 headerRefs 绕过 AuthBroker。
+- 本机源码主密钥默认读取仓库 `.local/secrets/mk_master_key`；Docker 预演和云端统一读取只读挂载的 `/run/secrets/mk_master_key`。历史 Keychain 引用只做一次性迁移，新凭据不再写入 Keychain。
 - `oauth` 配置当前消费已经完成外部授权并安全保存的 Access Token；浏览器授权和刷新 UI 不在聊天链路中实现。
 
 ## 5. Skills 生命周期

@@ -20,8 +20,11 @@ import { SdkMcpConnector } from "./mcp/sdk-mcp-connector.js";
 import { McpManagementRepository } from "./mcp/mcp-management-repository.js";
 import { McpManagementService } from "./mcp/mcp-management-service.js";
 import { registerMcpRoutes } from "./mcp/mcp-management-routes.js";
-import { HostSecretStore } from "./mcp/secret-store.js";
-import { OllamaProvider } from "./model/ollama-provider.js";
+import type { SecretStore } from "./mcp/secret-store.js";
+import { EncryptedFileSecretStore } from "./secrets/encrypted-file-secret-store.js";
+import { FileMasterKeySource } from "./secrets/file-master-key.js";
+import { LegacyMacKeychainReader } from "./secrets/legacy-keychain-reader.js";
+import { OllamaAdmissionAdapter } from "./model/ollama-admission-adapter.js";
 import { ResponsesApiProvider } from "./model/responses-api-provider.js";
 import { ResponsesCapabilityProber } from "./model/responses-capability-probe.js";
 import { ResponsesAdmissionAdapter } from "./model/responses-admission-adapter.js";
@@ -35,10 +38,11 @@ import { ModelAdmissionService } from "./model/model-admission-service.js";
 import { registerModelAdmissionRoutes } from "./model/model-admission-routes.js";
 import { RemoteModelUrlPolicy } from "./model/remote-model-url-policy.js";
 import { ModelStudentCatalog } from "./model/model-student-catalog.js";
-import type { ModelStudent } from "./model/model-provider.js";
+import { LegacyOllamaMigration } from "./model/legacy-ollama-migration.js";
 import { SessionRepository } from "./repository/session-repository.js";
 import { AgentRuntime } from "./runtime/agent-runtime.js";
 import { RemoteServer } from "./server/http-server.js";
+import { EvaluationApiProxy } from "./server/evaluation-api-proxy.js";
 import { ControlApi } from "./server/control-api.js";
 import { SessionBindingService } from "./session/session-binding-service.js";
 import { registerSessionRoutes } from "./session/session-routes.js";
@@ -64,7 +68,6 @@ import { ContextPreviewService } from "./experiments/context-preview-service.js"
 import { AnnotationWorksheetGenerator } from "./experiments/annotation-worksheet-generator.js";
 import { ToolRegistry } from "./tools/tool-registry.js";
 import { ToolRuntime } from "./tools/tool-runtime.js";
-import { createSmallModelRepeatedInvalidToolCallGuard } from "./runtime/repeated-invalid-tool-call-guard.js";
 import { ArtifactRepository } from "./artifacts/artifact-repository.js";
 import { ArtifactBlobStore } from "./artifacts/artifact-blob-store.js";
 import { ArtifactService } from "./artifacts/artifact-service.js";
@@ -76,22 +79,16 @@ import {
   DEFAULT_AGENT_SYSTEM_PROMPT,
   removeLegacyModelIdentity,
 } from "./agent/default-agent-system-prompt.js";
+import {
+  assertImplementedDeploymentFeatures,
+  readDeploymentConfig,
+} from "./config/deployment-config.js";
 
-const port = integerEnv("PORT", 7331);
-const host = process.env.HOST ?? "127.0.0.1";
-if (!isLoopbackHost(host)) {
-  throw new Error("当前 D2P-1.2 只允许监听本机地址；远程访问认证尚不在本期范围内");
-}
 const workspaceRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
-const dataDir = resolve(process.env.DATA_DIR ?? ".data");
-const sandboxDir = resolve(process.env.SANDBOX_DIR ?? `${dataDir}/sandbox`);
-const userSkillsDir = resolve(process.env.USER_SKILLS_DIR ?? `${dataDir}/skills`);
-const student = createStudent();
-const model = new OllamaProvider(student);
-
-const modelStudents = new ModelStudentCatalog(model, "unknown");
-const modelSummary = await modelStudents.verify();
-if (modelSummary.status !== "ready") console.warn(`ModelStudent 暂不可用：${modelSummary.statusMessage ?? "未知原因"}`);
+const deployment = readDeploymentConfig(process.env, process.cwd(), workspaceRoot);
+assertImplementedDeploymentFeatures(deployment);
+const { port, host, dataDir, sandboxDir, userSkillsDir } = deployment;
+const modelStudents = new ModelStudentCatalog();
 const sandbox = new FileSandbox(sandboxDir);
 await sandbox.initialize();
 const artifacts = new ArtifactService(
@@ -99,7 +96,12 @@ const artifacts = new ArtifactService(
   new ArtifactBlobStore(resolve(dataDir, "artifact-blobs")),
   resolve(dataDir, "workspaces"),
 );
-const secrets = new HostSecretStore();
+const secrets = new EncryptedFileSecretStore(
+  new FileMasterKeySource(deployment.masterKeyFile),
+  deployment.credentialVaultFile,
+  new LegacyMacKeychainReader(),
+);
+await secrets.initialize();
 const modelUrlPolicy = new RemoteModelUrlPolicy();
 const modelAdmissionRepository = new ModelAdmissionRepository(
   resolve(dataDir, "model-student-tests.json"),
@@ -243,13 +245,21 @@ if (defaultAgent) {
 if (defaultAgent) agentService.protect(defaultAgent.agentId);
 const sessions = new SessionRepository(dataDir, {
   ownerId: "local-admin",
-  modelStudentId: student.id,
+  modelStudentId: "local-coder-student",
   agentId: defaultAgent?.agentId ?? "unavailable-agent",
 });
 await sessions.persistMigrations();
 const recoveredTurns = await sessions.recoverInterruptedTurns();
 if (recoveredTurns > 0) console.warn(`已将 ${recoveredTurns} 个重启前未结束的 Turn 标记为 interrupted`);
+const legacyOllamaMigrated = await new LegacyOllamaMigration(
+  modelAdmissionRepository,
+  (modelStudentId) => sessions.usesModelStudent(modelStudentId),
+).migrate();
+if (legacyOllamaMigrated) {
+  console.log("已把历史 Session 引用的内置 Ollama 模型转换为普通入园记录");
+}
 const modelAdmissionAdapters = new ModelAdmissionAdapterRegistry([
+  new OllamaAdmissionAdapter(),
   new ResponsesAdmissionAdapter(
     new ResponsesCapabilityProber({ endpointResolver: /** 执行「endpointResolver」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (url) => modelUrlPolicy.resolve(url) }),
@@ -288,7 +298,7 @@ for (const restored of restoredModels) {
     console.warn(`ModelStudent ${restored.displayName} 暂不可用：${restored.statusMessage ?? "未知原因"}`);
   }
 }
-const evaluationServiceUrl = process.env.EVALUATION_SERVICE_URL ?? "http://127.0.0.1:7441";
+const evaluationServiceUrl = deployment.evaluationUrl;
 const evaluation = new EvaluationTraceExporter(evaluationServiceUrl);
 const resolver = new RuntimeCapabilityResolver(
   agentService,
@@ -322,15 +332,14 @@ async (id) => Boolean(await agentRepository.get(id)),
 (experimentId, variantId) => experimentService.binding(experimentId, variantId),
 });
 const runtime = new AgentRuntime(
-  model,
+  undefined,
   new ToolRuntime(catalog),
   context,
   evaluation,
   resolver,
-  createSmallModelRepeatedInvalidToolCallGuard,
 );
 const control = new ControlApi({
-  allowedOrigins: (process.env.CONTROL_ALLOWED_ORIGINS ?? "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175")
+  allowedOrigins: (process.env.CONTROL_ALLOWED_ORIGINS ?? deployment.publicOrigin ?? "http://127.0.0.1:5173")
     .split(",").map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.trim()).filter(Boolean),
 });
@@ -349,20 +358,19 @@ registerFileRoutes(control.router, fileReferences);
 registerArtifactRoutes(control.router, artifacts, new OnlyOfficePreviewService());
 const agent = new KindergartenAgent(sessions, runtime, bindings, experimentService, modelStudents, artifacts).createApp();
 const server = new RemoteServer(agent, {
-  studentId: student.id,
-  studentName: student.name,
-  provider: student.provider.kind,
-  model: student.provider.model,
-}, control);
+  configuredModels: String(modelStudents.all().length),
+  readyModels: String(modelStudents.all().filter((item) => item.status === "ready").length),
+}, control, new EvaluationApiProxy(evaluationServiceUrl), {
+  dataDirectory: true,
+  modelCatalog: true,
+  secretStore: true,
+});
 
 await server.listen(host, port);
 console.log(`Kindergarten Remote: ws://${host}:${port}/acp`);
 
-/** 判断「isLoopbackHost」对应条件，只返回判定结果且不修改输入状态。 */
-function isLoopbackHost(value: string): boolean {
-  return value === "127.0.0.1" || value === "localhost" || value === "::1";
-}
-console.log(`ModelStudent: ${student.name} (${student.provider.model})`);
+console.log(`Deployment profile: ${deployment.profile}`);
+console.log(`ModelStudents: ${modelStudents.all().length} configured`);
 console.log(`Sandbox: ${sandbox.root}`);
 console.log(`Skills: ${capabilityConfig.agentCapabilities.skills.join(", ") || "无"}`);
 for (const state of mcp.serverStates()) {
@@ -377,37 +385,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-/** 根据已校验输入构建「createStudent」结果，不额外持有调用方的大对象。 */
-function createStudent(): ModelStudent {
-  const provider = process.env.MODEL_PROVIDER ?? "ollama";
-  if (provider !== "ollama") {
-    throw new Error(
-      `V1.6 只实现 ollama Provider；${provider} 仅保留在 ModelProvider 适配接口中`,
-    );
-  }
-  const contextWindowTokens = optionalPositiveIntegerEnv("MODEL_CONTEXT_WINDOW_TOKENS");
-  return {
-    id: process.env.MODEL_STUDENT_ID ?? "local-coder-student",
-    name: process.env.MODEL_STUDENT_NAME ?? "本地编程小模型",
-    sizeClass: modelSizeClassEnv("MODEL_SIZE_CLASS", "small"),
-    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
-    provider: {
-      kind: "ollama",
-      baseUrl: process.env.OLLAMA_URL ?? "http://127.0.0.1:11434",
-      model: process.env.OLLAMA_MODEL ?? "qwen3:8b",
-    },
-    generationDefaults: {
-      temperature: numberEnv("MODEL_TEMPERATURE", 0.4),
-      reasoningProfile: "balanced",
-    },
-  };
-}
-
 /** 根据已校验输入构建「createResponsesProvider」结果，不额外持有调用方的大对象。 */
 function createResponsesProvider(
   storedStudent: ManagedModelStudentRecord,
   connection: ProviderConnectionRecord,
-  secretStore: HostSecretStore,
+  secretStore: SecretStore,
   urlPolicy: RemoteModelUrlPolicy,
 ): ResponsesApiProvider {
   return new ResponsesApiProvider({
@@ -425,7 +407,7 @@ function createResponsesProvider(
     generationDefaults: { reasoningProfile: storedStudent.generationDefaults.reasoningProfile },
   }, {
     readBearerToken: /** 读取「readBearerToken」所需数据，并遵守作用域、分页与容量边界。 */
-() => secretStore.read(connection.credentialRef),
+() => secretStore.read(requireCredentialRef(connection)),
     reasoning: {
       capability: storedStudent.snapshot.reasoning.capability,
       efforts: Object.fromEntries(Object.entries(storedStudent.snapshot.reasoning.nativeByProfile)
@@ -441,7 +423,7 @@ function createResponsesProvider(
 function createSiliconFlowProvider(
   storedStudent: ManagedModelStudentRecord,
   connection: ProviderConnectionRecord,
-  secretStore: HostSecretStore,
+  secretStore: SecretStore,
   urlPolicy: RemoteModelUrlPolicy,
 ): ChatCompletionsProvider {
   return new ChatCompletionsProvider({
@@ -459,7 +441,7 @@ function createSiliconFlowProvider(
     generationDefaults: { reasoningProfile: storedStudent.generationDefaults.reasoningProfile },
   }, {
     readBearerToken: /** 读取「readBearerToken」所需数据，并遵守作用域、分页与容量边界。 */
-() => secretStore.read(connection.credentialRef),
+() => secretStore.read(requireCredentialRef(connection)),
     reasoning: {
       capability: storedStudent.snapshot.reasoning.capability,
       nativeByProfile: storedStudent.snapshot.reasoning.nativeByProfile,
@@ -470,44 +452,10 @@ function createSiliconFlowProvider(
   });
 }
 
-/** 执行「modelSizeClassEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function modelSizeClassEnv(name: string, fallback: "small" | "large"): "small" | "large" {
-  const value = process.env[name] ?? fallback;
-  if (value !== "small" && value !== "large") {
-    throw new Error(`${name} 必须是 small 或 large`);
-  }
-  return value;
-}
-
-/** 执行「integerEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function integerEnv(name: string, fallback: number): number {
-  const value = numberEnv(name, fallback);
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`${name} 必须是正整数`);
-  }
-  return value;
-}
-
-/** 执行「optionalPositiveIntegerEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function optionalPositiveIntegerEnv(name: string): number | undefined {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return undefined;
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${name} 必须是正整数`);
-  }
-  return value;
-}
-
-/** 执行「numberEnv」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function numberEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`${name} 必须是非负数`);
-  }
-  return value;
+/** 需要 Bearer Token 的协议在 Provider 构造边界断言凭据，Ollama 不经过这里。 */
+function requireCredentialRef(connection: ProviderConnectionRecord) {
+  if (!connection.credentialRef) throw new Error(`ProviderConnection 缺少凭据: ${connection.connectionId}`);
+  return connection.credentialRef;
 }
 
 /** 执行「fileExists」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
