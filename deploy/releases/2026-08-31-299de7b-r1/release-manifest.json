@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "release": "2026-08-31-299de7b-r1",
-  "gitCommit": "299de7b41a63452535c3cc4b3ae1ccfe46792210",
+  "gitCommit": "299de7b80cfcb796faf2f8c409e8a2ee48434537",
   "dataCompatibilityVersion": 1,
   "images": {
     "web": "ghcr.io/bambibren/models-kindergarten/mk-web@sha256:56424009ad0913986e94a5d8cd822093d5a9046f58836f20f85134463842db62",
