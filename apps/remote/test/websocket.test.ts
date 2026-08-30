@@ -19,6 +19,7 @@ import type {
 import { SessionRepository } from "../src/repository/session-repository.js";
 import { AgentRuntime } from "../src/runtime/agent-runtime.js";
 import { RemoteServer } from "../src/server/http-server.js";
+import { ControlApi } from "../src/server/control-api.js";
 import { FileSandbox } from "../src/tools/sandbox.js";
 import { ToolRegistry } from "../src/tools/tool-registry.js";
 import { SessionBindingService } from "../src/session/session-binding-service.js";
@@ -182,6 +183,64 @@ async () => undefined,
     expect(await rejectedWebSocketStatus(url)).toBe(401);
     const accepted = await openRawWebSocket(url, { cookie: "mk_session=valid" });
     await closeRawWebSocket(accepted);
+  });
+
+  it("正式认证模式把 ONLYOFFICE 签名读取交给 Control API", async () => {
+    dir = await mkdtemp(join(tmpdir(), "kindergarten-http-auth-"));
+    const sessions = new SessionRepository(dir);
+    const sandbox = new FileSandbox(join(dir, "sandbox"));
+    await sandbox.initialize();
+    const agent = new KindergartenAgent(
+      sessions,
+      AgentRuntime.fromRegistry(new FixtureProvider(), new ToolRegistry(sandbox)),
+      new SessionBindingService({
+        workspaceCwd: "/workspace",
+        ownerId: "user-admin",
+        agentExists: () => true,
+        modelStudentReady: () => true,
+        experimentBinding: async () => undefined,
+      }),
+      undefined,
+      undefined,
+      undefined,
+      "user-admin",
+    ).createApp();
+    let forwardedUrl = "";
+    let controlAuthenticationCalls = 0;
+    const controlApi = new ControlApi({
+      allowedOrigins: [],
+      resolvePrincipal: async () => {
+        controlAuthenticationCalls += 1;
+        return undefined;
+      },
+    });
+    controlApi.router.register("GET", "/onlyoffice/artifacts/:artifactId/raw", ({ url }) => {
+      forwardedUrl = url.toString();
+      return new Response("pptx-content");
+    });
+    let serverAuthenticationCalls = 0;
+    server = new RemoteServer(agent, {}, controlApi, undefined, { server: true }, {
+      resolve: async () => {
+        serverAuthenticationCalls += 1;
+        return undefined;
+      },
+      createAgent: () => agent,
+    });
+    await server.listen("127.0.0.1", 0);
+    const port = (server.http.address() as AddressInfo).port;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    const preview = await fetch(`${baseUrl}/api/control/v1/onlyoffice/artifacts/artifact-a/raw?token=ticket-a`);
+    expect(preview.status).toBe(200);
+    expect(await preview.text()).toBe("pptx-content");
+    expect(forwardedUrl).toContain("/onlyoffice/artifacts/artifact-a/raw?token=ticket-a");
+    expect(serverAuthenticationCalls).toBe(0);
+    expect(controlAuthenticationCalls).toBe(0);
+
+    const protectedArtifact = await fetch(`${baseUrl}/api/control/v1/artifacts/artifact-a/raw`);
+    expect(protectedArtifact.status).toBe(401);
+    expect(serverAuthenticationCalls).toBe(1);
+    expect(controlAuthenticationCalls).toBe(0);
   });
 
   it("真实 WebSocket 断开后 Runtime 继续，手动 resume 补齐缺失输出", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */

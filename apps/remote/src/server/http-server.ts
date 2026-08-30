@@ -191,7 +191,8 @@ function isPublicAuthenticationRequest(request: Request): boolean {
   const path = new URL(request.url).pathname;
   return path === "/api/control/v1/auth/login" ||
     path === "/api/control/v1/auth/session" ||
-    path === "/api/control/v1/auth/logout";
+    path === "/api/control/v1/auth/logout" ||
+    /^\/api\/control\/v1\/onlyoffice\/artifacts\/[^/]+\/raw$/u.test(path);
 }
 
 function authenticationRequiredResponse(): Response {

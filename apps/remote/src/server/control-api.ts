@@ -56,7 +56,7 @@ async fetch(request: Request): Promise<Response | undefined> {
         }
         return problemResponse(new ApiProblemError(404, "NOT_FOUND", "Control API 路由不存在", false), requestId, cors(origin));
       }
-      const principal = this.options.publicPaths?.includes(path)
+      const principal = isPublicControlPath(path, this.options.publicPaths)
         ? localPrincipal
         : this.options.resolvePrincipal
           ? await this.options.resolvePrincipal(request)
@@ -134,6 +134,12 @@ private preflight(path: string, request: Request, requestId: string): Response {
       },
     });
   }
+}
+
+/** 识别无需登录 Cookie、改由路由自身票据完成认证的 Control API 请求。 */
+function isPublicControlPath(path: string, exactPaths: string[] | undefined): boolean {
+  return Boolean(exactPaths?.includes(path)) ||
+    /^\/onlyoffice\/artifacts\/[^/]+\/raw$/u.test(path);
 }
 
 /** 读取「readJson」所需数据，并遵守作用域、分页与容量边界。 */

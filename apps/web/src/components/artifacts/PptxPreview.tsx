@@ -85,7 +85,10 @@ async () => {
         }
         setState({ phase: "ready", slideCount: viewer.slideCount });
       } catch (error) {
-        if (active && !controller.signal.aborted) setState({ phase: "error" });
+        if (active && !controller.signal.aborted) {
+          console.error("PPTX 静态预览失败", error);
+          setState({ phase: "error" });
+        }
       }
     })();
 
