@@ -53,6 +53,40 @@ async () => {
     await expect(service.delete(first.agentId, "user-1")).rejects.toThrow("系统内置 Agent 不可删除");
   });
 
+  it("为既有系统默认 Agent 补齐新增默认工具且保留显式禁用", async () => {
+    const service = await makeService();
+    const initial = await service.ensureDefault(input("系统默认 Agent"));
+    const defaults = {
+      ...input("系统默认 Agent"),
+      builtinTools: [
+        { toolId: "read_file", enabled: true, permission: "allow" as const },
+        { toolId: "build_pptx", enabled: true, permission: "allow" as const },
+      ],
+    };
+
+    const migrated = await service.ensureDefault(defaults);
+
+    expect(migrated.agentId).toBe(initial.agentId);
+    expect(migrated.builtinTools).toContainEqual({
+      toolId: "build_pptx",
+      enabled: true,
+      permission: "allow",
+    });
+
+    await service.update(initial.agentId, {
+      ...defaults,
+      builtinTools: defaults.builtinTools.map((item) => item.toolId === "build_pptx"
+        ? { ...item, enabled: false }
+        : item),
+    });
+    const preserved = await service.ensureDefault(defaults);
+    expect(preserved.builtinTools).toContainEqual({
+      toolId: "build_pptx",
+      enabled: false,
+      permission: "allow",
+    });
+  });
+
   it("把账号下同名的历史默认 Agent 提升为系统默认记录", async () => {
     const service = await makeService();
     const legacy = await service.create(input("系统默认 Agent"), "user-1");
@@ -238,7 +272,7 @@ async function makeService(): Promise<AgentService> {
   dirs.push(dir);
   return new AgentService(new AgentRepository(join(dir, "agents.json")), {
     builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => ["read_file", "write_file"],
+() => ["build_pptx", "read_file", "write_file"],
     builtinSkills: () => [{ skillId: "builtin:sandbox-notes", name: "sandbox-notes", description: "记录沙箱笔记" }],
     readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (ownerId) => Promise.resolve(ownerId === "local-admin" ? ["skill-1"] : []),

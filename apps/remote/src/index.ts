@@ -209,6 +209,7 @@ const defaultAgentInput = async (ownerId: string): Promise<AgentInput> => ({
       ...new ToolRegistry(sandbox).definitions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.function.name),
       ...ARTIFACT_TOOL_IDS,
+      ...PPTX_TOOL_IDS,
     ].map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (toolId) => ({
       toolId,

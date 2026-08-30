@@ -36,7 +36,7 @@ constructor(
   async ensureDefault(raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
     const input = await this.validate(raw, ownerId);
     const now = new Date().toISOString();
-    const record = await this.repository.ensureSystemDefault({
+    let record = await this.repository.ensureSystemDefault({
       schemaVersion: 1,
       agentId: randomUUID(),
       ownerId,
@@ -54,6 +54,21 @@ constructor(
       createdAt: now,
       updatedAt: now,
     });
+    const existing = new Set(record.builtinTools.map((item) => item.toolId));
+    if (input.builtinTools.some((item) => !existing.has(item.toolId))) {
+      record = await this.repository.update(record.agentId, (current) => {
+        const bound = new Set(current.builtinTools.map((item) => item.toolId));
+        const additions = input.builtinTools.filter((item) => !bound.has(item.toolId));
+        if (additions.length === 0) return current;
+        return {
+          ...current,
+          // 缺失表示旧默认尚未迁移；已有 disabled 则是用户选择，不能被启动流程重新打开。
+          builtinTools: [...current.builtinTools, ...additions]
+            .toSorted((left, right) => left.toolId.localeCompare(right.toolId)),
+          updatedAt: new Date().toISOString(),
+        };
+      });
+    }
     this.protect(record.agentId);
     return { ...structuredClone(record), deletable: false };
   }
