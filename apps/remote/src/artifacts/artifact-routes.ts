@@ -19,8 +19,8 @@ export function registerArtifactRoutes(router: ControlRouter, service: ArtifactS
 ({ params, principal }) =>
     service.get(params.artifactId ?? "", principal.principalId));
   router.register("GET", "/artifacts/:artifactId/preview", /** 执行「registerArtifactRoutes」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-({ params, principal, url }) =>
-    service.preview(params.artifactId ?? "", principal.principalId, `${url.protocol}//${url.host}/api/control/v1`));
+({ params, principal }) =>
+    service.preview(params.artifactId ?? "", principal.principalId));
   if (onlyOffice) {
     router.register("GET", "/artifacts/:artifactId/pptx-playback", /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 async ({ params, principal }) => {

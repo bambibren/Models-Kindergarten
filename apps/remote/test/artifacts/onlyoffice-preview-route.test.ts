@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PptxPlaybackResponse } from "@kindergarten/contracts";
+import type { ArtifactPreviewResponse, PptxPlaybackResponse } from "@kindergarten/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { ArtifactBlobStore } from "../../src/artifacts/artifact-blob-store.js";
 import { registerArtifactRoutes } from "../../src/artifacts/artifact-routes.js";
@@ -46,6 +46,15 @@ async () => {
       now: /** 构造「now」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => 1_700_000_000_000,
     }));
+
+    const previewResponse = await api.fetch(new Request(
+      `http://mk-app:7331/api/control/v1/artifacts/${artifact.artifactId}/preview`,
+    ));
+    const previewEnvelope = await previewResponse?.json() as { data: ArtifactPreviewResponse };
+    expect(previewEnvelope.data.content).toMatchObject({
+      kind: "pptx",
+      contentUrl: `/api/control/v1/artifacts/${artifact.artifactId}/raw`,
+    });
 
     const playbackResponse = await api.fetch(new Request(
       `http://127.0.0.1:7331/api/control/v1/artifacts/${artifact.artifactId}/pptx-playback`,

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让生产认证模式下的 ONLYOFFICE DocumentServer 能凭短时签名票据读取 PPTX，并保留静态预览失败的可诊断信息。
+**Goal:** 让生产认证模式下的 ONLYOFFICE DocumentServer 能凭短时签名票据读取 PPTX，并让浏览器静态预览使用同源内容地址。
 
-**Architecture:** Remote HTTP 外层认证和 Control API 内层认证只放行形如 `/api/control/v1/onlyoffice/artifacts/:artifactId/raw` 的读取请求，实际访问仍由 `OnlyOfficePreviewService.verify()` 校验 token。Web 静态预览继续保持现有降级界面，但在捕获异常时输出原始错误。
+**Architecture:** Remote HTTP 外层认证和 Control API 内层认证只放行形如 `/api/control/v1/onlyoffice/artifacts/:artifactId/raw` 的读取请求，实际访问仍由 `OnlyOfficePreviewService.verify()` 校验 token。Artifact 预览响应返回同源相对 URL，避免把 Remote 容器内部 origin 暴露给浏览器；Web 静态预览继续保持现有降级界面，并在捕获异常时输出原始错误。
 
 **Tech Stack:** TypeScript、Node.js HTTP、Vitest、React
 
@@ -52,9 +52,19 @@ Expected: `websocket.test.ts` 全部通过。
 ### Task 2: 保留静态 PPTX 预览异常
 
 **Files:**
+- Modify: `apps/remote/src/artifacts/artifact-routes.ts`
+- Test: `apps/remote/test/artifacts/onlyoffice-preview-route.test.ts`
 - Modify: `apps/web/src/components/artifacts/PptxPreview.tsx:87-89`
 
-- [ ] **Step 1: 输出捕获到的实际异常**
+- [ ] **Step 1: 让预览内容地址保持同源**
+
+```ts
+service.preview(params.artifactId ?? "", principal.principalId)
+```
+
+路由使用 `ArtifactService.preview()` 的默认 `/api/control/v1` 相对 base，不根据 Remote 收到的内部 HTTP 请求拼接绝对地址。
+
+- [ ] **Step 2: 输出捕获到的实际异常**
 
 ```ts
 } catch (error) {
@@ -63,7 +73,7 @@ Expected: `websocket.test.ts` 全部通过。
 }
 ```
 
-- [ ] **Step 2: 验证类型、测试与构建**
+- [ ] **Step 3: 验证类型、测试与构建**
 
 Run: `pnpm --filter @kindergarten/web typecheck && pnpm --filter @kindergarten/web test && pnpm --filter @kindergarten/web build`
 
