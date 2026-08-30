@@ -296,7 +296,7 @@ async () => {
           PRODUCT_CONFIG.agent.historyRecentTurnsMax,
         );
         if (current.ownerId !== this.principalId) throw new Error("Session 不存在");
-        if (this.models && !this.models.isReady(current.modelStudentId)) {
+        if (this.models && !this.models.isReady(current.modelStudentId, this.principalId)) {
           throw new acp.RequestError(
             -32002,
             "该会话绑定的模型已停用、删除或当前不可用，不能继续对话",

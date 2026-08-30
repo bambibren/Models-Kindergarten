@@ -23,8 +23,8 @@ async () => {
     const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
       builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => [], readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [], mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [],
+() => Promise.resolve([]), mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => Promise.resolve([]),
     });
     const agent = await agents.create({
       name: "Agent",
@@ -56,21 +56,51 @@ async () => {
     const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
       builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => [], readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [], mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [],
+() => Promise.resolve([]), mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => Promise.resolve([]),
     });
     const agent = await agents.create({
       name: "Agent", systemPrompt: "test", builtinTools: [], skillInstallationIds: [], mcps: [],
       historyPolicy: { mode: "none" }, memoryPolicy: { mode: "off" },
     });
-    const service = new SessionLaunchService(join(dir, "launches.json"), agents, new ModelStudentCatalog(new FixtureProvider(), "ready"));
+    const resolved: Array<{ ids: string[]; ownerId: string }> = [];
+    const service = new SessionLaunchService(
+      join(dir, "launches.json"),
+      agents,
+      new ModelStudentCatalog(new FixtureProvider(), "ready"),
+      { resolveMentions: (ids, ownerId) => { resolved.push({ ids, ownerId }); return Promise.resolve([]); } },
+    );
     const base = { modelStudentId: "fixture-student", agentId: agent.agentId, promptText: "使用已有海报" };
 
     const created = await service.create({ ...base, artifactMentions: [{ artifactId: "artifact_12345678" }] });
     expect(created.artifactMentions).toEqual([{ artifactId: "artifact_12345678" }]);
+    expect(resolved).toEqual([{ ids: ["artifact_12345678"], ownerId: "local-admin" }]);
     expect((await service.get(created.launchId)).artifactMentions).toEqual([{ artifactId: "artifact_12345678" }]);
     await expect(service.create({ ...base, artifactMentions: [{ displayName: "伪造展示字段" }] }))
       .rejects.toThrow("artifactMentions 格式无效");
+  });
+
+  it("拒绝使用其他账号的 ModelStudent 创建启动草稿", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-session-launch-owner-"));
+    dirs.push(dir);
+    const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
+      builtinToolIds: () => [],
+      readySkillInstallationIds: () => Promise.resolve([]),
+      mcpCapabilities: () => Promise.resolve([]),
+    });
+    const agent = await agents.create({
+      name: "Owner B Agent", systemPrompt: "test", builtinTools: [], skillInstallationIds: [], mcps: [],
+      historyPolicy: { mode: "none" }, memoryPolicy: { mode: "off" },
+    }, "owner-b");
+    const models = new ModelStudentCatalog();
+    models.register(new FixtureProvider(), { initialStatus: "ready", ownerId: "owner-a" });
+    const service = new SessionLaunchService(join(dir, "launches.json"), agents, models);
+
+    await expect(service.create({
+      modelStudentId: "fixture-student",
+      agentId: agent.agentId,
+      promptText: "开始",
+    }, "owner-b")).rejects.toThrow("ModelStudent 不可用");
   });
 
   it("读取过期草稿时返回 410 并同步清理持久化记录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
@@ -91,8 +121,8 @@ async () => {
     const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
       builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => [], readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [], mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [],
+() => Promise.resolve([]), mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => Promise.resolve([]),
     });
     const service = new SessionLaunchService(file, agents, new ModelStudentCatalog(new FixtureProvider(), "ready"));
 

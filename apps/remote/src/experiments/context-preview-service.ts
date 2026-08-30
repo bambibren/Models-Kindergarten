@@ -30,7 +30,7 @@ async previewTest(
     ownerId = "local-admin",
   ): Promise<ContextPreviewResponseV2> {
     const resolved = await this.resolver.preview(ownerId, test.policy, promptText, test.modelStudentId);
-    const summary = this.resolver.modelSummary(test.modelStudentId);
+    const summary = this.resolver.modelSummary(test.modelStudentId, ownerId);
     if (!summary || summary.status !== "ready") {
       throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "ModelStudent 不可用", false);
     }

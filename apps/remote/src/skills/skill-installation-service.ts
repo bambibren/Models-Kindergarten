@@ -43,11 +43,10 @@ async importExisting(ownerId = "local-admin"): Promise<void> {
     // 达到目录容量时，不把未加载的旧记录误判为删除；它们保留事实但退出 Runtime 能力。
     for (const stale of persisted.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) =>
-      item.ownerId === ownerId &&
       item.state !== "uninstalled" &&
       remoteSource(item.source) &&
       !registeredNames.has(item.skillName))) {
-      await this.agents.removeSkillBindings(stale.skillInstallationId, ownerId);
+      await this.agents.removeSkillBindings(stale.skillInstallationId, stale.ownerId);
       if (capacitySaturated) {
         await this.repository.putInstallation({
           ...stale,
@@ -68,24 +67,26 @@ async importExisting(ownerId = "local-admin"): Promise<void> {
 
     const active = (await this.repository.listInstallations())
       .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.ownerId === ownerId && item.state !== "uninstalled");
+(item) => item.state !== "uninstalled");
     for (const skill of registered) {
       const matches = active.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.skillName === skill.name);
-      if (matches.length > 1) throw new Error(`Skill name 存在重复安装记录: ${skill.name}`);
-      const existing = matches[0];
-      if (existing) {
-        if (existing.state !== "ready") {
-          const { error: _error, ...restored } = existing;
-          await this.repository.putInstallation({
-            ...restored,
-            state: "ready",
-            updatedAt: new Date().toISOString(),
-          });
+      if (matches.length > 0) {
+        for (const existing of matches) {
+          if (existing.state !== "ready") {
+            const { error: _error, ...restored } = existing;
+            await this.repository.putInstallation({
+              ...restored,
+              state: "ready",
+              updatedAt: new Date().toISOString(),
+            });
+          }
+          this.readyIds.add(existing.skillInstallationId);
         }
-        this.readyIds.add(existing.skillInstallationId);
         continue;
       }
+      // 用户安装目录没有 owner 元数据；没有持久安装记录时视为孤立内容，不能转赠给 local-admin。
+      if (skill.scope === "user") continue;
       const now = new Date().toISOString();
       const skillInstallationId = randomUUID();
       await this.repository.putInstallation({
@@ -126,7 +127,7 @@ async get(id: string, ownerId = "local-admin"): Promise<SkillInstallation> {
   }
 
   /** 读取「readyInstallationIds」所需数据，并遵守作用域、分页与容量边界。 */
-async readyInstallationIds(ownerId = "local-admin"): Promise<string[]> {
+  async readyInstallationIds(ownerId = "local-admin"): Promise<string[]> {
     const ids = (await this.list(ownerId)).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.state === "ready").map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.skillInstallationId);
@@ -135,8 +136,14 @@ async readyInstallationIds(ownerId = "local-admin"): Promise<string[]> {
     return ids;
   }
 
+  /** 返回账号仍拥有的安装记录；暂不可用记录仍用于判断引用没有被删除。 */
+  async installationIds(ownerId = "local-admin"): Promise<string[]> {
+    return (await this.list(ownerId)).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.skillInstallationId);
+  }
+
   /** 执行「uninstall」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async uninstall(id: string, ownerId = "local-admin"): Promise<{ removedAgentBindings: string[] }> {
+  async uninstall(id: string, ownerId = "local-admin"): Promise<{ removedAgentBindings: string[] }> {
     const installation = await this.get(id, ownerId);
     const installed = this.registry.all().find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.name === installation.skillName);
@@ -145,12 +152,15 @@ async uninstall(id: string, ownerId = "local-admin"): Promise<{ removedAgentBind
     }
 
     const agents = await this.agents.removeSkillBindings(installation.skillInstallationId, ownerId);
-
-    const name = installed?.name ?? installation.displayName;
-    if (name) await this.installer.uninstall(name);
-    await this.registry.refresh();
     await this.repository.removeInstallation(installation.skillInstallationId);
     this.readyIds.delete(installation.skillInstallationId);
+    const stillReferenced = (await this.repository.listInstallations()).some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.skillName === installation.skillName && item.state !== "uninstalled");
+    if (!stillReferenced) {
+      const name = installed?.name ?? installation.displayName;
+      if (name) await this.installer.uninstall(name);
+      await this.registry.refresh();
+    }
     return { removedAgentBindings: agents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (agent) => agent.agentId).toSorted() };
   }
@@ -298,7 +308,8 @@ private async createJob(
 
   /** 执行「run」主流程，传播取消与失败并在结束时清理临时资源。 */
 private async run(jobId: string, mode: "ensure" | "update", agentId?: string): Promise<SkillInstallJob> {
-    let job = await this.getJob(jobId);
+    let job = await this.repository.getJob(jobId);
+    if (!job) throw new ApiProblemError(404, "NOT_FOUND", "Skill 安装任务不存在", false);
     job = { ...job, state: "running", updatedAt: new Date().toISOString() };
     await this.repository.putJob(job);
     const completed: SkillInstallJobItem[] = [];
@@ -341,19 +352,40 @@ private async run(jobId: string, mode: "ensure" | "update", agentId?: string): P
   }
 
   /** 执行「installItem」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-private async installItem(
+  private async installItem(
     item: SkillInstallJobItem,
     ownerId: string,
     mode: "ensure" | "update",
   ): Promise<SkillInstallJobItem> {
     if (item.source.kind === "approved_local") throw new Error("安装任务不接受本地派生来源");
     const source = item.source;
+    const allInstallations = await this.repository.listInstallations();
     const existing = (await this.list(ownerId)).find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (candidate) => {
       return this.sourcePolicy.sameSource(candidate.source, source);
     });
     if (existing && mode === "ensure") {
       return { ...item, state: "ready", skillInstallationId: existing.skillInstallationId, disposition: "reused" };
+    }
+    const shared = allInstallations.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.ownerId !== ownerId && candidate.state === "ready" && this.sourcePolicy.sameSource(candidate.source, source));
+    if (!existing && shared) {
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      await this.repository.putInstallation({
+        ...shared,
+        skillInstallationId: id,
+        ownerId,
+        installedPathRef: `skill-root:${id}`,
+        createdAt: now,
+        updatedAt: now,
+      });
+      this.readyIds.add(id);
+      return { ...item, source: shared.source, state: "ready", skillInstallationId: id, disposition: "reused" };
+    }
+    if (existing && mode === "update" && allInstallations.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.ownerId !== ownerId && candidate.state === "ready" && candidate.skillName === existing.skillName)) {
+      throw new ApiProblemError(409, "SKILL_SOURCE_NAME_CONFLICT", "同名 Skill 正被其他账号使用，不能单独更新共享内容", false);
     }
     if (!existing) {
       const installedCount = (await this.list(ownerId)).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */

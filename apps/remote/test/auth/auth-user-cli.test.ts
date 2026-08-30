@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runAuthUserCli } from "../../src/auth/auth-user-cli.js";
 import { AccountDataDeletionService } from "../../src/auth/account-data-deletion-service.js";
+import { McpConfigStore } from "../../src/mcp/mcp-config-store.js";
 
 describe("服务器账号管理脚本", () => {
   it("支持新增、禁用、启用和修改密码", async () => {
@@ -49,6 +50,32 @@ describe("服务器账号管理脚本", () => {
     const document = JSON.parse(await readFile(join(dataDir, "artifacts.json"), "utf8"));
     expect(document.records.map((item: { artifactId: string }) => item.artifactId)).toEqual(["other"]);
     expect(await readdir(join(dataDir, "artifact-blobs"))).toEqual([otherHash]);
+  });
+
+  it("删除账号时同步清理该账号的 MCP 运行配置", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "mk-auth-mcp-data-"));
+    await writeFile(join(dataDir, "mcp-installations.json"), JSON.stringify({
+      schemaVersion: 1,
+      records: [
+        { schemaVersion: 1, mcpInstallationId: "mcp-owner-a", ownerId: "owner-a" },
+        { schemaVersion: 1, mcpInstallationId: "mcp-owner-b", ownerId: "owner-b" },
+      ],
+    }));
+    const config = new McpConfigStore(join(dataDir, "mcp/config.json"));
+    await config.save({
+      version: 1,
+      servers: [
+        { id: "mcp-owner-a", displayName: "A", enabled: true, source: "manual", trust: "untrusted", transport: { kind: "streamable_http", url: "https://a.example/mcp" } },
+        { id: "mcp-owner-b", displayName: "B", enabled: true, source: "manual", trust: "untrusted", transport: { kind: "streamable_http", url: "https://b.example/mcp" } },
+      ],
+      authProfiles: [],
+      agentCapabilities: { mcpTools: [], skills: [], resources: [] },
+    });
+
+    await new AccountDataDeletionService(dataDir).deleteOwner("owner-a");
+
+    expect((await config.load()).servers.map(/** 构造「map」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(server) => server.id)).toEqual(["mcp-owner-b"]);
   });
 });
 

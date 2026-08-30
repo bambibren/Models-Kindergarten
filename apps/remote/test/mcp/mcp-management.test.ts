@@ -35,6 +35,12 @@ async () => {
     expect(installed).not.toHaveProperty("credentialRef");
     expect(manager.capabilitySnapshots().some(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (item) => item.serverId === installed.mcpInstallationId)).toBe(true);
+    expect(await service.capabilities("another-owner")).toEqual([]);
+    expect(await service.capabilities("local-admin")).toMatchObject([{
+      installationId: installed.mcpInstallationId,
+      tools: ["echo"],
+      resources: ["demo://guide"],
+    }]);
   });
 
   it("拒绝 Bearer 与未成功测试的安装", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
@@ -113,21 +119,15 @@ async function setup(withBuiltin = false) {
     config, testSecretStore(), new FakeConnector(),
   );
   await manager.initialize();
+  let service: McpManagementService | undefined;
   const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
     builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => [], readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [],
+() => Promise.resolve([]),
     mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => manager.capabilitySnapshots().map(/** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(item) => ({
-      installationId: item.serverId,
-      tools: item.tools.map(/** 构造「tools」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(tool) => tool.name),
-      resources: item.resources.map(/** 构造「resources」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(resource) => resource.uri),
-    })),
+(ownerId) => service?.capabilities(ownerId) ?? Promise.resolve([]),
   });
-  const service = new McpManagementService(
+  service = new McpManagementService(
     new McpManagementRepository(join(dir, "tests.json"), join(dir, "installations.json")), manager, agents,
   );
   return { service, manager, agents };

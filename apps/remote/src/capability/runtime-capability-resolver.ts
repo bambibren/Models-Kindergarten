@@ -68,12 +68,12 @@ constructor(
 
   /** 执行「resolve」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async resolve(scope: TurnScope, currentUserMessage = ""): Promise<ResolvedRuntimeCapabilities> {
-    const model = this.models.requireProvider(scope.modelStudentId);
+    const model = this.models.requireProvider(scope.modelStudentId, scope.ownerId);
     if (scope.experimentRunRef && this.experimentSnapshot) {
       const snapshot = await this.experimentSnapshot(scope.experimentRunRef.experimentId, scope.experimentRunRef.variantId);
       if (!snapshot) throw new Error("EXPERIMENT_SNAPSHOT_UNAVAILABLE: 冻结的 Test 快照不存在");
       if (snapshot.model.modelStudentId !== scope.modelStudentId) throw new Error("EXPERIMENT_SNAPSHOT_MISMATCH: ModelStudent 不一致");
-      const input = this.agents.validateContextPolicy(snapshot.policy);
+      const input = await this.agents.validateContextPolicy(snapshot.policy, scope.ownerId);
       const now = snapshot.frozenAt;
       const agent: AgentRecord = {
         schemaVersion: 1,
@@ -102,8 +102,8 @@ setExperimentSnapshotResolver(
   }
 
   /** 执行「modelSummary」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-modelSummary(modelStudentId: string) {
-    return this.models.get(modelStudentId);
+modelSummary(modelStudentId: string, ownerId?: string) {
+    return this.models.get(modelStudentId, ownerId);
   }
 
   /** 执行「preview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -113,8 +113,8 @@ async preview(
     prompt: string,
     modelStudentId: string,
   ): Promise<ResolvedRuntimeCapabilities> {
-    const model = this.models.requireProvider(modelStudentId);
-    const input = this.agents.validateContextPolicy(policy);
+    const model = this.models.requireProvider(modelStudentId, ownerId);
+    const input = await this.agents.validateContextPolicy(policy, ownerId);
     const now = new Date().toISOString();
     const agent: AgentRecord = {
       schemaVersion: 1,

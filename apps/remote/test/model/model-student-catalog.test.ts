@@ -23,4 +23,15 @@ describe("ModelStudentCatalog zero-model startup", () => {
     });
     expect(catalog.provider(provider.student.id, false)).toBeUndefined();
   });
+
+  it("用户入园模型只向所属账号解析，共享系统模型仍可被所有账号读取", () => {
+    const owned = new FixtureProvider();
+    const catalog = new ModelStudentCatalog();
+    catalog.register(owned, { initialStatus: "ready", ownerId: "owner-a" });
+
+    expect(catalog.isReady(owned.student.id, "owner-a")).toBe(true);
+    expect(catalog.isReady(owned.student.id, "owner-b")).toBe(false);
+    expect(catalog.get(owned.student.id, "owner-b")).toBeUndefined();
+    expect(() => catalog.requireProvider(owned.student.id, "owner-b")).toThrow("不存在");
+  });
 });

@@ -133,7 +133,7 @@ async install(raw: unknown, ownerId = "local-admin"): Promise<McpInstallationVie
   }
 
   /** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
-async list(ownerId = "local-admin"): Promise<McpInstallationView[]> {
+  async list(ownerId = "local-admin"): Promise<McpInstallationView[]> {
     return (await this.repository.listInstallations())
       .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.ownerId === ownerId && item.state !== "uninstalled")
@@ -141,6 +141,27 @@ async list(ownerId = "local-admin"): Promise<McpInstallationView[]> {
 (item) => ({ ...item, deletable: !this.protectedIds.has(item.mcpInstallationId) }))
       .toSorted(/** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
 (left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  /** 返回当前账号真正可绑定的 MCP 能力，不把其他账号或禁用连接暴露给 Agent。 */
+  async capabilities(ownerId = "local-admin"): Promise<Array<{ installationId: string; tools: string[]; resources: string[] }>> {
+    return (await this.list(ownerId))
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.enabled && item.state === "connected" && item.snapshot)
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => ({
+        installationId: item.mcpInstallationId,
+        tools: item.snapshot?.tools.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(tool) => tool.name) ?? [],
+        resources: item.snapshot?.resources.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(resource) => resource.uri) ?? [],
+      }));
+  }
+
+  /** 返回账号仍拥有的 MCP 安装记录；disabled/degraded 不等于引用已删除。 */
+  async installationIds(ownerId = "local-admin"): Promise<string[]> {
+    return (await this.list(ownerId)).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.mcpInstallationId);
   }
 
   /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */

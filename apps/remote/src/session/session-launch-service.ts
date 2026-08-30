@@ -24,12 +24,21 @@ export interface SessionLaunchDraft {
   expiresAt: string;
 }
 
+interface ArtifactMentionResolver {
+  resolveMentions(ids: string[], ownerId: string): Promise<unknown>;
+}
+
 /** 描述「SessionLaunchService」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class SessionLaunchService {
   private readonly store: AtomicJsonStore<SessionLaunchDraft>;
 
   /** 初始化「SessionLaunchService」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-constructor(file: string, private readonly agents: AgentService, private readonly models: ModelStudentCatalog) {
+constructor(
+    file: string,
+    private readonly agents: AgentService,
+    private readonly models: ModelStudentCatalog,
+    private readonly artifacts?: ArtifactMentionResolver,
+  ) {
     this.store = new AtomicJsonStore({ file, schemaVersion: 1, validate: isDraft });
   }
 
@@ -44,8 +53,12 @@ async create(raw: unknown, ownerId = "local-admin"): Promise<SessionLaunchDraft>
     if (!promptText || promptText.length > PRODUCT_CONFIG.sessionLaunch.maxPromptCharacters) {
       throw invalid(`promptText 必须为 1 到 ${PRODUCT_CONFIG.sessionLaunch.maxPromptCharacters} 个字符`);
     }
-    if (!this.models.isReady(raw.modelStudentId)) throw new ApiProblemError(409, "SESSION_BINDING_INVALID", "ModelStudent 不可用", false);
+    if (!this.models.isReady(raw.modelStudentId, ownerId)) throw new ApiProblemError(409, "SESSION_BINDING_INVALID", "ModelStudent 不可用", false);
     await this.agents.get(raw.agentId, ownerId);
+    if (artifactMentions.length > 0) {
+      await this.artifacts?.resolveMentions(artifactMentions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.artifactId), ownerId);
+    }
     const created = new Date();
     const draft: SessionLaunchDraft = {
       schemaVersion: 1,

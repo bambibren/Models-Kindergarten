@@ -85,6 +85,90 @@ async () => {
     })).rejects.toThrow("CAPABILITY_REFERENCE_INVALID");
   });
 
+  it("拒绝绑定其他账号拥有的 Skill 和 MCP Installation", async () => {
+    const service = await makeService();
+    await expect(service.create({
+      ...input("跨账号 Skill"),
+      skillInstallationIds: ["skill-1"],
+    }, "user-2")).rejects.toThrow("Skill Installation 不可用");
+    await expect(service.create({
+      ...input("跨账号 MCP"),
+      mcps: [{
+        mcpInstallationId: "mcp-1",
+        enabled: true,
+        tools: [{ remoteName: "search", enabled: true, permission: "allow" }],
+        resources: [],
+      }],
+    }, "user-2")).rejects.toThrow("MCP Installation 不可用");
+  });
+
+  it("清理历史 Agent 中不属于当前账号的 Skill 和 MCP 引用", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-agent-reconcile-"));
+    dirs.push(dir);
+    const repository = new AgentRepository(join(dir, "agents.json"));
+    const now = new Date().toISOString();
+    await repository.insert({
+      schemaVersion: 1,
+      agentId: "legacy-owner-b",
+      ownerId: "user-2",
+      recordKind: "system_default",
+      name: "系统默认 Agent",
+      systemPrompt: "test",
+      builtinTools: [],
+      skills: [{ skillInstallationId: "skill-owner-a", enabled: true }],
+      mcps: [{ mcpInstallationId: "mcp-owner-a", enabled: true, tools: [], resources: [] }],
+      historyPolicy: { mode: "none" },
+      memoryPolicy: { mode: "off" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const service = new AgentService(repository, {
+      builtinToolIds: () => [],
+      readySkillInstallationIds: () => Promise.resolve([]),
+      mcpCapabilities: () => Promise.resolve([]),
+    });
+
+    const repaired = await service.reconcileCapabilities("user-2");
+
+    expect(repaired).toHaveLength(1);
+    expect(await service.get("legacy-owner-b", "user-2")).toMatchObject({ skills: [], mcps: [] });
+  });
+
+  it("保留当前账号仍拥有但暂不可用的 Skill 和 MCP 引用", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-agent-disabled-assets-"));
+    dirs.push(dir);
+    const repository = new AgentRepository(join(dir, "agents.json"));
+    const now = new Date().toISOString();
+    await repository.insert({
+      schemaVersion: 1,
+      agentId: "agent-disabled-assets",
+      ownerId: "owner-a",
+      recordKind: "user",
+      name: "保留禁用资产",
+      systemPrompt: "test",
+      builtinTools: [],
+      skills: [{ skillInstallationId: "skill-disabled", enabled: true }],
+      mcps: [{ mcpInstallationId: "mcp-disabled", enabled: true, tools: [], resources: [] }],
+      historyPolicy: { mode: "none" },
+      memoryPolicy: { mode: "off" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const service = new AgentService(repository, {
+      builtinToolIds: () => [],
+      readySkillInstallationIds: () => Promise.resolve([]),
+      mcpCapabilities: () => Promise.resolve([]),
+      skillInstallationIds: () => Promise.resolve(["skill-disabled"]),
+      mcpInstallationIds: () => Promise.resolve(["mcp-disabled"]),
+    });
+
+    expect(await service.reconcileCapabilities("owner-a")).toEqual([]);
+    expect(await service.get("agent-disabled-assets", "owner-a")).toMatchObject({
+      skills: [{ skillInstallationId: "skill-disabled" }],
+      mcps: [{ mcpInstallationId: "mcp-disabled" }],
+    });
+  });
+
   it("列表支持搜索、cursor 分页且后一次成功保存生效", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const service = await makeService();
@@ -152,9 +236,11 @@ async function makeService(): Promise<AgentService> {
     builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => ["read_file", "write_file"],
     readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => ["skill-1"],
+(ownerId) => Promise.resolve(ownerId === "local-admin" ? ["skill-1"] : []),
     mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [{ installationId: "mcp-1", tools: ["search"], resources: ["docs://index"] }],
+(ownerId) => Promise.resolve(ownerId === "local-admin"
+      ? [{ installationId: "mcp-1", tools: ["search"], resources: ["docs://index"] }]
+      : []),
   });
 }
 

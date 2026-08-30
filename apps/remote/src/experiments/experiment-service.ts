@@ -380,7 +380,7 @@ async generateAnnotationWorksheet(experimentId: string, force = false, ownerId =
     const selectedModelStudentId = worksheetModelStudentId?.trim() || experiment.worksheetModelStudentId;
     const replacingModel = selectedModelStudentId !== experiment.worksheetModelStudentId;
     if (experiment.annotationWorksheet && !force && !replacingModel) return experiment.annotationWorksheet;
-    if (!this.models.isReady(selectedModelStudentId)) {
+    if (!this.models.isReady(selectedModelStudentId, ownerId)) {
       throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "所选评测辅助 ModelStudent 不可用", false);
     }
     if (!this.worksheetGenerator) throw new ApiProblemError(503, "WORKSHEET_GENERATOR_UNAVAILABLE", "标注题目生成器不可用", true);
@@ -533,11 +533,11 @@ private traceRuntimeFacts(sessionId: string, turnId: string): import("@kindergar
 
   /** 校验并规范化「validateDraftDependencies」输入，非法数据直接返回明确错误。 */
 private async validateDraftDependencies(input: import("@kindergarten/contracts").ExperimentDraftV2, ownerId: string): Promise<void> {
-    if (!this.models.isReady(input.worksheetModelStudentId)) {
+    if (!this.models.isReady(input.worksheetModelStudentId, ownerId)) {
       throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "评测辅助 ModelStudent 不可用", false);
     }
     for (const [index, test] of input.tests.entries()) {
-      if (!this.models.isReady(test.modelStudentId)) {
+      if (!this.models.isReady(test.modelStudentId, ownerId)) {
         throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", `Test ${test.label} 的 ModelStudent 不可用`, false, [
           { path: `tests.${index}.modelStudentId`, message: "ModelStudent 必须为 Ready" },
         ]);

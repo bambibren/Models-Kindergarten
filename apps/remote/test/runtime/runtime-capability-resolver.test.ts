@@ -118,9 +118,9 @@ async function setup() {
     builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => ["read_file", "write_file", "build_pptx"],
     readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [],
+() => Promise.resolve([]),
     mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [],
+() => Promise.resolve([]),
   });
   const agent = await service.create(agentInput("初始提示词", false));
   const mcp = new McpClientManager(

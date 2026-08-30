@@ -92,6 +92,7 @@ async restoreInstalled(): Promise<ModelStudentSummary[]> {
           studentMetadata(student, connection),
           "模型已停用；历史 Session 可查看，但不能继续对话",
           {
+            ownerId: student.ownerId,
             deletable: true,
             lastCheckedAt: student.snapshot.testedAt,
             supports: supportsFrom(student.snapshot),
@@ -113,6 +114,7 @@ async restoreInstalled(): Promise<ModelStudentSummary[]> {
         restored.push(this.catalog.registerCapacityBlocked(
           studentMetadata(student, connection),
           {
+            ownerId: student.ownerId,
             deletable: true,
             lastCheckedAt: student.snapshot.testedAt,
             supports: supportsFrom(student.snapshot),
@@ -177,6 +179,7 @@ async restoreInstalled(): Promise<ModelStudentSummary[]> {
         }
       }
       restored.push(this.catalog.register(provider, {
+        ownerId: student.ownerId,
         initialStatus,
         ...(statusMessage ? { statusMessage } : {}),
         lastCheckedAt: student.snapshot.testedAt,
@@ -405,6 +408,7 @@ private async installClaimed(
       }
       await this.repository.setLifecycle(modelStudentId, ownerId, "active");
       const summary = this.catalog.register(provider, {
+        ownerId,
         initialStatus: "ready",
         lastCheckedAt: test.snapshot.testedAt,
         deletable: true,
@@ -446,7 +450,7 @@ async list(ownerId = "local-admin"): Promise<ModelStudentSummary[]> {
 
   /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */
 async get(modelStudentId: string, ownerId = "local-admin"): Promise<ModelStudentSummary> {
-    const summary = this.catalog.get(modelStudentId);
+    const summary = this.catalog.get(modelStudentId, ownerId);
     if (!summary) throw new ApiProblemError(404, "NOT_FOUND", "ModelStudent 不存在", false);
     if (summary.deletable) {
       const record = await this.repository.getStudent(modelStudentId);

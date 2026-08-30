@@ -12,8 +12,10 @@ import type { AgentRepository } from "./agent-repository.js";
 /** 描述「AgentCapabilitySource」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface AgentCapabilitySource {
   builtinToolIds(): string[];
-  readySkillInstallationIds(): string[];
-  mcpCapabilities(): Array<{ installationId: string; tools: string[]; resources: string[] }>;
+  readySkillInstallationIds(ownerId: string): Promise<string[]>;
+  mcpCapabilities(ownerId: string): Promise<Array<{ installationId: string; tools: string[]; resources: string[] }>>;
+  skillInstallationIds?(ownerId: string): Promise<string[]>;
+  mcpInstallationIds?(ownerId: string): Promise<string[]>;
 }
 
 /** 描述「AgentService」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -30,7 +32,7 @@ constructor(
 
   /** 确保每个账号都有且只有一个系统默认 Agent；该记录不绑定任何 ModelStudent。 */
   async ensureDefault(raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
-    const input = this.validate(raw);
+    const input = await this.validate(raw, ownerId);
     const now = new Date().toISOString();
     const record = await this.repository.ensureSystemDefault({
       schemaVersion: 1,
@@ -55,7 +57,7 @@ constructor(
 
   /** 根据已校验输入构建「create」结果，不额外持有调用方的大对象。 */
 async create(raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
-    const input = this.validate(raw);
+    const input = await this.validate(raw, ownerId);
     const now = new Date().toISOString();
     const record: AgentRecord = {
       schemaVersion: 1,
@@ -109,7 +111,7 @@ async list(options: { query?: string; cursor?: string; limit?: number }, ownerId
 
   /** 更新「update」对应状态，并保持写入顺序、原子性与容量约束。 */
 async update(agentId: string, raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
-    const input = this.validate(raw);
+    const input = await this.validate(raw, ownerId);
     const current = await this.get(agentId, ownerId);
     const record: AgentRecord = {
       schemaVersion: 1,
@@ -147,11 +149,11 @@ async createExperimentPolicy(
     variant: import("@kindergarten/contracts").ExperimentVariant,
     ownerId = "local-admin",
   ): Promise<AgentRecord> {
-    const input = this.validate({
+    const input = await this.validate({
       name: `experiment-${experimentId}-${variant.label}`,
       description: "对照实验运行策略；不会出现在 Agent 管理列表",
       ...variant.policy,
-    });
+    }, ownerId);
     const now = new Date().toISOString();
     const record: AgentRecord = {
       schemaVersion: 1,
@@ -176,7 +178,7 @@ async createExperimentPolicy(
 
   /** 汇总「mergeReadySkills」对应指标，保持缺失字段语义且不重复计算同一来源。 */
 async mergeReadySkills(agentId: string, installationIds: string[], ownerId = "local-admin"): Promise<AgentRecord> {
-    const ready = new Set(this.capabilities.readySkillInstallationIds());
+    const ready = new Set(await this.capabilities.readySkillInstallationIds(ownerId));
     for (const id of installationIds) {
       if (!ready.has(id)) throw invalid(`Skill Installation 不可用: ${id}`);
     }
@@ -236,17 +238,50 @@ async removeSkillBindings(installationId: string, ownerId = "local-admin"): Prom
   }
 
   /** 执行「capabilityOptions」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-capabilityOptions() {
+async capabilityOptions(ownerId = "local-admin") {
     return {
       builtinTools: this.capabilities.builtinToolIds(),
-      readySkillInstallationIds: this.capabilities.readySkillInstallationIds(),
-      mcps: this.capabilities.mcpCapabilities(),
+      readySkillInstallationIds: await this.capabilities.readySkillInstallationIds(ownerId),
+      mcps: await this.capabilities.mcpCapabilities(ownerId),
     };
   }
 
   /** 校验并规范化「validateContextPolicy」输入，非法数据直接返回明确错误。 */
-  validateContextPolicy(policy: import("@kindergarten/contracts").ExperimentContextPolicy): AgentInput {
-    return this.validate({ name: "context-preview", description: "preview only", ...policy });
+  validateContextPolicy(policy: import("@kindergarten/contracts").ExperimentContextPolicy, ownerId = "local-admin"): Promise<AgentInput> {
+    return this.validate({ name: "context-preview", description: "preview only", ...policy }, ownerId);
+  }
+
+  /** 清理账号历史 Agent 中已经不属于该账号或已失效的 Skill/MCP 引用。 */
+  async reconcileCapabilities(ownerId = "local-admin"): Promise<AgentRecord[]> {
+    const readySkillIds = await this.capabilities.readySkillInstallationIds(ownerId);
+    const readyMcpCapabilities = await this.capabilities.mcpCapabilities(ownerId);
+    const existingSkills = new Set(this.capabilities.skillInstallationIds
+      ? await this.capabilities.skillInstallationIds(ownerId)
+      : readySkillIds);
+    const existingMcps = new Set(this.capabilities.mcpInstallationIds
+      ? await this.capabilities.mcpInstallationIds(ownerId)
+      : readyMcpCapabilities.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.installationId));
+    const affected = (await this.repository.all()).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(record) => record.ownerId === ownerId && (
+      record.skills.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => !existingSkills.has(item.skillInstallationId)) ||
+      record.mcps.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => !existingMcps.has(item.mcpInstallationId))
+    ));
+    const updated: AgentRecord[] = [];
+    for (const agent of affected) {
+      updated.push(await this.repository.update(agent.agentId, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(record) => ({
+        ...record,
+        skills: record.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => existingSkills.has(item.skillInstallationId)),
+        mcps: record.mcps.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => existingMcps.has(item.mcpInstallationId)),
+        updatedAt: new Date().toISOString(),
+      })));
+    }
+    return updated;
   }
 
   /** 系统默认记录按持久类型保护；protectedIds 继续兼容进程内显式保护。 */
@@ -255,15 +290,15 @@ capabilityOptions() {
   }
 
   /** 校验并规范化「validate」输入，非法数据直接返回明确错误。 */
-private validate(raw: unknown): AgentInput {
+private async validate(raw: unknown, ownerId: string): Promise<AgentInput> {
     let input: AgentInput;
     try { input = canonicalAgentInput(parseAgentInput(raw)); }
     catch (error) { throw new ApiProblemError(400, "VALIDATION_FAILED", errorText(error), false); }
     const tools = new Set(this.capabilities.builtinToolIds());
     for (const binding of input.builtinTools) if (!tools.has(binding.toolId)) throw invalid(`Built-in Tool 不存在: ${binding.toolId}`);
-    const skills = new Set(this.capabilities.readySkillInstallationIds());
+    const skills = new Set(await this.capabilities.readySkillInstallationIds(ownerId));
     for (const id of input.skillInstallationIds) if (!skills.has(id)) throw invalid(`Skill Installation 不可用: ${id}`);
-    const mcps = new Map(this.capabilities.mcpCapabilities().map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+    const mcps = new Map((await this.capabilities.mcpCapabilities(ownerId)).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => [item.installationId, item]));
     for (const binding of input.mcps) {
       const snapshot = mcps.get(binding.mcpInstallationId);

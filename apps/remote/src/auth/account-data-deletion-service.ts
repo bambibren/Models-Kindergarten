@@ -3,6 +3,7 @@ import { copyFile, mkdir, readFile, readdir, rename, rm, unlink, writeFile } fro
 import { basename, dirname, extname, join } from "node:path";
 import type { WritableSecretStore } from "../mcp/secret-store.js";
 import type { SecretRef } from "../mcp/mcp-types.js";
+import { McpConfigStore } from "../mcp/mcp-config-store.js";
 import { SessionRepository } from "../repository/session-repository.js";
 
 interface JsonDocument { schemaVersion: number; records: unknown[] }
@@ -26,6 +27,13 @@ export class AccountDataDeletionService {
     const refs = catalog?.records.flatMap((value) => credentialRefs(value, ownerId)) ?? [];
     for (const ref of refs) await this.secrets?.delete(ref);
 
+    const mcpInstallations = await readAtomic(join(this.dataDir, "mcp-installations.json"));
+    const mcpIds = new Set(mcpInstallations?.records.flatMap((value) =>
+      record(value) && value.ownerId === ownerId && typeof value.mcpInstallationId === "string"
+        ? [value.mcpInstallationId]
+        : []) ?? []);
+    await this.removeMcpRuntimeConfig(mcpIds);
+
     let records = 0;
     for (const name of ATOMIC_OWNER_FILES) records += await removeAtomicOwner(join(this.dataDir, name), ownerId);
 
@@ -46,6 +54,43 @@ export class AccountDataDeletionService {
     for (const id of sessionIds) await rm(join(this.dataDir, "workspaces", id), { recursive: true, force: true });
     await removeEvaluations(this.dataDir, new Set(sessionIds));
     return { sessions: sessionIds.length, records };
+  }
+
+  /** 停机删除账号时同步移除 Manager 的运行配置，避免安装记录消失后仍在重启时连接。 */
+  private async removeMcpRuntimeConfig(ids: Set<string>): Promise<void> {
+    if (ids.size === 0) return;
+    const store = new McpConfigStore(join(this.dataDir, "mcp/config.json"));
+    const config = await store.load();
+    const removedServers = config.servers.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(server) => ids.has(server.id));
+    if (removedServers.length === 0) return;
+    const servers = config.servers.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(server) => !ids.has(server.id));
+    const retainedAuthIds = new Set(servers.flatMap(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(server) => server.transport.kind === "streamable_http" && server.transport.authProfileId
+      ? [server.transport.authProfileId]
+      : []));
+    const removedAuthIds = new Set(removedServers.flatMap(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(server) => server.transport.kind === "streamable_http" && server.transport.authProfileId && !retainedAuthIds.has(server.transport.authProfileId)
+      ? [server.transport.authProfileId]
+      : []));
+    for (const profile of config.authProfiles) {
+      if (removedAuthIds.has(profile.id) && profile.tokenRef) await this.secrets?.delete(profile.tokenRef);
+    }
+    await store.save({
+      ...config,
+      servers,
+      authProfiles: config.authProfiles.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(profile) => !removedAuthIds.has(profile.id)),
+      agentCapabilities: {
+        ...config.agentCapabilities,
+        mcpTools: config.agentCapabilities.mcpTools.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(tool) => ![...ids].some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(id) => tool.id.startsWith(`mcp:${id}:tool:`))),
+        resources: config.agentCapabilities.resources.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(resource) => !ids.has(resource.serverId)),
+      },
+    });
   }
 }
 

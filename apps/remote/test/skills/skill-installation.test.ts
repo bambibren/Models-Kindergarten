@@ -443,6 +443,74 @@ async () => {
     await expect(service.get("legacy-install")).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("多个账号共享同一 Skill 文件时最后一个账号卸载后才删除物理目录", async () => {
+    const { service, repository, installer } = await setup();
+    const now = new Date().toISOString();
+    const source = parseGitHubSkillUrl(URL_A).source;
+    for (const [skillInstallationId, ownerId] of [["install-a", "owner-a"], ["install-b", "owner-b"]] as const) {
+      await repository.putInstallation({
+        schemaVersion: 1,
+        skillInstallationId,
+        ownerId,
+        skillName: "frontend-design",
+        displayName: "frontend-design",
+        state: "ready",
+        source,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await service.uninstall("install-a", "owner-a");
+    expect(installer.uninstall).not.toHaveBeenCalled();
+    expect(await service.get("install-b", "owner-b")).toMatchObject({ skillName: "frontend-design" });
+
+    await service.uninstall("install-b", "owner-b");
+    expect(installer.uninstall).toHaveBeenCalledWith("frontend-design");
+  });
+
+  it("第二个账号安装相同来源时复用物理 Skill 并创建独立安装记录", async () => {
+    const { service, repository, installer, agents } = await setup();
+    const now = new Date().toISOString();
+    await repository.putInstallation({
+      schemaVersion: 1,
+      skillInstallationId: "install-owner-a",
+      ownerId: "owner-a",
+      skillName: "frontend-design",
+      displayName: "frontend-design",
+      state: "ready",
+      source: parseGitHubSkillUrl(URL_A).source,
+      contentHash: "shared-hash",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const agent = await agents.create({
+      name: "Owner B Agent", systemPrompt: "test", builtinTools: [], skillInstallationIds: [], mcps: [],
+      historyPolicy: { mode: "none" }, memoryPolicy: { mode: "off" },
+    }, "owner-b");
+    const scope: TurnScope = {
+      schemaVersion: 1,
+      ownerId: "owner-b",
+      sessionId: "session-owner-b",
+      turnId: "turn-owner-b",
+      purpose: "chat",
+      modelStudentId: "fixture-student",
+      agentId: agent.agentId,
+    };
+
+    const job = await service.ensureForTurn({ sourceUrls: [URL_A], mode: "ensure" }, scope, `安装 ${URL_A}`);
+
+    expect(installer.install).not.toHaveBeenCalled();
+    expect(job.items[0]).toMatchObject({ state: "ready", disposition: "reused" });
+    const ownerB = await service.list("owner-b");
+    expect(ownerB).toHaveLength(1);
+    expect(ownerB[0]?.skillInstallationId).not.toBe("install-owner-a");
+    expect((await agents.get(agent.agentId, "owner-b")).skills).toEqual([{
+      skillInstallationId: ownerB[0]?.skillInstallationId,
+      enabled: true,
+    }]);
+  });
+
   it("启动时清理目录已不存在的旧 GitHub 安装记录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const { service, repository } = await setup();
@@ -533,9 +601,10 @@ async function setup(readyIds: string[] = [], resourceOrigins: string[] = []) {
     builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => [],
     readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [...new Set([...readyIds, ...(service?.readyInstallationIdsSync() ?? [])])],
+(ownerId) => service?.readyInstallationIds(ownerId).then(/** 读取「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(ids) => [...new Set([...readyIds, ...ids])]) ?? Promise.resolve([...readyIds]),
     mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [],
+() => Promise.resolve([]),
   });
   const agent = await agents.create({
     name: "测试 Agent",

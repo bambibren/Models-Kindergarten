@@ -16,6 +16,7 @@ interface CatalogCapabilities {
 
 /** 描述「ModelStudentRegistration」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelStudentRegistration {
+  ownerId?: string;
   initialStatus?: ModelStudentSummary["status"];
   statusMessage?: string;
   lastCheckedAt?: string;
@@ -24,6 +25,7 @@ export interface ModelStudentRegistration {
 }
 
 interface CatalogItem {
+  ownerId?: string;
   student: ModelStudent;
   provider?: ModelProvider;
   status: ModelStudentSummary["status"];
@@ -64,6 +66,7 @@ register(provider: ModelProvider, options: ModelStudentRegistration = {}): Model
       throw new Error(`ModelStudent ${provider.student.id} 的默认推理档位不在已验证能力中: ${configuredDefault}`);
     }
     const item: CatalogItem = {
+      ...(options.ownerId ? { ownerId: options.ownerId } : {}),
       student: structuredClone(provider.student),
       provider,
       status: options.initialStatus ?? "unknown",
@@ -96,6 +99,7 @@ register(provider: ModelProvider, options: ModelStudentRegistration = {}): Model
       defaultProfile: "balanced",
     };
     const item: CatalogItem = {
+      ...(options.ownerId ? { ownerId: options.ownerId } : {}),
       student: structuredClone(student),
       status: "capacity_blocked",
       statusMessage: options.statusMessage ?? `ModelStudent 运行目录已达到 ${PRODUCT_CONFIG.capacity.maxModelStudents} 条容量上限`,
@@ -149,8 +153,9 @@ async verifyAll(): Promise<ModelStudentSummary[]> {
   }
 
   /** 执行「all」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-all(): ModelStudentSummary[] {
-    return [...this.items.values()].map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+all(ownerId?: string): ModelStudentSummary[] {
+    return [...this.items.values()].filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => this.accessible(item, ownerId)).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => this.summary(item));
   }
 
@@ -161,29 +166,30 @@ all(): ModelStudentSummary[] {
   }
 
   /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */
-get(id: string): ModelStudentSummary | undefined {
+get(id: string, ownerId?: string): ModelStudentSummary | undefined {
     const item = this.items.get(id);
-    return item ? this.summary(item) : undefined;
+    return item && this.accessible(item, ownerId) ? this.summary(item) : undefined;
   }
 
   /** 执行「provider」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-provider(id: string, requireReady = true): ModelProvider | undefined {
+provider(id: string, requireReady = true, ownerId?: string): ModelProvider | undefined {
     const item = this.items.get(id);
-    if (!item || requireReady && item.status !== "ready") return undefined;
+    if (!item || !this.accessible(item, ownerId) || requireReady && item.status !== "ready") return undefined;
     return item.provider;
   }
 
   /** 校验并取得「requireProvider」所需对象；缺失或归属不符时立即抛出明确错误。 */
-requireProvider(id: string): ModelProvider {
+requireProvider(id: string, ownerId?: string): ModelProvider {
     const item = this.items.get(id);
-    if (!item) throw new Error(`ModelStudent 不存在: ${id}`);
+    if (!item || !this.accessible(item, ownerId)) throw new Error(`ModelStudent 不存在: ${id}`);
     if (item.status !== "ready" || !item.provider) throw new Error(`ModelStudent 不可用: ${id}`);
     return item.provider;
   }
 
   /** 判断「isReady」对应条件，只返回判定结果且不修改输入状态。 */
-isReady(id: string): boolean {
-    return this.items.get(id)?.status === "ready";
+isReady(id: string, ownerId?: string): boolean {
+    const item = this.items.get(id);
+    return Boolean(item && this.accessible(item, ownerId) && item.status === "ready");
   }
 
   /** 更新「setStatus」对应状态，并保持写入顺序、原子性与容量约束。 */
@@ -221,10 +227,15 @@ deactivate(id: string, statusMessage: string): ModelProvider | undefined {
   }
 
   /** 校验并取得「requireItem」所需对象；缺失或归属不符时立即抛出明确错误。 */
-private requireItem(id: string): CatalogItem {
+  private requireItem(id: string): CatalogItem {
     const item = this.items.get(id);
     if (!item) throw new Error(`ModelStudent 不存在: ${id}`);
     return item;
+  }
+
+  /** 没有 owner 的测试或系统目录项为共享项；用户入园记录只向所属账号开放。 */
+  private accessible(item: CatalogItem, ownerId?: string): boolean {
+    return ownerId === undefined || item.ownerId === undefined || item.ownerId === ownerId;
   }
 
   /** 汇总「summary」对应指标，保持缺失字段语义且不重复计算同一来源。 */

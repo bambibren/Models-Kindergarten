@@ -161,6 +161,7 @@ const context = new ContextAssembler([
 const agentStoreFile = resolve(dataDir, "agents.json");
 const agentRepository = new AgentRepository(agentStoreFile);
 let skillInstallations: SkillInstallationService;
+let mcpManagement: McpManagementService | undefined;
 const agentService = new AgentService(agentRepository, {
   builtinToolIds: /** 执行「builtinToolIds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 () => [
@@ -170,16 +171,13 @@ const agentService = new AgentService(agentRepository, {
     ...PPTX_TOOL_IDS,
   ],
   readySkillInstallationIds: /** 读取「readySkillInstallationIds」所需数据，并遵守作用域、分页与容量边界。 */
-() => skillInstallations?.readyInstallationIdsSync() ?? [],
+(ownerId) => skillInstallations?.readyInstallationIds(ownerId) ?? Promise.resolve([]),
   mcpCapabilities: /** 执行「mcpCapabilities」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-() => mcp.capabilitySnapshots().map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(snapshot) => ({
-    installationId: snapshot.serverId,
-    tools: snapshot.tools.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(item) => item.name),
-    resources: snapshot.resources.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(item) => item.uri),
-  })),
+(ownerId) => mcpManagement?.capabilities(ownerId) ?? Promise.resolve([]),
+  skillInstallationIds: /** 读取账号安装记录，只用于区分“已删除”和“暂不可用”。 */
+(ownerId) => skillInstallations?.installationIds(ownerId) ?? Promise.resolve([]),
+  mcpInstallationIds: /** 读取账号安装记录，只用于区分“已删除”和“暂不可用”。 */
+(ownerId) => mcpManagement?.installationIds(ownerId) ?? Promise.resolve([]),
 });
 skillInstallations = new SkillInstallationService(
   skillInstallationRepository,
@@ -195,14 +193,13 @@ skillInstallations = new SkillInstallationService(
   skillSourcePolicy,
 );
 await skillInstallations.importExisting();
-const readySkillInstallations = await skillInstallations.list();
-const mcpManagement = new McpManagementService(
+mcpManagement = new McpManagementService(
   new McpManagementRepository(resolve(dataDir, "mcp-tests.json"), resolve(dataDir, "mcp-installations.json")),
   mcp,
   agentService,
 );
 await mcpManagement.importExisting();
-const defaultAgentInput = (): AgentInput => ({
+const defaultAgentInput = async (ownerId: string): Promise<AgentInput> => ({
     name: "系统默认 Agent",
     description: "MK 为每个账号提供的初始 Agent",
     systemPrompt: process.env.AGENT_SYSTEM_PROMPT ?? DEFAULT_AGENT_SYSTEM_PROMPT,
@@ -216,18 +213,17 @@ const defaultAgentInput = (): AgentInput => ({
       enabled: true,
       permission: "allow",
     })),
-    skillInstallationIds: capabilityConfig.agentCapabilities.skills.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(name) => {
-      const installation = readySkillInstallations.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.state === "ready" && item.skillName === name);
-      if (!installation) throw new Error(`默认 Agent 引用了未安装的 Skill: ${name}`);
-      return installation.skillInstallationId;
-    }),
+    skillInstallationIds: (await skillInstallations.list(ownerId))
+      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.state === "ready" && capabilityConfig.agentCapabilities.skills.includes(item.skillName))
+      .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => item.skillInstallationId),
     mcps: [],
     historyPolicy: { mode: "recent_turns", maxTurns: 12 },
     memoryPolicy: { mode: "off" },
   });
-let defaultAgent = await agentService.ensureDefault(defaultAgentInput(), localPrincipal.principalId);
+await agentService.reconcileCapabilities(localPrincipal.principalId);
+let defaultAgent = await agentService.ensureDefault(await defaultAgentInput(localPrincipal.principalId), localPrincipal.principalId);
 if (defaultAgent) {
   const systemPrompt = removeLegacyModelIdentity(defaultAgent.systemPrompt);
   if (systemPrompt !== defaultAgent.systemPrompt) {
@@ -345,7 +341,7 @@ const control = new ControlApi({
 });
 registerAuthRoutes(control.router, auth);
 registerAgentRoutes(control.router, agentService, { defaultAgentInput });
-registerSessionRoutes(control.router, sessions, new SessionLaunchService(resolve(dataDir, "session-launches.json"), agentService, modelStudents));
+registerSessionRoutes(control.router, sessions, new SessionLaunchService(resolve(dataDir, "session-launches.json"), agentService, modelStudents, artifacts));
 registerSkillRoutes(control.router, skillInstallations);
 registerMcpRoutes(control.router, mcpManagement);
 registerModelAdmissionRoutes(control.router, modelAdmission);
@@ -363,8 +359,7 @@ const createAgent = (principal: Principal) => {
     ownerId: principal.principalId,
     agentExists: async (id) => Boolean(await agentService.get(id, principal.principalId).catch(() => undefined)),
     modelStudentReady: async (id) =>
-      modelStudents.isReady(id) && (await modelAdmissionRepository.listStudents(principal.principalId))
-        .some((item) => item.modelStudentId === id),
+      modelStudents.isReady(id, principal.principalId),
     experimentBinding: (experimentId, variantId) =>
       experimentService.binding(experimentId, variantId, principal.principalId),
   });

@@ -125,8 +125,8 @@ async function setup(options: { dir?: string; ignoreHistory?: boolean } = {}) {
   const agents = new AgentService(new AgentRepository(join(dir, "agents.json")), {
     builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => ["read_file"], readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [], mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => [],
+() => Promise.resolve([]), mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => Promise.resolve([]),
   });
   const source = await agents.create(agentInput("source"));
   const sessions = new SessionRepository(dir);

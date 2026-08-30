@@ -35,7 +35,7 @@ constructor(private readonly models: ModelProvider | ModelStudentCatalog) {}
   /** 执行「generate」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async generate(experiment: ExperimentRecordV2, evidence: WorksheetRunEvidence[]): Promise<ExperimentAnnotationWorksheet> {
     const model = this.models instanceof ModelStudentCatalog
-      ? this.models.requireProvider(experiment.worksheetModelStudentId)
+      ? this.models.requireProvider(experiment.worksheetModelStudentId, experiment.ownerId)
       : this.models;
     if (model.student.id !== experiment.worksheetModelStudentId) {
       throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "评测辅助 ModelStudent 与实际 Provider 不一致", false);
