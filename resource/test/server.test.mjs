@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { createResourceServer } from "../server.mjs";
+import { createResourceServer, exportStaticResourceSite } from "../server.mjs";
 
 let server;
 let baseUrl;
@@ -39,4 +39,22 @@ test("列出并下载带哈希的 Skill bundle", async () => {
   assert.deepEqual(bundle.files.map((file) => file.path), ["agents/openai.yaml", "SKILL.md"]);
   const instructions = bundle.files.find((file) => file.path === "SKILL.md");
   assert.equal(Buffer.from(instructions.content, "base64").toString("utf8").includes("name: demo-skill"), true);
+});
+
+test("导出 Caddy 可直接提供的静态 Skill 站点", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "mk-resource-static-"));
+  try {
+    const exported = await exportStaticResourceSite(fixtureRoot, outputRoot);
+    assert.deepEqual(exported, ["demo-skill"]);
+
+    const list = JSON.parse(await readFile(join(outputRoot, "skills", "index.json"), "utf8"));
+    assert.deepEqual(list.skills, [{ name: "demo-skill", url: "/skills/demo-skill" }]);
+
+    const bundle = JSON.parse(await readFile(join(outputRoot, "skills", "demo-skill.json"), "utf8"));
+    assert.equal(bundle.kind, "mk-skill-bundle");
+    assert.equal(bundle.name, "demo-skill");
+    assert.equal(bundle.contentHash.length, 64);
+  } finally {
+    await rm(outputRoot, { recursive: true, force: true });
+  }
 });

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "release": "2026-08-30-example",
+  "gitCommit": "0000000000000000000000000000000000000000",
+  "dataCompatibilityVersion": 1,
+  "images": {
+    "web": "ghcr.io/example/models-kindergarten/mk-web@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "runtime": "ghcr.io/example/models-kindergarten/mk-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "onlyoffice": "onlyoffice/documentserver@sha256:e3da62a847b9a5d51a11f73cfea1d9c13c3be3809614490d4edddcf01dcf919b"
+  }
+}

@@ -157,6 +157,21 @@ API Key 等动态凭据由 Remote 使用主密钥加密后写入 `DATA_DIR/secur
 
 环境变量模板见 [.env.example](.env.example)。
 
+## 本机 Docker 预演
+
+本机 Docker 使用真实构建产物、云端同款 Dockerfile 和三容器拓扑，不挂载源码：
+
+```bash
+pnpm deploy:preview
+```
+
+- MK 主入口：`http://127.0.0.1:7410`；
+- ACP：`ws://127.0.0.1:7410/acp`；
+- ONLYOFFICE：`http://127.0.0.1:7411`；
+- 停止并保留数据：`pnpm deploy:preview:down`。
+
+公网 IP 与正式域名命令、云服务器前置条件见 [deploy/README.md](deploy/README.md)。
+
 ## 验证
 
 ```bash

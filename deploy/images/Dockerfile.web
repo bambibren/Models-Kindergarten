@@ -1,0 +1,28 @@
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS build
+
+RUN npm install --global pnpm@11.9.0
+WORKDIR /workspace
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/remote/package.json apps/remote/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY resource/package.json resource/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/evaluation-contract/package.json packages/evaluation-contract/package.json
+COPY packages/runtime-observation/package.json packages/runtime-observation/package.json
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm --filter @kindergarten/web build
+RUN node resource/export-static.mjs /workspace/resource/dist-static
+
+FROM caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /workspace/apps/web/dist /srv/web
+COPY --from=build /workspace/resource/dist-static/skills /srv/skills
+RUN cp /usr/bin/caddy /usr/local/bin/caddy \
+  && addgroup -g 10001 mk \
+  && adduser -D -H -u 10001 -G mk mk \
+  && chown -R 10001:10001 /data /config /srv/web /srv/skills
+
+USER 10001:10001
+EXPOSE 8080 8081 8443

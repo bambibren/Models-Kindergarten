@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -76,6 +76,19 @@ export async function buildSkillBundle(skillsRoot, name) {
   };
 }
 
+/** 把运行时资源协议预生成成静态 JSON，使 Caddy 无需额外 Node 进程即可提供同一组 URL。 */
+export async function exportStaticResourceSite(skillsRoot, outputRoot) {
+  const root = resolve(skillsRoot);
+  const target = resolve(outputRoot, "skills");
+  const skills = await listSkills(root);
+  await mkdir(target, { recursive: true });
+  await writeJson(resolve(target, "index.json"), { schemaVersion: 1, skills });
+  for (const skill of skills) {
+    await writeJson(resolve(target, `${skill.name}.json`), await buildSkillBundle(root, skill.name));
+  }
+  return skills.map((skill) => skill.name);
+}
+
 async function listSkills(skillsRoot) {
   const entries = await readdir(skillsRoot, { withFileTypes: true });
   return entries
@@ -127,6 +140,10 @@ function send(response, status, value, headers = {}) {
     ...headers,
   });
   response.end(body);
+}
+
+async function writeJson(file, value) {
+  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
 function isLoopback(host) {

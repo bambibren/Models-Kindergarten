@@ -1,0 +1,52 @@
+{
+	admin off
+	http_port 8080
+	https_port 8443
+}
+
+{$MK_SITE_ADDRESS:http://:8080} {
+	encode zstd gzip
+
+	handle /health/live {
+		reverse_proxy mk-app:7331
+	}
+
+	handle /health/ready {
+		reverse_proxy mk-app:7331
+	}
+
+	handle /api/* {
+		reverse_proxy mk-app:7331
+	}
+
+	handle /acp {
+		reverse_proxy mk-app:7331
+	}
+
+	@skillList path /skills
+	handle @skillList {
+		rewrite * /skills/index.json
+		header Content-Type "application/json; charset=utf-8"
+		root * /srv
+		file_server
+	}
+
+	@skillBundle path_regexp skill ^/skills/[a-z0-9-]+$
+	handle @skillBundle {
+		rewrite * {path}.json
+		header Content-Type "application/vnd.mk.skill+json; charset=utf-8"
+		header Cache-Control "no-cache"
+		root * /srv
+		file_server
+	}
+
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+{$MK_OFFICE_SITE_ADDRESS:http://:8081} {
+	reverse_proxy mk-onlyoffice:80
+}

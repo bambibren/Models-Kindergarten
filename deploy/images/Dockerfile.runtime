@@ -1,0 +1,36 @@
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS build
+
+RUN npm install --global pnpm@11.9.0
+WORKDIR /workspace
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/remote/package.json apps/remote/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY resource/package.json resource/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/evaluation-contract/package.json packages/evaluation-contract/package.json
+COPY packages/runtime-observation/package.json packages/runtime-observation/package.json
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm --filter @kindergarten/remote build
+RUN pnpm --filter @kindergarten/remote deploy --prod --legacy /runtime
+
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
+
+RUN apt-get update \
+  && apt-get install --yes --no-install-recommends ca-certificates git util-linux \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --gid 10001 mk \
+  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin mk
+
+WORKDIR /app
+COPY --from=build /runtime/package.json /app/apps/remote/package.json
+COPY --from=build /runtime/dist /app/apps/remote/dist
+COPY --from=build /runtime/node_modules /app/apps/remote/node_modules
+COPY --from=build /workspace/skills/builtin /app/skills/builtin
+RUN mkdir -p /data /tmp/mk \
+  && chown -R 10001:10001 /data /tmp/mk /app
+
+ENV NODE_ENV=production
+USER 10001:10001
+EXPOSE 7331
+CMD ["node", "apps/remote/dist/index.js"]

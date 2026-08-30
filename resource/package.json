@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node --watch server.mjs",
     "start": "node server.mjs",
+    "build": "node export-static.mjs dist-static",
     "test": "node --test"
   }
 }

@@ -1,0 +1,14 @@
+.git
+.github
+.data
+.local
+deploy/local
+deploy/releases
+node_modules
+**/node_modules
+**/dist
+**/coverage
+*.log
+.DS_Store
+
+# resource/skills 是 mk-web 的受控发布输入，不能在这里排除。

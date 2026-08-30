@@ -1,0 +1,110 @@
+name: ${COMPOSE_PROJECT_NAME:-mk-preview}
+
+services:
+  mk-web:
+    image: ${MK_WEB_IMAGE:-models-kindergarten/mk-web:preview}
+    build:
+      context: ..
+      dockerfile: deploy/images/Dockerfile.web
+    environment:
+      MK_SITE_ADDRESS: ${MK_SITE_ADDRESS:-http://:8080}
+      MK_OFFICE_SITE_ADDRESS: ${MK_OFFICE_SITE_ADDRESS:-http://:8081}
+    ports:
+      - "${MK_HTTP_BIND:-127.0.0.1}:${MK_HTTP_PORT:-7410}:8080"
+      - "${MK_OFFICE_BIND:-127.0.0.1}:${MK_OFFICE_PORT:-7411}:8081"
+      - "${MK_HTTPS_BIND:-127.0.0.1}:${MK_HTTPS_PORT:-7443}:8443"
+    depends_on:
+      mk-app:
+        condition: service_healthy
+      mk-onlyoffice:
+        condition: service_healthy
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  mk-app:
+    image: ${MK_RUNTIME_IMAGE:-models-kindergarten/mk-runtime:preview}
+    build:
+      context: ..
+      dockerfile: deploy/images/Dockerfile.runtime
+    environment:
+      DEPLOYMENT_PROFILE: ${DEPLOYMENT_PROFILE:-docker-preview}
+      AUTH_MODE: ${AUTH_MODE:-development}
+      HOST: 0.0.0.0
+      PORT: 7331
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://127.0.0.1:7410}
+      DATA_DIR: /data
+      SANDBOX_DIR: /data/sandbox
+      MASTER_KEY_FILE: /run/secrets/mk_master_key
+      CREDENTIAL_VAULT_FILE: /data/secure/credentials.enc
+      BUILTIN_SKILLS_DIR: skills/builtin
+      PROJECT_SKILLS_DIR: .agents/skills
+      USER_SKILLS_DIR: /data/skills
+      SKILLS_LOCK_FILE: /data/skills-lock.json
+      MCP_CONFIG_PATH: /data/mcp/config.json
+      SKILL_RESOURCE_ORIGINS: ${PUBLIC_ORIGIN:-http://127.0.0.1:7410}
+      SKILL_RESOURCE_FETCH_BASE: http://mk-web:8080
+      ONLYOFFICE_PUBLIC_URL: ${ONLYOFFICE_PUBLIC_URL:-http://127.0.0.1:7411}
+      ONLYOFFICE_ARTIFACT_BASE_URL: http://mk-app:7331/api/control/v1
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+      ONLYOFFICE_PREVIEW_SECRET: ${ONLYOFFICE_PREVIEW_SECRET:-docker-preview-onlyoffice-ticket}
+      WEB_SEARCH_ENDPOINT: ${WEB_SEARCH_ENDPOINT:-https://mcp.exa.ai/mcp}
+    volumes:
+      - ${MK_DATA_PATH:-./local/data/app}:/data
+      - ${MK_MASTER_KEY_FILE:-./local/secrets/mk_master_key}:/run/secrets/mk_master_key:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7331/health/ready').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  mk-onlyoffice:
+    image: ${ONLYOFFICE_IMAGE:-onlyoffice/documentserver:9.4.0@sha256:e3da62a847b9a5d51a11f73cfea1d9c13c3be3809614490d4edddcf01dcf919b}
+    environment:
+      JWT_ENABLED: ${ONLYOFFICE_JWT_ENABLED:-false}
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+    expose:
+      - "80"
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+      - onlyoffice_lib:/var/lib/onlyoffice
+      - onlyoffice_db:/var/lib/postgresql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1/healthcheck"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  caddy_data:
+  caddy_config:
+  onlyoffice_data:
+  onlyoffice_logs:
+  onlyoffice_lib:
+  onlyoffice_db:

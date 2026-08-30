@@ -34,3 +34,9 @@ temp/
 # 本机演示 Skill；资源服务代码进入仓库，来源待确认的 Skill 内容不提交
 /resource/skills/*
 !/resource/skills/.gitkeep
+/resource/dist-static/
+
+# Docker 预演数据和主密钥只保存在本机，不进入镜像或 Git。
+/deploy/local/*
+!/deploy/local/.gitkeep
+/deploy/releases/
