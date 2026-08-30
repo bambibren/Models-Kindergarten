@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "release": "2026-08-30-100f423",
+  "gitCommit": "100f42399fdab26f797c7b9fb761f3b024eab746",
+  "dataCompatibilityVersion": 1,
+  "images": {
+    "web": "ghcr.io/bambibren/models-kindergarten/mk-web@sha256:3df2bf796c7d59eaa0176249437dd6166f253ca763f12d902d49f7aa4ac1103e",
+    "runtime": "ghcr.io/bambibren/models-kindergarten/mk-runtime@sha256:f8c8967e038ba54506f464be0c0fb729ed43505eecfa791a6ec3345490a92c67",
+    "onlyoffice": "onlyoffice/documentserver@sha256:e3da62a847b9a5d51a11f73cfea1d9c13c3be3809614490d4edddcf01dcf919b"
+  }
+}
