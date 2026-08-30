@@ -68,6 +68,19 @@ pnpm deploy:cloud:domain -- \
 
 云端命令只通过 SCP 上传 Compose、PPTX Runtime seccomp profile、环境文件和 release manifest；镜像由云服务器从私有 GHCR 按摘要拉取，业务数据和主密钥保存在 `/srv/mk/data` 与 `/srv/mk/secrets`。
 
+## Web 镜像发布唯一入口
+
+Web 镜像同时承载前端和 `pptx`、`website-design-fast` 两个受管 Skill。禁止直接手写 `docker buildx` 发布 Web 镜像；统一使用：
+
+```bash
+pnpm release:web:check
+pnpm release:web -- \
+  --release YYYY-MM-DD-当前短提交-rN \
+  --base-manifest deploy/releases/当前线上版本/release-manifest.json
+```
+
+脚本会校验本机 Skill 源目录与 `deploy/managed-web-skills.json` 完全一致，从已提交并推送的 `main` HEAD 创建干净暂存区，只注入清单内的 Skill，然后构建并推送 linux/amd64 镜像。推送后脚本会读取镜像内 `/srv/skills/index.json` 及每个 Bundle 再次验收，最后自动写入锁定摘要和准确 `gitCommit` 的 release manifest。缺少任一 Skill、出现额外目录、相关源码未提交、HEAD 未推送或镜像验收失败时都不会生成 manifest。
+
 部署脚本同时上传 `internal.env`，并在切换 `/srv/mk/current` 前从 `mk-app` 容器验证 Web Skills、Runtime 和 ONLYOFFICE 三个内部 origin，再执行真实 PPTX 生成与结构检查。任一内部请求连接失败、发生重定向、状态码异常、Content-Type 不符或 PPTX 构建失败，部署直接失败。
 
 `mk-app` 使用 `deploy/pptx-worker-seccomp.json`。该 profile 保留 Docker 默认拒绝策略，只额外允许参数精确等于 `CLONE_NEWUSER | CLONE_NEWNET` 的 `unshare`，供 PPTX 子进程建立无网络的嵌套 namespace；不得替换为 `seccomp=unconfined`，也不需要增加 `CAP_SYS_ADMIN`。

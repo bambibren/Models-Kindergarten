@@ -21,6 +21,8 @@
     "deploy:preview:up": "sh deploy/scripts/preview-up.sh",
     "deploy:preview:smoke": "node deploy/scripts/preview-smoke.mjs",
     "deploy:preview:down": "sh deploy/scripts/preview-down.sh",
+    "release:web:check": "node deploy/scripts/release-web.mjs --check",
+    "release:web": "node deploy/scripts/release-web.mjs",
     "deploy:cloud:ip": "node deploy/scripts/cloud-deploy.mjs ip",
     "deploy:cloud:domain": "node deploy/scripts/cloud-deploy.mjs domain",
     "deploy:validate": "node deploy/scripts/validate-pptx-seccomp.mjs",

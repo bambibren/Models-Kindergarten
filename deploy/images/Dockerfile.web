@@ -12,7 +12,9 @@ COPY packages/runtime-observation/package.json packages/runtime-observation/pack
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm --filter @kindergarten/web build
-RUN node resource/export-static.mjs /workspace/resource/dist-static
+# Web 镜像是受管 Skill 的正式发布载体；缺项或夹带额外目录都必须让构建失败。
+RUN MK_REQUIRED_SKILLS_FILE=/workspace/deploy/managed-web-skills.json \
+  node resource/export-static.mjs /workspace/resource/dist-static
 
 FROM caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
 
