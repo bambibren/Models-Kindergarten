@@ -1,8 +1,9 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runAuthUserCli } from "../../src/auth/auth-user-cli.js";
+import { AccountDataDeletionService } from "../../src/auth/account-data-deletion-service.js";
 
 describe("服务器账号管理脚本", () => {
   it("支持新增、禁用、启用和修改密码", async () => {
@@ -28,6 +29,26 @@ describe("服务器账号管理脚本", () => {
     const records = JSON.parse(await readFile(join(dataDir, "auth/users.json"), "utf8")).records;
     expect(records).toEqual([]);
     expect(principalId).toMatch(/^user_/u);
+  });
+
+  it("清理旧聚合产物时保留其他账号仍引用的 Blob", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "mk-auth-owner-data-"));
+    const ownHash = "a".repeat(64);
+    const otherHash = "b".repeat(64);
+    await writeFile(join(dataDir, "artifacts.json"), JSON.stringify({
+      schemaVersion: 1,
+      records: [
+        { artifactId: "mine", ownerId: "owner-a", primary: { sha256: ownHash } },
+        { artifactId: "other", ownerId: "owner-b", primary: { sha256: otherHash } },
+      ],
+    }));
+    await mkdir(join(dataDir, "artifact-blobs"));
+    await writeFile(join(dataDir, "artifact-blobs", ownHash), "mine");
+    await writeFile(join(dataDir, "artifact-blobs", otherHash), "other");
+    await new AccountDataDeletionService(dataDir).deleteOwner("owner-a");
+    const document = JSON.parse(await readFile(join(dataDir, "artifacts.json"), "utf8"));
+    expect(document.records.map((item: { artifactId: string }) => item.artifactId)).toEqual(["other"]);
+    expect(await readdir(join(dataDir, "artifact-blobs"))).toEqual([otherHash]);
   });
 });
 

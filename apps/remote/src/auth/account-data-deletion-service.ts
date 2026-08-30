@@ -79,11 +79,22 @@ async function readAtomic(file: string): Promise<JsonDocument | undefined> {
 }
 
 async function removePartitionOwner(legacyFile: string, ownerId: string): Promise<{ ids: string[] }> {
-  await removeAtomicOwner(legacyFile, ownerId);
+  const legacy = await readAtomic(legacyFile);
+  const legacyRemoved = legacy?.records.filter((value) => record(value) && value.ownerId === ownerId) ?? [];
+  if (legacy && legacyRemoved.length > 0) {
+    await writePrimaryAndBackup(legacyFile, {
+      ...legacy,
+      records: legacy.records.filter((value) => !record(value) || value.ownerId !== ownerId),
+    });
+  }
+  const ids = legacyRemoved.flatMap((value) => {
+    const id = partitionIdentity(legacyFile, value);
+    return id ? [id] : [];
+  });
   const root = partitionRoot(legacyFile);
   const index = await readPartitionIndex(root);
-  if (!index) return { ids: [] };
-  const removed: string[] = [];
+  if (!index) return { ids };
+  const removed = [...ids];
   for (const id of index.ids) {
     const value = await readPartitionValue(root, id);
     if (record(value) && value.ownerId === ownerId) removed.push(id);
@@ -94,6 +105,14 @@ async function removePartitionOwner(legacyFile: string, ownerId: string): Promis
 
 async function removePartitionIds(legacyFile: string, removed: Set<string>): Promise<void> {
   if (removed.size === 0) return;
+  const legacy = await readAtomic(legacyFile);
+  if (legacy) {
+    const kept = legacy.records.filter((value) => {
+      const id = partitionIdentity(legacyFile, value);
+      return !id || !removed.has(id);
+    });
+    if (kept.length !== legacy.records.length) await writePrimaryAndBackup(legacyFile, { ...legacy, records: kept });
+  }
   const root = partitionRoot(legacyFile);
   const index = await readPartitionIndex(root);
   if (!index) return;
@@ -130,14 +149,25 @@ function partitionRecordFile(root: string, id: string): string {
 }
 
 async function pruneArtifactBlobs(dataDir: string): Promise<void> {
-  const root = partitionRoot(join(dataDir, "artifacts.json"));
+  const legacyFile = join(dataDir, "artifacts.json");
+  const root = partitionRoot(legacyFile);
   const index = await readPartitionIndex(root);
   const referenced = new Set<string>();
-  for (const id of index?.ids ?? []) collectHashes(await readPartitionValue(root, id), referenced);
+  if (index) for (const id of index.ids) collectHashes(await readPartitionValue(root, id), referenced);
+  else for (const value of (await readAtomic(legacyFile))?.records ?? []) collectHashes(value, referenced);
   const blobDir = join(dataDir, "artifact-blobs");
   for (const entry of await readdir(blobDir, { withFileTypes: true }).catch((error) => missing(error) ? [] : Promise.reject(error))) {
     if (entry.isFile() && /^[a-f0-9]{64}$/u.test(entry.name) && !referenced.has(entry.name)) await unlink(join(blobDir, entry.name));
   }
+}
+
+function partitionIdentity(file: string, value: unknown): string | undefined {
+  if (!record(value)) return undefined;
+  const stem = basename(file, extname(file));
+  const key = stem === "artifacts" ? "artifactId"
+    : stem === "file-references" ? "fileReferenceId"
+      : "experimentId";
+  return typeof value[key] === "string" ? value[key] : undefined;
 }
 
 function collectHashes(value: unknown, target: Set<string>): void {
