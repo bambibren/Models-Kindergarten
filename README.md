@@ -35,6 +35,8 @@ PPTX 支持两级预览：
 - **静态预览**：浏览器解析并展示每一页，不依赖 ONLYOFFICE；
 - **动画播放**：按需使用 ONLYOFFICE DocumentServer。原始 `.pptx` 始终来自 Artifact Blob Store，DocumentServer 不是业务事实来源。
 
+打开 PPTX 预览后，Web 才预连接 ONLYOFFICE，并按 `DocumentServer origin + document key` 在当前浏览器页面生命周期内执行一次有界后台预热。点击动画播放会先等待在途预热结束，再获取新的短时签名播放配置；隐藏编辑器在文档就绪、错误或 30 秒超时时释放，只有 `onDocumentReady` 才表示可播放。
+
 本机可先拉取固定版本镜像：
 
 ```bash

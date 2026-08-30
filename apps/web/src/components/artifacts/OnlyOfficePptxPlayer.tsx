@@ -1,18 +1,11 @@
 import type { PptxPlaybackResponse } from "@kindergarten/contracts";
 import { ArrowLeft, Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-
-interface OnlyOfficeEditor {
-  destroyEditor(): void;
-}
-
-interface OnlyOfficeWindow extends Window {
-  DocsAPI?: {
-    DocEditor: new (id: string, config: Record<string, unknown>) => OnlyOfficeEditor;
-  };
-}
-
-const scripts = new Map<string, Promise<void>>();
+import {
+  createOnlyOfficeEditor,
+  loadOnlyOffice,
+  type OnlyOfficeEditor,
+} from "./onlyoffice-runtime.js";
 
 /** 渲染「OnlyOfficePptxPlayer」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function OnlyOfficePptxPlayer({
@@ -41,18 +34,11 @@ async () => {
         const value = await load();
         await loadOnlyOffice(value.documentServerApiUrl);
         if (!active) return;
-        const DocsAPI = (window as OnlyOfficeWindow).DocsAPI;
-        if (!DocsAPI) throw new Error("ONLYOFFICE API 未加载");
-        editor = new DocsAPI.DocEditor(hostId, {
-          ...value.config,
-          width: "100%",
-          height: "100%",
-          events: {
-            onAppReady: /** 处理「onAppReady」事件，校验归属后再推进状态且避免重复提交。 */
+        editor = createOnlyOfficeEditor(hostId, value.config, {
+          onDocumentReady: /** 文档内容与播放器均可用后才移除加载遮罩。 */
 () => { if (active) setState("ready"); },
-            onError: /** 处理「onError」事件，校验归属后再推进状态且避免重复提交。 */
+          onError: /** 处理「onError」事件，校验归属后再推进状态且避免重复提交。 */
 () => { if (active) setState("error"); },
-          },
         });
       } catch {
         if (active) setState("error");
@@ -120,28 +106,4 @@ async function toggleFullscreen() {
 (value) => value + 1)}><RefreshCw size={14} />重试</button>
     </div> : null}
   </section>;
-}
-
-/** 读取「loadOnlyOffice」所需数据，并遵守作用域、分页与容量边界。 */
-function loadOnlyOffice(url: string): Promise<void> {
-  if ((window as OnlyOfficeWindow).DocsAPI) return Promise.resolve();
-  const existing = scripts.get(url);
-  if (existing) return existing;
-  const promise = new Promise<void>(/** 完成当前异步桥接，并保证每条分支只结算一次。 */
-(resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = url;
-    script.async = true;
-    script.onload = /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
-() => resolve();
-    script.onerror = /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
-() => {
-      scripts.delete(url);
-      script.remove();
-      reject(new Error("ONLYOFFICE API 加载失败"));
-    };
-    document.head.append(script);
-  });
-  scripts.set(url, promise);
-  return promise;
 }

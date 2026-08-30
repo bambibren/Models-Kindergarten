@@ -198,3 +198,5 @@ web_search · web_fetch · ask_user
 ## Web 投影
 
 `historyChatEntries` 与 `streamingChatEntries` 都使用 `order + byId`。Tool 完成顺序只更新对应 ID，不移动首次出现位置。正常连接由 PromptResponse 合并为历史；断线恢复由 Remote 返回的权威 Turn 终态提交。Reasoning/Tool disclosure 继续由局部组件状态管理。WebSocket 意外断开不取消 Runtime，Web 不自动重连；用户点击既有按钮后用当前 Turn 游标 resume。停止只 cancel 当前 Turn，正常路由离开和可监听到的页面关闭 close Session。
+
+PPTX 静态预览默认由浏览器解析。用户打开 PPTX 预览后才加载 ONLYOFFICE 静态资源，并按 `DocumentServer origin + document key` 对当前浏览器页面生命周期内的后台转换预热去重；隐藏编辑器在 `onDocumentReady`、错误或 30 秒超时时清理。点击动画播放先等待在途预热，再从 Control API 获取新的短时签名配置，不缓存复用播放票据；可见播放器只在 `onDocumentReady` 后进入 ready。

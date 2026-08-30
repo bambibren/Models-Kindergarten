@@ -1,7 +1,8 @@
 import { PRODUCT_CONFIG, type PptxPlaybackResponse } from "@kindergarten/contracts";
 import { Download, FileText, Play, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { OnlyOfficePptxPlayer } from "./OnlyOfficePptxPlayer.js";
+import { warmOnlyOfficePlayback } from "./onlyoffice-runtime.js";
 import "./PptxPreview.css";
 
 type PreviewState =
@@ -22,8 +23,36 @@ export function PptxPreview({
   loadPlayback?: () => Promise<PptxPlaybackResponse>;
 }) {
   const [animated, setAnimated] = useState(false);
+  const sourceRef = useRef(loadPlayback);
+  const warmupRef = useRef<Promise<void>>(Promise.resolve());
+  sourceRef.current = loadPlayback;
+  const loadCurrentPlayback = useCallback(/** 始终读取最新父级闭包，避免父级渲染函数身份变化重启预热。 */
+  () => {
+    const current = sourceRef.current;
+    if (!current) return Promise.reject(new Error("当前 PPTX 不支持动画播放"));
+    return current();
+  }, []);
+  const canPlay = Boolean(loadPlayback);
+  const loadFreshPlayback = useCallback(/** 点击播放先等待在途预热，再获取新的短时签名配置。 */
+  async () => {
+    await warmupRef.current;
+    return loadCurrentPlayback();
+  }, [loadCurrentPlayback]);
+
+  useEffect(/** 用户已打开 PPTX 预览后才预载/预热，不在首页或聊天空闲态消耗 DocumentServer。 */
+  () => {
+    if (!canPlay) {
+      warmupRef.current = Promise.resolve();
+      return;
+    }
+    warmupRef.current = loadCurrentPlayback()
+      .then(warmOnlyOfficePlayback)
+      .catch(/** Warmup 是性能优化，失败不能阻断原有可见播放器路径。 */
+      () => undefined);
+  }, [canPlay, contentUrl, loadCurrentPlayback]);
+
   if (animated && loadPlayback) {
-    return <OnlyOfficePptxPlayer load={loadPlayback} title={title} onBack={/** 处理「onBack」事件，校验归属后再推进状态且避免重复提交。 */
+    return <OnlyOfficePptxPlayer load={loadFreshPlayback} title={title} onBack={/** 处理「onBack」事件，校验归属后再推进状态且避免重复提交。 */
 () => setAnimated(false)} />;
   }
   return <StaticPptxPreview
