@@ -653,6 +653,7 @@ function startArtifactResize(event: ReactPointerEvent<HTMLDivElement>): void {
           <ChatViewport
             historyPaging={historyPaging}
             historyChatEntries={chat.historyChatEntries}
+            initializing={connection.phase === "connecting" || identity.agentAvailability === "loading"}
             streamingChatEntries={chat.streamingChatEntries}
             promptTurn={promptTurn}
             onTurnAction={handleTurnAction}

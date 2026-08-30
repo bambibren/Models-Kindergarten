@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef } from "react";
-import { GraduationCap } from "lucide-react";
 import type { EntryCollection } from "../../chat/chat-types.js";
 import {
   canDisplaySessionTokenTotal,
@@ -10,13 +9,15 @@ import {
 import { ChatBlockList } from "./ChatBlockList.js";
 import { PromptTurnLoader } from "./PromptTurnLoader.js";
 import { PromptTurnStatusRow } from "../errors/PromptTurnStatusRow.js";
+import { Loader } from "../primitives/Loader.js";
 import { TokenUsageTotal } from "./TokenUsageTotal.js";
 
 /** 渲染「ChatViewport」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-export function ChatViewport({ historyPaging, historyChatEntries, streamingChatEntries, promptTurn, onTurnAction, onLoadOlder }: {
+export function ChatViewport({ historyPaging, historyChatEntries, streamingChatEntries, initializing, promptTurn, onTurnAction, onLoadOlder }: {
   historyPaging: { loading: boolean; hasMore: boolean };
   historyChatEntries: EntryCollection;
   streamingChatEntries: EntryCollection;
+  initializing: boolean;
   promptTurn: PromptTurnState;
   onTurnAction: (action: TurnAction) => void;
   onLoadOlder: () => void;
@@ -51,11 +52,8 @@ function updateFollowState() {
     if (!viewport) return;
     followsBottom.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 72;
   }
-  if (count === 0) return <section className="empty-state">
-    <span className="empty-mark"><GraduationCap size={23} /></span>
-    <h1>今天想让模型学习什么？</h1>
-    <p>当前 ModelStudent 通过 ACP 与沙箱工具协作。你可以让它读取文件、写入文件，或在需要时向你提问。</p>
-    <div className="suggestion-grid"><span>总结 sandbox 中的文件</span><span>新建一份学习笔记</span><span>读取 README 并解释架构</span></div>
+  if (count === 0) return <section className="session-empty-state">
+    {initializing ? <Loader size="lg" label="正在初始化会话" /> : null}
   </section>;
   return <section className="chat-viewport" ref={viewportRef} onScroll={updateFollowState} aria-live="polite"><div className="chat-content" ref={contentRef}>
     {historyPaging.hasMore ? <div className="history-page-control"><button
