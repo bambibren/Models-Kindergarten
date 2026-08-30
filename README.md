@@ -28,6 +28,8 @@ Models Kindergarten 是一个面向模型、Agent 与上下文效果验证的 AI
 
 从首页选择“PPT 制作”，系统会根据当前页面源站填入 `/skills/pptx` 的完整地址和示例任务。源码开发时公开地址是 `http://127.0.0.1:5173/skills/pptx`；Agent 激活 Skill 后，通过受控工具链生成可编辑 `.pptx`，再发布为 Artifact。
 
+PPTX 源码只在当前 Session Workspace 中执行。macOS 使用 `sandbox-exec`；Linux Runtime 使用受 seccomp 参数约束的嵌套 user/network namespace，并叠加 Node 文件权限、非 root、只读根文件系统和 `cap_drop: ALL`。构建环境固定提供 PptxGenJS 4.0.1 与 JSZip 3.10.1。
+
 PPTX 支持两级预览：
 
 - **静态预览**：浏览器解析并展示每一页，不依赖 ONLYOFFICE；
@@ -65,7 +67,7 @@ Artifact 是已经发布、可以稳定引用的产物，不等同于 Session Wo
 | 网页与交互 | `web_search`、`web_fetch`、`ask_user` | 搜索和网页读取有网络与大小限制；`ask_user` 使用 ACP Elicitation |
 | 终端 | `run_command` | 实现代码仍保留，但当前构建全局不向 Agent 暴露 |
 | Artifact | `read_artifact`、`publish_artifact`、`publish_artifact_version`、`rollback_artifact` | 负责稳定产物的读取、发布、版本化和明确回滚 |
-| PPTX | `build_pptx` | 在受控构建环境中执行 PptxGenJS 源码并生成可编辑 `.pptx`；生成后仍需发布 |
+| PPTX | `build_pptx` | 在断网且仅允许读写当前 Workspace 的受控构建环境中执行 PptxGenJS 源码并生成可编辑 `.pptx`；生成后仍需发布 |
 | Skills | `ensure_agent_skills`、`activate_skill`、`read_skill_resource` | 安装 Tool 只在用户消息包含允许的 Skill 来源时出现；另外两个 Tool 只针对当前 Agent 已绑定 Skill 出现 |
 | MCP | `mcp__<server>__<tool>`、`read_mcp_resource` | 名称和数量来自当前 Agent 已绑定的 MCP Tool 与 Resource，属于动态 Tool；当前“添加远程 MCP”页面只支持 Streamable HTTP，Remote 底层仍保留受控 stdio 配置能力 |
 

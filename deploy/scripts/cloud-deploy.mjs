@@ -54,6 +54,7 @@ try {
   run("ssh", [server, bootstrapCommand(remoteRelease)], dryRun);
   run("scp", [
     resolve(repoRoot, "deploy/compose.yaml"),
+    resolve(repoRoot, "deploy/pptx-worker-seccomp.json"),
     internalEnvFile,
     resolve(repoRoot, "deploy/scripts/mk-user.sh"),
     envFile,
@@ -132,12 +133,14 @@ function remoteDeployCommand(remoteRelease, manifestName, settings) {
     `cd ${quote(remoteRelease)}`,
     `test -f ${quote(manifestName)}`,
     "test -f internal.env",
+    "test -f pptx-worker-seccomp.json",
     "sudo test -r /srv/mk/secrets/mk_master_key",
     `${compose} config --quiet`,
     "if sudo test -d /srv/mk/data/app && [ \"$(sudo find /srv/mk/data/app -mindepth 1 -maxdepth 1 -print -quit)\" ]; then sudo tar -C /srv/mk/data -czf /srv/mk/backups/pre-deploy-$(date +%Y%m%d%H%M%S).tgz app; fi",
     `${compose} pull`,
     `${compose} up --detach --no-build --wait --wait-timeout 420`,
     `${compose} exec -T mk-app node -e ${quote(internalOriginProbeSource)}`,
+    `${compose} exec -T mk-app node apps/remote/dist/pptx-runtime-smoke.js`,
     `curl --fail --silent --show-error ${quote(settings.probe)} >/dev/null`,
     `sudo ln -sfn ${quote(remoteRelease)} /srv/mk/current`,
     "sudo install -m 0755 mk-user.sh /usr/local/bin/mk-user",

@@ -23,10 +23,11 @@
     "deploy:preview:down": "sh deploy/scripts/preview-down.sh",
     "deploy:cloud:ip": "node deploy/scripts/cloud-deploy.mjs ip",
     "deploy:cloud:domain": "node deploy/scripts/cloud-deploy.mjs domain",
+    "deploy:validate": "node deploy/scripts/validate-pptx-seccomp.mjs",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm deploy:validate",
     "audit:comments": "node scripts/documentation/audit-chinese-comments.mjs"
   },
   "devDependencies": {

@@ -9,7 +9,7 @@
     "start:dist": "node --env-file-if-exists=../../.env dist/index.js",
     "secret:init": "node --env-file-if-exists=../../.env --import tsx src/secrets/secret-init.ts",
     "skill:install": "node --env-file-if-exists=../../.env --import tsx src/skills/skill-cli.ts",
-    "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --platform=node --format=esm --external:@agentclientprotocol/sdk --external:@agentclientprotocol/sdk/* --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/* --external:ajv --external:pptxgenjs --external:ws --external:yaml --outfile=dist/index.js && esbuild src/auth/auth-user-cli.ts --bundle --platform=node --format=esm --outfile=dist/auth-user-cli.js",
+    "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --platform=node --format=esm --external:@agentclientprotocol/sdk --external:@agentclientprotocol/sdk/* --external:@modelcontextprotocol/client --external:@modelcontextprotocol/client/* --external:ajv --external:pptxgenjs --external:ws --external:yaml --outfile=dist/index.js && esbuild src/auth/auth-user-cli.ts --bundle --platform=node --format=esm --outfile=dist/auth-user-cli.js && esbuild src/pptx/pptx-runtime-smoke.ts --bundle --platform=node --format=esm --external:pptxgenjs --outfile=dist/pptx-runtime-smoke.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
@@ -20,6 +20,7 @@
     "@kindergarten/runtime-observation": "workspace:*",
     "@modelcontextprotocol/client": "2.0.0",
     "ajv": "8.17.1",
+    "jszip": "3.10.1",
     "pptxgenjs": "4.0.1",
     "ws": "8.21.2",
     "yaml": "2.8.1"

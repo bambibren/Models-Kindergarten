@@ -12,7 +12,7 @@
 pnpm deploy:preview
 ```
 
-该命令创建独立主密钥，构建 `mk-web` 和 `mk-runtime`，启动 `mk-web`、`mk-app`、`mk-onlyoffice`，并自动验证 Web、API、Evaluation、Skills、ACP、ONLYOFFICE、非 root、Secret 权限和数据重启持久化。
+该命令创建独立主密钥，构建 `mk-web` 和 `mk-runtime`，启动 `mk-web`、`mk-app`、`mk-onlyoffice`，并自动验证 Web、API、Evaluation、Skills、ACP、ONLYOFFICE、非 root、Secret 权限、PPTX Linux Runtime 和数据重启持久化。PPTX 验收只在容器内生成并结构检查临时单页文件，完成后删除，不发布 Artifact。
 
 ```bash
 pnpm deploy:preview:smoke
@@ -66,9 +66,11 @@ pnpm deploy:cloud:domain -- \
   --confirm-production-ready
 ```
 
-云端命令只通过 SCP 上传 Compose、环境文件和 release manifest；镜像由云服务器从私有 GHCR 按摘要拉取，业务数据和主密钥保存在 `/srv/mk/data` 与 `/srv/mk/secrets`。
+云端命令只通过 SCP 上传 Compose、PPTX Runtime seccomp profile、环境文件和 release manifest；镜像由云服务器从私有 GHCR 按摘要拉取，业务数据和主密钥保存在 `/srv/mk/data` 与 `/srv/mk/secrets`。
 
-部署脚本同时上传 `internal.env`，并在切换 `/srv/mk/current` 前从 `mk-app` 容器验证 Web Skills、Runtime 和 ONLYOFFICE 三个内部 origin。任一内部请求连接失败、发生重定向、状态码异常或 Content-Type 不符，部署直接失败。
+部署脚本同时上传 `internal.env`，并在切换 `/srv/mk/current` 前从 `mk-app` 容器验证 Web Skills、Runtime 和 ONLYOFFICE 三个内部 origin，再执行真实 PPTX 生成与结构检查。任一内部请求连接失败、发生重定向、状态码异常、Content-Type 不符或 PPTX 构建失败，部署直接失败。
+
+`mk-app` 使用 `deploy/pptx-worker-seccomp.json`。该 profile 保留 Docker 默认拒绝策略，只额外允许参数精确等于 `CLONE_NEWUSER | CLONE_NEWNET` 的 `unshare`，供 PPTX 子进程建立无网络的嵌套 namespace；不得替换为 `seccomp=unconfined`，也不需要增加 `CAP_SYS_ADMIN`。
 
 云端执行 SSH 的普通用户负责 `docker compose pull/up`，因此其 `~/.docker/config.json` 必须保存 GHCR 的只读登录；脚本仅在创建宿主持久目录、备份和初始化主密钥时使用 `sudo`。`/srv/mk/data/app` 与 `/srv/mk/secrets/mk_master_key` 会归容器 UID/GID `10001:10001` 所有，并保持 `0700`/`0600`，使非 root 的 `mk-app` 能写入数据、读取主密钥。
 

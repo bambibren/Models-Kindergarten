@@ -44,6 +44,14 @@ await check("Docker 内部服务地址", async () => {
     ["ONLYOFFICE", 200],
   ]);
 });
+await check("PPTX Linux Runtime", async () => {
+  const result = JSON.parse(compose(
+    "exec", "-T", "mk-app", "node", "apps/remote/dist/pptx-runtime-smoke.js",
+  ));
+  assert.equal(result.slides, 1);
+  assert.ok(result.entries > 0);
+  assert.ok(result.byteLength > 10_000);
+});
 await check("ACP WebSocket initialize", async () => {
   const url = new URL("/acp", origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";

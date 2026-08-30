@@ -182,7 +182,9 @@ web_search · web_fetch · ask_user
 - `write_file` 使用 `ask`，`run_command` 使用 `always_ask`；
 - Elicitation 只用于 `ask_user`，不能代替权限；
 - FileSandbox 限制 root、真实路径、符号链接与 256 KiB 文件；
-- ProcessSandbox 只在 macOS `sandbox-exec` 下运行，cwd 在 root 内，限制写入 root、禁止网络、限制环境变量、超时和输出；其他平台明确拒绝而不静默降级；
+- `run_command` 的 ProcessSandbox 只在 macOS `sandbox-exec` 下运行，其他平台明确拒绝而不静默降级；
+- `build_pptx` 使用独立受控进程：macOS 通过 `sandbox-exec` 限制文件和网络，Linux 通过只允许 `CLONE_NEWUSER | CLONE_NEWNET` 的 seccomp 规则进入嵌套 user/network namespace，再由 Node permission model 只开放当前 Workspace 和固定依赖目录；容器保持非 root、只读根文件系统、`no-new-privileges` 和 `cap_drop: ALL`；
+- PPTX Runtime 固定提供 PptxGenJS 与 JSZip；部署验收在容器内生成并结构检查临时单页 PPTX，完成后删除且不发布 Artifact；
 - `web_fetch` 只允许公开 http/https，逐次验证重定向和 DNS，拒绝本机/私网地址并限制正文大小。
 
 ## Retry 与熔断
