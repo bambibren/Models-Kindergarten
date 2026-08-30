@@ -143,6 +143,7 @@ const skillInstallationRepository = new SkillInstallationRepository(
 );
 const skillSourcePolicy = new SkillSourceUrlPolicy(
   configuredSkillResourceOrigins(process.env.SKILL_RESOURCE_ORIGINS),
+  { allowInsecureHttp: process.env.ALLOW_INSECURE_SKILL_RESOURCE_ORIGINS === "true" },
 );
 const catalog = new RuntimeCapabilityCatalog([
   new ToolRegistry(sandbox),

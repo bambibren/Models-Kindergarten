@@ -49,8 +49,8 @@ export class SkillSourceUrlPolicy {
   private readonly resourceOrigins: Set<string>;
 
   /** 初始化「SkillSourceUrlPolicy」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-constructor(resourceOrigins: string[] = []) {
-    this.resourceOrigins = new Set(resourceOrigins.map(normalizeResourceOrigin));
+constructor(resourceOrigins: string[] = [], options: { allowInsecureHttp?: boolean } = {}) {
+    this.resourceOrigins = new Set(resourceOrigins.map((origin) => normalizeResourceOrigin(origin, options.allowInsecureHttp === true)));
   }
 
   /** 校验并规范化「parse」输入，非法数据直接返回明确错误。 */
@@ -114,7 +114,7 @@ sameSource(left: SkillSource, right: SkillSource): boolean {
 }
 
 /** 校验并规范化「normalizeResourceOrigin」输入，非法数据直接返回明确错误。 */
-function normalizeResourceOrigin(value: string): string {
+function normalizeResourceOrigin(value: string, allowInsecureHttp: boolean): string {
   let url: URL;
   try { url = new URL(value); }
   catch { throw new Error(`SKILL_RESOURCE_ORIGINS 包含无效 URL: ${value}`); }
@@ -122,7 +122,7 @@ function normalizeResourceOrigin(value: string): string {
     throw new Error(`SKILL_RESOURCE_ORIGINS 只能配置无凭据的 origin: ${value}`);
   }
   const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && (loopback || allowInsecureHttp))) {
     throw new Error(`Skill 资源源站只允许 HTTPS，或本机回环 HTTP: ${value}`);
   }
   return url.origin;

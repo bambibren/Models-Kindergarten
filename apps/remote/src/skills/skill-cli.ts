@@ -12,7 +12,10 @@ const installer = new SkillInstaller(
   fetch,
   configuredSkillResourceFetchBase(process.env.SKILL_RESOURCE_FETCH_BASE),
 );
-const sourcePolicy = new SkillSourceUrlPolicy(configuredSkillResourceOrigins(process.env.SKILL_RESOURCE_ORIGINS));
+const sourcePolicy = new SkillSourceUrlPolicy(
+  configuredSkillResourceOrigins(process.env.SKILL_RESOURCE_ORIGINS),
+  { allowInsecureHttp: process.env.ALLOW_INSECURE_SKILL_RESOURCE_ORIGINS === "true" },
+);
 const request = installRequest(args, sourcePolicy);
 const record = await installer.install(request);
 console.log(JSON.stringify({

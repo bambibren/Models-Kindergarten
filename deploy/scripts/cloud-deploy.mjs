@@ -45,6 +45,7 @@ try {
     MK_RUNTIME_IMAGE: manifest.images.runtime,
     ONLYOFFICE_IMAGE: manifest.images.onlyoffice,
     ONLYOFFICE_JWT_ENABLED: settings.jwtEnabled,
+    ALLOW_INSECURE_SKILL_RESOURCE_ORIGINS: settings.allowInsecureSkillResourceOrigins,
   }), "utf8");
 
   run("ssh", [server, bootstrapCommand(remoteRelease)], dryRun);
@@ -76,6 +77,7 @@ function ipSettings(values) {
     httpsBind: "127.0.0.1",
     httpsPort: "7443",
     jwtEnabled: "false",
+    allowInsecureSkillResourceOrigins: "true",
     probe: `http://${ip}/health/ready`,
   };
 }
@@ -94,6 +96,7 @@ function domainSettings(values) {
     httpsBind: "0.0.0.0",
     httpsPort: "443",
     jwtEnabled: "true",
+    allowInsecureSkillResourceOrigins: "false",
     probe: `https://${domain}/health/ready`,
   };
 }

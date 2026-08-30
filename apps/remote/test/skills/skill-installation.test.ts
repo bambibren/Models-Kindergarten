@@ -93,6 +93,14 @@ async () => {
     expect((await agents.get(scope.agentId)).skills).toHaveLength(1);
   });
 
+  it("公网 HTTP 资源源站必须显式开启临时预览开关", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    expect(() => new SkillSourceUrlPolicy(["http://203.0.113.10"])).toThrow("只允许 HTTPS");
+    expect(new SkillSourceUrlPolicy(["http://203.0.113.10"], { allowInsecureHttp: true })
+      .explicitUrls("安装 http://203.0.113.10/skills/website-design-fast"))
+      .toEqual(["http://203.0.113.10/skills/website-design-fast"]);
+  });
+
   it("动态 Tool Schema 保留用户给出的原始 URL，模型继续传 source_urls 和 mode", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const { service, scope } = await setup();
