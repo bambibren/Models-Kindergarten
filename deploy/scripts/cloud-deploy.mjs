@@ -128,7 +128,7 @@ function remoteDeployCommand(remoteRelease, manifestName, settings) {
     `cd ${quote(remoteRelease)}`,
     `test -f ${quote(manifestName)}`,
     "sudo test -r /srv/mk/secrets/mk_master_key",
-    "if [ -d /srv/mk/data/app ] && [ \"$(sudo find /srv/mk/data/app -mindepth 1 -maxdepth 1 -print -quit)\" ]; then sudo tar -C /srv/mk/data -czf /srv/mk/backups/pre-deploy-$(date +%Y%m%d%H%M%S).tgz app; fi",
+    "if sudo test -d /srv/mk/data/app && [ \"$(sudo find /srv/mk/data/app -mindepth 1 -maxdepth 1 -print -quit)\" ]; then sudo tar -C /srv/mk/data -czf /srv/mk/backups/pre-deploy-$(date +%Y%m%d%H%M%S).tgz app; fi",
     `${compose} pull`,
     `${compose} up --detach --no-build --wait --wait-timeout 420`,
     `curl --fail --silent --show-error ${quote(settings.probe)} >/dev/null`,
