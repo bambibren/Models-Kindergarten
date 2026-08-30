@@ -21,6 +21,24 @@ pnpm deploy:preview:down
 
 预演数据位于 `deploy/local/data`，主密钥位于 `deploy/local/secrets`，二者均不进入 Git 或镜像。
 
+## 公网地址与 Docker 内部地址
+
+```text
+公网入口
+└─ mk-web
+   ├─ Web / API / ACP / Skills
+   └─ ONLYOFFICE 独立域名或预演入口
+
+Docker 内部调用
+├─ MK_WEB_INTERNAL_ORIGIN        → mk-web 纯 HTTP Skills 站点
+├─ MK_RUNTIME_INTERNAL_ORIGIN    → mk-app
+└─ MK_ONLYOFFICE_INTERNAL_ORIGIN → mk-onlyoffice
+```
+
+内部拓扑统一保存在 `deploy/env/internal.env`。Compose 把这些字段作为必填配置；缺少任一字段时，构建、预演和云端部署都会在启动容器前失败。业务代码只读取语义配置，不写死 Docker 服务名或端口。
+
+`MK_WEB_INTERNAL_SITE_ADDRESS` 是 Caddy 的纯 HTTP 内部监听地址。该端口只在 Docker 网络中使用，不配置宿主机 `ports`，不会暴露到本机局域网或云服务器公网。公开 Skill URL 继续用于来源授权和安装记录；Remote 下载时使用 `MK_WEB_INTERNAL_ORIGIN`，并继续拒绝重定向。
+
 ## 阶段二：公网 IP
 
 前置条件：已经购买 Linux 云服务器，安装 Docker Compose，创建 SSH deploy 用户，把服务器限制为本人来源访问，并使用只读 Token 登录私有 GHCR。
@@ -49,6 +67,8 @@ pnpm deploy:cloud:domain -- \
 ```
 
 云端命令只通过 SCP 上传 Compose、环境文件和 release manifest；镜像由云服务器从私有 GHCR 按摘要拉取，业务数据和主密钥保存在 `/srv/mk/data` 与 `/srv/mk/secrets`。
+
+部署脚本同时上传 `internal.env`，并在切换 `/srv/mk/current` 前从 `mk-app` 容器验证 Web Skills、Runtime 和 ONLYOFFICE 三个内部 origin。任一内部请求连接失败、发生重定向、状态码异常或 Content-Type 不符，部署直接失败。
 
 云端执行 SSH 的普通用户负责 `docker compose pull/up`，因此其 `~/.docker/config.json` 必须保存 GHCR 的只读登录；脚本仅在创建宿主持久目录、备份和初始化主密钥时使用 `sudo`。`/srv/mk/data/app` 与 `/srv/mk/secrets/mk_master_key` 会归容器 UID/GID `10001:10001` 所有，并保持 `0700`/`0600`，使非 root 的 `mk-app` 能写入数据、读取主密钥。
 

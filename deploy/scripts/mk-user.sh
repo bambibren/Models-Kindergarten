@@ -23,7 +23,7 @@ ONLYOFFICE_JWT_SECRET=$(cat /srv/mk/secrets/onlyoffice_jwt_secret)
 ONLYOFFICE_PREVIEW_SECRET=$(cat /srv/mk/secrets/onlyoffice_preview_secret)
 
 compose() {
-  docker compose --progress quiet --env-file release.env -f compose.yaml "$@"
+  docker compose --progress quiet --env-file internal.env --env-file release.env -f compose.yaml "$@"
 }
 
 restart_app() {

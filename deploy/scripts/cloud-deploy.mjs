@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { internalOriginProbeSource } from "./internal-origin-probe.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const [mode, ...rawArgs] = process.argv.slice(2);
@@ -14,6 +15,8 @@ const server = required(args, "server");
 const manifestFile = resolve(repoRoot, required(args, "manifest"));
 const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
 validateManifest(manifest);
+const internalEnvFile = resolve(repoRoot, "deploy/env/internal.env");
+validateInternalEnv(await readFile(internalEnvFile, "utf8"));
 
 const release = safeSegment(manifest.release, "release");
 const remoteRelease = `/srv/mk/releases/${release}`;
@@ -51,6 +54,7 @@ try {
   run("ssh", [server, bootstrapCommand(remoteRelease)], dryRun);
   run("scp", [
     resolve(repoRoot, "deploy/compose.yaml"),
+    internalEnvFile,
     resolve(repoRoot, "deploy/scripts/mk-user.sh"),
     envFile,
     manifestFile,
@@ -122,19 +126,46 @@ function bootstrapCommand(remoteRelease) {
 }
 
 function remoteDeployCommand(remoteRelease, manifestName, settings) {
-  const compose = "ONLYOFFICE_JWT_SECRET=$(sudo cat /srv/mk/secrets/onlyoffice_jwt_secret) ONLYOFFICE_PREVIEW_SECRET=$(sudo cat /srv/mk/secrets/onlyoffice_preview_secret) docker compose --env-file release.env -f compose.yaml";
+  const compose = "ONLYOFFICE_JWT_SECRET=$(sudo cat /srv/mk/secrets/onlyoffice_jwt_secret) ONLYOFFICE_PREVIEW_SECRET=$(sudo cat /srv/mk/secrets/onlyoffice_preview_secret) docker compose --env-file internal.env --env-file release.env -f compose.yaml";
   return [
     "set -eu",
     `cd ${quote(remoteRelease)}`,
     `test -f ${quote(manifestName)}`,
+    "test -f internal.env",
     "sudo test -r /srv/mk/secrets/mk_master_key",
+    `${compose} config --quiet`,
     "if sudo test -d /srv/mk/data/app && [ \"$(sudo find /srv/mk/data/app -mindepth 1 -maxdepth 1 -print -quit)\" ]; then sudo tar -C /srv/mk/data -czf /srv/mk/backups/pre-deploy-$(date +%Y%m%d%H%M%S).tgz app; fi",
     `${compose} pull`,
     `${compose} up --detach --no-build --wait --wait-timeout 420`,
+    `${compose} exec -T mk-app node -e ${quote(internalOriginProbeSource)}`,
     `curl --fail --silent --show-error ${quote(settings.probe)} >/dev/null`,
     `sudo ln -sfn ${quote(remoteRelease)} /srv/mk/current`,
     "sudo install -m 0755 mk-user.sh /usr/local/bin/mk-user",
   ].join("; ");
+}
+
+/** 内部拓扑只能声明 Docker HTTP origin；缺项或公网/TLS 地址会在上传前失败。 */
+function validateInternalEnv(source) {
+  const values = new Map(source.split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const separator = line.indexOf("=");
+      if (separator <= 0) fail(`内部拓扑配置行无效：${line}`);
+      return [line.slice(0, separator), line.slice(separator + 1)];
+    }));
+  const requiredOrigins = ["MK_WEB_INTERNAL_ORIGIN", "MK_RUNTIME_INTERNAL_ORIGIN", "MK_ONLYOFFICE_INTERNAL_ORIGIN"];
+  for (const name of requiredOrigins) {
+    const value = values.get(name);
+    if (!value) fail(`内部拓扑缺少 ${name}`);
+    if (!/^http:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?:\d+$/u.test(value)) {
+      fail(`${name} 必须是带容器服务名和端口的纯 HTTP origin`);
+    }
+  }
+  const siteAddress = values.get("MK_WEB_INTERNAL_SITE_ADDRESS");
+  if (!siteAddress || !/^http:\/\/:\d+$/u.test(siteAddress)) {
+    fail("MK_WEB_INTERNAL_SITE_ADDRESS 必须使用 http://:端口");
+  }
 }
 
 function validateManifest(value) {

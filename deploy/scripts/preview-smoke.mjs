@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import * as acp from "../../apps/remote/node_modules/@agentclientprotocol/sdk/dist/acp.js";
 import { createWebSocketStream } from "../../apps/remote/node_modules/@agentclientprotocol/sdk/dist/ws-stream.js";
+import { internalOriginProbeSource } from "./internal-origin-probe.mjs";
 
 const origin = process.env.MK_PREVIEW_ORIGIN ?? "http://127.0.0.1:7410";
 const officeOrigin = process.env.MK_PREVIEW_OFFICE_ORIGIN ?? "http://127.0.0.1:7411";
@@ -33,6 +34,14 @@ await check("Skills 静态资源", async () => {
     assert.match(response.headers.get("content-type") ?? "", /^application\/vnd\.mk\.skill\+json/u);
     assert.equal((await response.json()).name, name);
   }
+});
+await check("Docker 内部服务地址", async () => {
+  const facts = JSON.parse(compose("exec", "-T", "mk-app", "node", "-e", internalOriginProbeSource));
+  assert.deepEqual(facts.map((item) => [item.name, item.status]), [
+    ["Web Skills", 200],
+    ["Runtime", 200],
+    ["ONLYOFFICE", 200],
+  ]);
 });
 await check("ACP WebSocket initialize", async () => {
   const url = new URL("/acp", origin);
@@ -93,7 +102,11 @@ async function waitFor(url, timeoutMs) {
 
 function compose(...args) {
   const result = spawnSync("docker", [
-    "compose", "--env-file", "deploy/env/preview.env.example", "-f", "deploy/compose.yaml", ...args,
+    "compose",
+    "--env-file", "deploy/env/internal.env",
+    "--env-file", "deploy/env/preview.env.example",
+    "-f", "deploy/compose.yaml",
+    ...args,
   ], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || `docker compose ${args.join(" ")} 失败`);
   return result.stdout;

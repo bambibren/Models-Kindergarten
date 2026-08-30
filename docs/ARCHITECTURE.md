@@ -39,6 +39,19 @@ React Web
           → Evaluation 模块
 ```
 
+```text
+公网地址层
+├─ PUBLIC_ORIGIN                    浏览器、Cookie、来源授权
+└─ ONLYOFFICE_PUBLIC_URL            浏览器文档预览
+
+Docker 内部地址层
+├─ MK_WEB_INTERNAL_ORIGIN           mk-app → mk-web Skills
+├─ MK_RUNTIME_INTERNAL_ORIGIN       mk-web → mk-app
+└─ MK_ONLYOFFICE_INTERNAL_ORIGIN    mk-web → mk-onlyoffice
+```
+
+Docker 内部拓扑由 `deploy/env/internal.env` 统一声明，Compose 将全部内部地址作为必填配置。Caddy 为 Skills 提供独立纯 HTTP 内网站点，该监听端口不发布到宿主机；公网域名的 HTTPS 和自动跳转不会进入容器间下载链路。部署冒烟测试从 `mk-app` 容器验证三个内部 origin，并禁止重定向。
+
 ACP Adapter 不实现模型循环或工具安全；Model Provider 不依赖 ACP；ToolRuntime 不依赖 Ollama；Web 不保存 Runtime 状态。Evaluation 保持独立模块职责，通过有界后台队列观察主链；评分或持久化失败不能改变 Agent 结果。
 
 ## 单一事实源与投影
@@ -118,6 +131,8 @@ Skill Registry
 ```
 
 D2P-1 在每个 Turn 和模型轮次解析当前 Agent 实际可用能力并保存 generation snapshot。`ensure_agent_skills` 只接受当前用户消息中明确出现的有效来源 URL；安装或复用并绑定当前 Agent 后，只返回安装事实。下一模型轮次从同一次解析原子更新 Tool Schema、能力快照和唯一一份动态 Skill 目录，模型再按稳定协议调用 `activate_skill` 渐进加载正文。完整设计见 [MCP 与 Agent Skills](MCP_SKILLS.md)。
+
+Skill 资源的公开 URL 和下载 URL 是两个事实：公开 URL 保存在 Installation 中并接受 `SKILL_RESOURCE_ORIGINS` 校验；下载 URL 保留同一路径，但 origin 来自 `MK_WEB_INTERNAL_ORIGIN`。下载器禁止重定向，因此 Docker 内部站点必须直接返回资源包，不能借公网 HTTPS 跳转完成寻址。
 
 ## 可管理领域与实验
 

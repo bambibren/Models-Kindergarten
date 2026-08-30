@@ -4,32 +4,7 @@
 	https_port 8443
 }
 
-# 容器内部健康端点不参与公网 HTTP 到 HTTPS 跳转，只验证 Caddy 与 Remote 主链。
-http://127.0.0.1:8090 {
-	handle /health/live {
-		reverse_proxy mk-app:7331
-	}
-}
-
-{$MK_SITE_ADDRESS:http://:8080} {
-	encode zstd gzip
-
-	handle /health/live {
-		reverse_proxy mk-app:7331
-	}
-
-	handle /health/ready {
-		reverse_proxy mk-app:7331
-	}
-
-	handle /api/* {
-		reverse_proxy mk-app:7331
-	}
-
-	handle /acp {
-		reverse_proxy mk-app:7331
-	}
-
+(skill_resources) {
 	@skillList path /skills
 	handle @skillList {
 		rewrite * /skills/index.json
@@ -46,6 +21,35 @@ http://127.0.0.1:8090 {
 		root * /srv
 		file_server
 	}
+}
+
+# 容器内部健康端点不参与公网 HTTP 到 HTTPS 跳转，只验证 Caddy 与 Runtime 主链。
+http://127.0.0.1:8090 {
+	handle /health/live {
+		reverse_proxy {$MK_RUNTIME_INTERNAL_ORIGIN}
+	}
+}
+
+{$MK_SITE_ADDRESS:http://:8080} {
+	encode zstd gzip
+
+	handle /health/live {
+		reverse_proxy {$MK_RUNTIME_INTERNAL_ORIGIN}
+	}
+
+	handle /health/ready {
+		reverse_proxy {$MK_RUNTIME_INTERNAL_ORIGIN}
+	}
+
+	handle /api/* {
+		reverse_proxy {$MK_RUNTIME_INTERNAL_ORIGIN}
+	}
+
+	handle /acp {
+		reverse_proxy {$MK_RUNTIME_INTERNAL_ORIGIN}
+	}
+
+	import skill_resources
 
 	handle {
 		root * /srv/web
@@ -54,6 +58,14 @@ http://127.0.0.1:8090 {
 	}
 }
 
+# 纯 HTTP 内网站点只提供 Skills；没有宿主机端口映射，也不会触发自动 HTTPS 跳转。
+{$MK_WEB_INTERNAL_SITE_ADDRESS} {
+	import skill_resources
+	handle {
+		respond 404
+	}
+}
+
 {$MK_OFFICE_SITE_ADDRESS:http://:8081} {
-	reverse_proxy mk-onlyoffice:80
+	reverse_proxy {$MK_ONLYOFFICE_INTERNAL_ORIGIN}
 }

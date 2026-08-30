@@ -82,7 +82,7 @@ pnpm --filter @kindergarten/remote skill:install \
   --source resource --url http://127.0.0.1:5173/skills/example --approve
 ```
 
-Git 安装最终记录解析后的 40 位 Commit。静态资源公开地址必须位于 `SKILL_RESOURCE_ORIGINS` 配置的源站；源码开发默认使用 `http://127.0.0.1:5173`。Remote 保留公开地址用于授权和来源记录，再通过 `SKILL_RESOURCE_FETCH_BASE` 下载：源码开发默认为 `http://127.0.0.1:7342`，Docker 与云端使用 `http://mk-web`。资源包逐文件验证路径、大小和 SHA-256，并验证整包 Hash 后才进入同一个隔离发布流程。安装过程不会运行 lifecycle 或 Skill scripts；同名 Skill 直接拒绝，内容与 lock Hash 不一致时 Remote 启动失败。
+Git 安装最终记录解析后的 40 位 Commit。静态资源公开地址必须位于 `SKILL_RESOURCE_ORIGINS` 配置的源站；源码开发默认使用 `http://127.0.0.1:5173`。Remote 保留公开地址用于授权和来源记录，再通过内部下载 origin 获取相同路径：源码开发的 `SKILL_RESOURCE_FETCH_BASE` 默认为 `http://127.0.0.1:7342`；Docker 与云端由 `deploy/env/internal.env` 的 `MK_WEB_INTERNAL_ORIGIN` 统一注入。内部 Caddy 站点只使用纯 HTTP，不发布宿主机端口，也不发生公网 HTTPS 跳转。资源包逐文件验证路径、大小和 SHA-256，并验证整包 Hash 后才进入同一个隔离发布流程。安装过程不会运行 lifecycle 或 Skill scripts；同名 Skill 直接拒绝，内容与 lock Hash 不一致时 Remote 启动失败。
 
 ### 产品安装入口
 

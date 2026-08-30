@@ -25,4 +25,4 @@ RUN cp /usr/bin/caddy /usr/local/bin/caddy \
   && chown -R 10001:10001 /data /config /srv/web /srv/skills
 
 USER 10001:10001
-EXPOSE 8080 8081 8443
+EXPOSE 8080 8081 8082 8443

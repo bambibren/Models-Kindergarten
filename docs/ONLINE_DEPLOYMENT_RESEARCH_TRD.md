@@ -120,7 +120,10 @@ mk-app
 Remote 实际下载
 └─ SKILL_RESOURCE_FETCH_BASE
    ├─ 源码开发：http://127.0.0.1:7342
-   └─ Docker / 云端：http://mk-web
+   └─ Docker / 云端：${MK_WEB_INTERNAL_ORIGIN}
+      ├─ deploy/env/internal.env 统一配置
+      ├─ 纯 HTTP 内网站点
+      └─ 不发布宿主机端口、禁止重定向
 ```
 
 ```text
