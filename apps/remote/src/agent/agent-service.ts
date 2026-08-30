@@ -26,7 +26,32 @@ constructor(
   ) {}
 
   /** 执行「protect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-protect(agentId: string): void { this.protectedIds.add(agentId); }
+  protect(agentId: string): void { this.protectedIds.add(agentId); }
+
+  /** 确保每个账号都有且只有一个系统默认 Agent；该记录不绑定任何 ModelStudent。 */
+  async ensureDefault(raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
+    const input = this.validate(raw);
+    const now = new Date().toISOString();
+    const record = await this.repository.ensureSystemDefault({
+      schemaVersion: 1,
+      agentId: randomUUID(),
+      ownerId,
+      recordKind: "system_default",
+      name: input.name,
+      ...(input.description ? { description: input.description } : {}),
+      systemPrompt: input.systemPrompt,
+      builtinTools: input.builtinTools,
+      skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(skillInstallationId) => ({ skillInstallationId, enabled: true })),
+      mcps: input.mcps,
+      historyPolicy: input.historyPolicy,
+      memoryPolicy: input.memoryPolicy,
+      createdAt: now,
+      updatedAt: now,
+    });
+    this.protect(record.agentId);
+    return { ...structuredClone(record), deletable: false };
+  }
 
   /** 根据已校验输入构建「create」结果，不额外持有调用方的大对象。 */
 async create(raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
@@ -54,10 +79,10 @@ async create(raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
   }
 
   /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */
-async get(agentId: string, ownerId = "local-admin"): Promise<AgentRecord> {
+  async get(agentId: string, ownerId = "local-admin"): Promise<AgentRecord> {
     const record = await this.repository.get(agentId);
     if (!record || record.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "Agent 不存在", false);
-    return { ...record, deletable: !this.protectedIds.has(record.agentId) };
+    return { ...record, deletable: this.deletable(record) };
   }
 
   /** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */
@@ -75,7 +100,7 @@ async list(options: { query?: string; cursor?: string; limit?: number }, ownerId
       .toSorted(/** 更新「records」对应状态，并保持写入顺序、原子性与容量约束。 */
 (left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.agentId.localeCompare(right.agentId));
     const items = records.slice(offset, offset + limit).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(item) => ({ ...item, deletable: !this.protectedIds.has(item.agentId) }));
+(item) => ({ ...item, deletable: this.deletable(item) }));
     return {
       items,
       ...(offset + items.length < records.length ? { nextCursor: encodeCursor(offset + items.length) } : {}),
@@ -104,13 +129,15 @@ async update(agentId: string, raw: unknown, ownerId = "local-admin"): Promise<Ag
       updatedAt: new Date().toISOString(),
     };
     await this.repository.replace(record);
-    return { ...structuredClone(record), deletable: !this.protectedIds.has(agentId) };
+    return { ...structuredClone(record), deletable: this.deletable(record) };
   }
 
   /** 释放或删除「delete」对应资源，重复调用仍保持安全。 */
-async delete(agentId: string, ownerId = "local-admin"): Promise<void> {
-    if (this.protectedIds.has(agentId)) throw new ApiProblemError(409, "CONFLICT", "系统内置 Agent 不可删除", false);
-    await this.get(agentId, ownerId);
+  async delete(agentId: string, ownerId = "local-admin"): Promise<void> {
+    const current = await this.get(agentId, ownerId);
+    if (current.recordKind === "system_default" || this.protectedIds.has(agentId)) {
+      throw new ApiProblemError(409, "CONFLICT", "系统内置 Agent 不可删除", false);
+    }
     await this.repository.remove(agentId);
   }
 
@@ -218,8 +245,13 @@ capabilityOptions() {
   }
 
   /** 校验并规范化「validateContextPolicy」输入，非法数据直接返回明确错误。 */
-validateContextPolicy(policy: import("@kindergarten/contracts").ExperimentContextPolicy): AgentInput {
+  validateContextPolicy(policy: import("@kindergarten/contracts").ExperimentContextPolicy): AgentInput {
     return this.validate({ name: "context-preview", description: "preview only", ...policy });
+  }
+
+  /** 系统默认记录按持久类型保护；protectedIds 继续兼容进程内显式保护。 */
+  private deletable(record: AgentRecord): boolean {
+    return record.recordKind !== "system_default" && !this.protectedIds.has(record.agentId);
   }
 
   /** 校验并规范化「validate」输入，非法数据直接返回明确错误。 */

@@ -1,5 +1,4 @@
 import {
-  normalizeLocalOllamaBaseUrl,
   normalizeModelBaseUrl,
   type ModelProviderPresetView,
   type ModelStudentCandidateInput,
@@ -13,17 +12,6 @@ interface PresetDefinition extends ModelProviderPresetView {
 }
 
 const PRESETS: readonly PresetDefinition[] = [
-  {
-    schemaVersion: 1,
-    presetId: "ollama",
-    displayName: "本机 Ollama",
-    description: "当前设备上运行的 Ollama Native API；仅用于本地开发",
-    protocol: "ollama_native",
-    availability: "ready",
-    baseUrl: { mode: "editable", defaultValue: "http://127.0.0.1:11434" },
-    auth: { scheme: "none", apiKeyLabel: "不需要 API Key" },
-    modelEntry: "manual",
-  },
   {
     schemaVersion: 1,
     presetId: "openai",
@@ -100,7 +88,7 @@ resolve(input: ModelStudentCandidateInput): ResolvedModelStudentCandidate {
     if (!preset) throw new Error(`模型预设当前不可用: ${input.presetId}`);
     const baseUrl = preset.baseUrl.mode === "fixed"
       ? preset.baseUrl.value
-      : input.presetId === "custom_responses" || input.presetId === "ollama"
+      : input.presetId === "custom_responses"
         ? input.baseUrl
         : undefined;
     if (!baseUrl) throw new Error(`模型预设缺少 Base URL: ${input.presetId}`);
@@ -108,9 +96,7 @@ resolve(input: ModelStudentCandidateInput): ResolvedModelStudentCandidate {
       presetId: input.presetId,
       protocol: preset.protocol as ReadyProviderProtocol,
       displayName: input.displayName,
-      baseUrl: input.presetId === "ollama"
-        ? normalizeLocalOllamaBaseUrl(baseUrl)
-        : normalizeModelBaseUrl(baseUrl),
+      baseUrl: normalizeModelBaseUrl(baseUrl),
       model: input.model,
       ...("apiKey" in input ? { apiKey: input.apiKey } : {}),
     };

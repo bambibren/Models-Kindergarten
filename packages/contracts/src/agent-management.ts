@@ -61,7 +61,7 @@ export interface AgentRecord extends Omit<AgentInput, "skillInstallationIds"> {
   schemaVersion: 1;
   agentId: string;
   ownerId: string;
-  recordKind?: "user" | "experiment_policy";
+  recordKind?: "user" | "system_default" | "experiment_policy";
   skills: SkillBinding[];
   createdAt: string;
   updatedAt: string;

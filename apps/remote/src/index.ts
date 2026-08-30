@@ -1,6 +1,5 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stat } from "node:fs/promises";
 import { KindergartenAgent } from "./acp/kindergarten-agent.js";
 import { AgentRepository } from "./agent/agent-repository.js";
 import { registerAgentRoutes } from "./agent/agent-routes.js";
@@ -85,7 +84,7 @@ import { PasswordAuthStore } from "./auth/password-auth-store.js";
 import { AuthService } from "./auth/auth-service.js";
 import { AUTH_PUBLIC_PATHS, registerAuthRoutes } from "./auth/auth-routes.js";
 import { localPrincipal } from "./server/local-principal.js";
-import type { Principal } from "@kindergarten/contracts";
+import type { AgentInput, Principal } from "@kindergarten/contracts";
 
 const workspaceRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const deployment = readDeploymentConfig(process.env, process.cwd(), workspaceRoot);
@@ -160,7 +159,6 @@ const context = new ContextAssembler([
   new McpResourceContextSource(mcp),
 ]);
 const agentStoreFile = resolve(dataDir, "agents.json");
-const agentStoreExisted = await fileExists(agentStoreFile);
 const agentRepository = new AgentRepository(agentStoreFile);
 let skillInstallations: SkillInstallationService;
 const agentService = new AgentService(agentRepository, {
@@ -204,13 +202,9 @@ const mcpManagement = new McpManagementService(
   agentService,
 );
 await mcpManagement.importExisting();
-let defaultAgent = (await agentService.list({ query: "系统默认 Agent", limit: 100 })).items
-  .find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.name === "系统默认 Agent");
-if (!defaultAgent && !agentStoreExisted) {
-  defaultAgent = await agentService.create({
+const defaultAgentInput = (): AgentInput => ({
     name: "系统默认 Agent",
-    description: "从 D2P-1 启用时的真实 Runtime 配置导入",
+    description: "MK 为每个账号提供的初始 Agent",
     systemPrompt: process.env.AGENT_SYSTEM_PROMPT ?? DEFAULT_AGENT_SYSTEM_PROMPT,
     builtinTools: [
       ...new ToolRegistry(sandbox).definitions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
@@ -233,7 +227,7 @@ if (!defaultAgent && !agentStoreExisted) {
     historyPolicy: { mode: "recent_turns", maxTurns: 12 },
     memoryPolicy: { mode: "off" },
   });
-}
+let defaultAgent = await agentService.ensureDefault(defaultAgentInput(), localPrincipal.principalId);
 if (defaultAgent) {
   const systemPrompt = removeLegacyModelIdentity(defaultAgent.systemPrompt);
   if (systemPrompt !== defaultAgent.systemPrompt) {
@@ -253,7 +247,7 @@ if (defaultAgent) {
     });
   }
 }
-if (defaultAgent) agentService.protect(defaultAgent.agentId);
+agentService.protect(defaultAgent.agentId);
 const sessions = new SessionRepository(dataDir, {
   ownerId: "local-admin",
   modelStudentId: "local-coder-student",
@@ -350,7 +344,7 @@ const control = new ControlApi({
   publicPaths: AUTH_PUBLIC_PATHS,
 });
 registerAuthRoutes(control.router, auth);
-registerAgentRoutes(control.router, agentService);
+registerAgentRoutes(control.router, agentService, { defaultAgentInput });
 registerSessionRoutes(control.router, sessions, new SessionLaunchService(resolve(dataDir, "session-launches.json"), agentService, modelStudents));
 registerSkillRoutes(control.router, skillInstallations);
 registerMcpRoutes(control.router, mcpManagement);
@@ -504,15 +498,6 @@ function createSiliconFlowProvider(
 function requireCredentialRef(connection: ProviderConnectionRecord) {
   if (!connection.credentialRef) throw new Error(`ProviderConnection 缺少凭据: ${connection.connectionId}`);
   return connection.credentialRef;
-}
-
-/** 执行「fileExists」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async function fileExists(path: string): Promise<boolean> {
-  try { await stat(path); return true; }
-  catch (error) {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return false;
-    throw error;
-  }
 }
 
 /** 根目录 .env 中的项目路径相对仓库解析，不受 pnpm 子包 cwd 影响。 */

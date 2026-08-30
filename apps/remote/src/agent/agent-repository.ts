@@ -23,13 +23,34 @@ async get(agentId: string): Promise<AgentRecord | undefined> {
   }
 
   /** 更新「insert」对应状态，并保持写入顺序、原子性与容量约束。 */
-async insert(record: AgentRecord): Promise<void> {
+  async insert(record: AgentRecord): Promise<void> {
     await this.store.update(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (records) => {
       if (records.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.agentId === record.agentId)) throw new Error(`Agent 已存在: ${record.agentId}`);
       return [...records, record];
     });
+  }
+
+  /** 为账号原子创建唯一系统默认 Agent，并把同名历史记录提升为系统默认记录。 */
+  async ensureSystemDefault(record: AgentRecord): Promise<AgentRecord> {
+    const result = await this.store.update(/** 更新「result」对应状态，并保持写入顺序、原子性与容量约束。 */
+(records) => {
+      const index = records.findIndex(/** 执行「index」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => item.ownerId === record.ownerId &&
+        (item.recordKind === "system_default" ||
+          ((item.recordKind === undefined || item.recordKind === "user") && item.name === record.name)));
+      if (index < 0) return { records: [...records, record], result: record };
+      const current = records[index];
+      if (!current) throw new Error(`默认 Agent 不存在: ${record.ownerId}`);
+      if (current.recordKind === "system_default") return { records, result: current };
+      const promoted: AgentRecord = { ...current, recordKind: "system_default" };
+      const next = [...records];
+      next[index] = promoted;
+      return { records: next, result: promoted };
+    });
+    if (!result) throw new Error(`无法创建默认 Agent: ${record.ownerId}`);
+    return result;
   }
 
   /** 执行「replace」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -78,6 +99,8 @@ function isAgentRecord(value: unknown): value is AgentRecord {
   return item.schemaVersion === 1 && typeof item.agentId === "string" && typeof item.ownerId === "string" &&
     typeof item.name === "string" && typeof item.systemPrompt === "string" && Array.isArray(item.builtinTools) &&
     Array.isArray(item.skills) && Array.isArray(item.mcps) &&
+    (item.recordKind === undefined || item.recordKind === "user" ||
+      item.recordKind === "system_default" || item.recordKind === "experiment_policy") &&
     !("defaultReasoningProfile" in item) &&
     typeof item.createdAt === "string" && typeof item.updatedAt === "string";
 }

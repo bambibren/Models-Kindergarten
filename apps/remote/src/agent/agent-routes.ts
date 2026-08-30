@@ -1,10 +1,22 @@
 import type { ControlRouter } from "../server/control-router.js";
+import type { AgentInput } from "@kindergarten/contracts";
 import type { AgentService } from "./agent-service.js";
 
+interface AgentRouteOptions {
+  defaultAgentInput?: () => AgentInput;
+}
+
 /** 执行「registerAgentRoutes」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-export function registerAgentRoutes(router: ControlRouter, service: AgentService): void {
+export function registerAgentRoutes(
+  router: ControlRouter,
+  service: AgentService,
+  options: AgentRouteOptions = {},
+): void {
   router.register("GET", "/agents", /** 执行「registerAgentRoutes」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-({ url, principal }) => {
+async ({ url, principal }) => {
+    if (options.defaultAgentInput) {
+      await service.ensureDefault(options.defaultAgentInput(), principal.principalId);
+    }
     const query = url.searchParams.get("query");
     const cursor = url.searchParams.get("cursor");
     const limit = parseLimit(url.searchParams.get("limit"));

@@ -10,7 +10,7 @@
 - 一个浏览器页面只有一个 ACP connection owner；
 - `load` 完整回放；`resume` 默认零回放，携带当前 Turn 游标时只补齐断线增量；
 - Remote 不保存 Web 投影，Web 不保存 Runtime 状态；
-- Model Provider 不依赖 ACP；Remote 允许零模型启动，Ollama 与线上 API 都必须走统一入园；
+- Model Provider 不依赖 ACP；Remote 允许零模型启动，但每个账号必须幂等拥有一个不绑定模型的系统默认 Agent；线上 API 必须走统一入园；Ollama 只保留已有记录和历史迁移兼容，不再提供新模型入园选项；
 - Evaluation 是独立职责模块但不建立独立进程、端口或容器；评测持久化失败不得改变 Agent Turn 结果；
 - UI 组件不解释 Raw ACP；
 - 每个 session 同时最多一个 prompt；
@@ -36,7 +36,7 @@ D2P-1 允许受控终端、网络搜索/读取、有限重试和外部依赖熔�
 
 D2P-1 增加可变 Agent 配置、ModelStudent 目录与多 Provider 入园、固定绑定 Session、Session-scoped Artifact 预览、2～3 lane Context Experiment、三维人工注释与 Runtime 执行分。Context Experiment 只编排正式 Session/Prompt，不是 Workflow/DAG。
 
-D2P-1 的模型入园实现 OpenAI 官方、自定义公网 HTTPS Responses、硅基流动 Chat Completions 与本机回环地址 Ollama；能力必须来自目标端点逐项体检，禁止按域名或模型名写死。Provider Preset 与 Protocol Adapter 必须分离，固定公网 Preset 不接受客户端 Base URL。Anthropic Messages 只保留扩展合同，不得显示为已支持。小说真实创作、Bearer Token 小说 MCP、自动评分调用、MCP 市场、自动升级、Tasks、MCP Apps、Skill 依赖安装或脚本自动执行仍不做。首页小说创作卡片保留为不可点击的调研占位。
+D2P-1 的模型入园实现 OpenAI 官方、自定义公网 HTTPS Responses 与硅基流动 Chat Completions；能力必须来自目标端点逐项体检，禁止按域名或模型名写死。Ollama Protocol Adapter 仅用于已有记录和历史迁移兼容，不得作为新模型入园预设发布。Provider Preset 与 Protocol Adapter 必须分离，固定公网 Preset 不接受客户端 Base URL。Anthropic Messages 只保留扩展合同，不得显示为已支持。小说真实创作、Bearer Token 小说 MCP、自动评分调用、MCP 市场、自动升级、Tasks、MCP Apps、Skill 依赖安装或脚本自动执行仍不做。首页小说创作卡片保留为不可点击的调研占位。
 
 ## 代码风格
 

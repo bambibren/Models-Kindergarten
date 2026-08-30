@@ -31,6 +31,42 @@ async () => {
     expect(merged.skills).toEqual([{ skillInstallationId: "skill-1", enabled: true }]);
   });
 
+  it("为每个账号幂等创建一个不绑定模型且不可删除的系统默认 Agent", async () => {
+    const service = await makeService();
+    const [first, repeated] = await Promise.all([
+      service.ensureDefault(input("系统默认 Agent"), "user-1"),
+      service.ensureDefault(input("系统默认 Agent"), "user-1"),
+    ]);
+    const anotherOwner = await service.ensureDefault(input("系统默认 Agent"), "user-2");
+
+    expect(repeated.agentId).toBe(first.agentId);
+    expect(first).toMatchObject({
+      ownerId: "user-1",
+      recordKind: "system_default",
+      name: "系统默认 Agent",
+      deletable: false,
+    });
+    expect(first).not.toHaveProperty("modelStudentId");
+    expect(anotherOwner.agentId).not.toBe(first.agentId);
+    expect((await service.list({}, "user-1")).items).toHaveLength(1);
+    expect((await service.list({}, "user-2")).items).toHaveLength(1);
+    await expect(service.delete(first.agentId, "user-1")).rejects.toThrow("系统内置 Agent 不可删除");
+  });
+
+  it("把账号下同名的历史默认 Agent 提升为系统默认记录", async () => {
+    const service = await makeService();
+    const legacy = await service.create(input("系统默认 Agent"), "user-1");
+    const ensured = await service.ensureDefault(input("系统默认 Agent"), "user-1");
+
+    expect(ensured).toMatchObject({
+      agentId: legacy.agentId,
+      ownerId: "user-1",
+      recordKind: "system_default",
+      deletable: false,
+    });
+    expect((await service.list({}, "user-1")).items).toHaveLength(1);
+  });
+
   it("拒绝不存在的 built-in、Skill 和 MCP capability 引用", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const service = await makeService();

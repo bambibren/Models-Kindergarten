@@ -69,6 +69,32 @@ async () => {
     expect(removed.response.status).toBe(409);
     expect(await service.get(created.agentId)).toMatchObject({ agentId: created.agentId, deletable: false });
   });
+
+  it("账号首次读取列表时自动得到默认 Agent", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-agent-default-route-"));
+    dirs.push(dir);
+    const api = new ControlApi({ allowedOrigins: ["http://127.0.0.1:5174"] });
+    const service = new AgentService(new AgentRepository(join(dir, "agents.json")), {
+      builtinToolIds: () => [], readySkillInstallationIds: () => [], mcpCapabilities: () => [],
+    });
+    const defaultAgentInput = () => ({
+      name: "系统默认 Agent",
+      systemPrompt: "默认系统提示词",
+      builtinTools: [],
+      skillInstallationIds: [],
+      mcps: [],
+      historyPolicy: { mode: "recent_turns" as const, maxTurns: 12 },
+      memoryPolicy: { mode: "off" as const },
+    });
+    registerAgentRoutes(api.router, service, { defaultAgentInput });
+
+    const first = await json(api, "/agents", "GET");
+    const repeated = await json(api, "/agents", "GET");
+    expect(first.value.data).toMatchObject({
+      items: [{ name: "系统默认 Agent", recordKind: "system_default", deletable: false }],
+    });
+    expect((repeated.value.data as { items: unknown[] }).items).toHaveLength(1);
+  });
 });
 
 /** 构造「json」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */

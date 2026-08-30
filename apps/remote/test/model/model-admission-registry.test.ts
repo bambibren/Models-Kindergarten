@@ -20,6 +20,19 @@ describe("provider-neutral model admission registry", /** 组织这一组相关�
       .toEqual(["openai", "custom_responses", "siliconflow"]);
   });
 
+  it("不发布或接受新的本机 Ollama 入园预设", () => {
+    const presets = new ModelProviderPresetRegistry(new ModelAdmissionAdapterRegistry([
+      adapter("ollama_native"),
+    ]));
+    expect(presets.views()).toEqual([]);
+    expect(() => presets.resolve({
+      presetId: "ollama",
+      displayName: "本机模型",
+      baseUrl: "http://127.0.0.1:11434",
+      model: "qwen3:8b",
+    })).toThrow("模型预设当前不可用: ollama");
+  });
+
   it("固定预设由 Remote 解析官方地址，自定义预设才接收输入地址", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     const presets = new ModelProviderPresetRegistry(registry());
