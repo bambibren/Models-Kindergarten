@@ -66,3 +66,5 @@ sudo mk-user delete admin
 ```
 
 `add` 和 `reset-password` 会要求无回显输入两次密码。`disable` 会立即撤销该账号的登录会话，但保留全部业务数据。`delete` 只有在逐字输入 `确认删除账号 <用户名>` 后才会永久删除账号、登录会话以及该账号的模型、Agent、会话、实验、Workspace、产物、文件和加密 API Key。
+
+`list` 是不停服务的只读查询；其他修改命令会在输入完成后短暂停止 `mk-app`，完成账号文件的独占写入后自动恢复。Docker Compose 的创建、停止和启动过程保持静默，终端只显示账号结果或明确错误。
