@@ -5,6 +5,17 @@ export interface LocalPrincipal {
   kind: "local_admin";
 }
 
+/** 云端密码账号对应的服务端身份；浏览器不能自行指定 principalId。 */
+export interface PasswordPrincipal {
+  schemaVersion: 1;
+  principalId: string;
+  kind: "password_user";
+  username: string;
+}
+
+/** Control API 与 ACP 共用的认证身份。 */
+export type Principal = LocalPrincipal | PasswordPrincipal;
+
 /** 描述「ModelStudentSummary」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelStudentSummary {
   schemaVersion: 1;
