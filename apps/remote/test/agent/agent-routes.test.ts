@@ -81,6 +81,7 @@ async () => {
       name: "系统默认 Agent",
       systemPrompt: "默认系统提示词",
       builtinTools: [],
+      builtinSkillIds: [],
       skillInstallationIds: [],
       mcps: [],
       historyPolicy: { mode: "recent_turns" as const, maxTurns: 12 },

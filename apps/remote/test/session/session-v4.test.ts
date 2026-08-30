@@ -61,7 +61,7 @@ async () => {
       model: "qwen3:8b",
       agentId: "agent-1",
       agentSnapshotHash: "hash-1",
-      agentSnapshot: { systemPrompt: "旧提示词", builtinTools: [], skills: [], mcps: [], historyPolicy: { mode: "none" }, memoryPolicy: { mode: "off" } },
+      agentSnapshot: { systemPrompt: "旧提示词", builtinTools: [], builtinSkills: [], skills: [], mcps: [], historyPolicy: { mode: "none" }, memoryPolicy: { mode: "off" } },
       capabilitySnapshots: [{ generation: 1, hash: "cap-1", snapshot: { tools: [], mcpServers: [], skills: [] } }],
       modelRounds: [{ roundIndex: 0, capabilityGeneration: 1, contextSummary: { schemaVersion: 1, turnId: "turn-1", items: [], totalEstimatedTokens: 0 }, providerInput: { provider: "ollama", model: "qwen3:8b", format: "json", value: "{}" }, startedAt: new Date().toISOString() }],
       resolvedReasoning: { schemaVersion: 1, requestedProfile: "auto", resolvedProfile: "deep", source: "model_default", providerKind: "ollama", model: "qwen3:8b", native: { think: true } },

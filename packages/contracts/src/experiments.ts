@@ -8,6 +8,7 @@ import { parseReasoningProfile } from "./reasoning.js";
 export interface ExperimentContextPolicy {
   systemPrompt: string;
   builtinTools: BuiltinToolBinding[];
+  builtinSkillIds: string[];
   skillInstallationIds: string[];
   mcps: McpBinding[];
   historyPolicy: HistoryPolicy;
@@ -519,6 +520,7 @@ function parseExperimentTestDraftV2(value: unknown): ExperimentTestDraftV2 {
     policy: {
       systemPrompt: parsed.systemPrompt,
       builtinTools: parsed.builtinTools,
+      builtinSkillIds: parsed.builtinSkillIds,
       skillInstallationIds: parsed.skillInstallationIds,
       mcps: parsed.mcps,
       historyPolicy: parsed.historyPolicy,
@@ -623,6 +625,7 @@ function parseVariant(value: unknown): ExperimentVariant {
     policy: {
       systemPrompt: parsed.systemPrompt,
       builtinTools: parsed.builtinTools,
+      builtinSkillIds: parsed.builtinSkillIds,
       skillInstallationIds: parsed.skillInstallationIds,
       mcps: parsed.mcps,
       historyPolicy: parsed.historyPolicy,

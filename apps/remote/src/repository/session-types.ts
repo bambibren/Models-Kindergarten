@@ -6,6 +6,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import type {
   BuiltinToolBinding,
+  BuiltinSkillBinding,
   ContextSummary,
   HistoryPolicy,
   McpBinding,
@@ -49,6 +50,7 @@ export interface TurnExecutionRecord {
   agentSnapshot?: {
     systemPrompt: string;
     builtinTools: BuiltinToolBinding[];
+    builtinSkills: BuiltinSkillBinding[];
     skills: SkillBinding[];
     mcps: McpBinding[];
     historyPolicy: HistoryPolicy;

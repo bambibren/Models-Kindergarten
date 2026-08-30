@@ -28,6 +28,7 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
         { toolId: "read_file", enabled: true, permission: "allow" },
         { toolId: "read_file", enabled: true, permission: "allow" },
       ],
+      builtinSkillIds: ["builtin:sandbox-notes", "builtin:sandbox-notes"],
       skillInstallationIds: ["skill-b", "skill-a", "skill-a"],
       mcps: [],
       historyPolicy: { mode: "recent_turns", maxTurns: 6 },
@@ -42,6 +43,7 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
     expect(PRODUCT_CONFIG.pptx.maxSourceBytes).toBe(5 * 1024 * 1024);
     expect(PRODUCT_CONFIG.pptx.maxOutputBytes).toBe(PRODUCT_CONFIG.artifact.maxFileBytes);
     expect(canonicalAgentInput(input).skillInstallationIds).toEqual(["skill-a", "skill-b"]);
+    expect(canonicalAgentInput(input).builtinSkillIds).toEqual(["builtin:sandbox-notes"]);
     expect(canonicalAgentInput(input).builtinTools).toHaveLength(1);
     expect(input).not.toHaveProperty("defaultReasoningProfile");
     expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
@@ -87,6 +89,7 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
     const policy = {
       systemPrompt: "保持简洁",
       builtinTools: [],
+      builtinSkillIds: [],
       skillInstallationIds: [],
       mcps: [],
       historyPolicy: { mode: "none" as const },
@@ -115,6 +118,7 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
     const policy = {
       systemPrompt: "保持简洁",
       builtinTools: [],
+      builtinSkillIds: [],
       skillInstallationIds: [],
       mcps: [],
       historyPolicy: { mode: "recent_turns" as const, maxTurns: 6 },

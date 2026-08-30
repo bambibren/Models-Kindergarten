@@ -5,12 +5,14 @@ import { addContextLane, importAgentIntoLane, initialContextLanes, removeContext
 const policy: ExperimentContextPolicy = {
   systemPrompt: "先理解任务。",
   builtinTools: [{ toolId: "read_file", enabled: true, permission: "allow" }],
+  builtinSkillIds: ["builtin:sandbox-notes"],
   skillInstallationIds: ["skill-a"], mcps: [],
   historyPolicy: { mode: "recent_turns", maxTurns: 6 }, memoryPolicy: { mode: "off" },
 };
 const agent: AgentRecord = {
   schemaVersion: 1, agentId: "agent-a", ownerId: "local-admin", name: "Agent A",
   systemPrompt: policy.systemPrompt, builtinTools: policy.builtinTools,
+  builtinSkills: [{ skillId: "builtin:sandbox-notes", enabled: true }],
   skills: [{ skillInstallationId: "skill-a", enabled: true }], mcps: [],
   historyPolicy: policy.historyPolicy, memoryPolicy: { mode: "off" },
   createdAt: "2026-08-18T00:00:00.000Z", updatedAt: "2026-08-18T00:00:00.000Z",

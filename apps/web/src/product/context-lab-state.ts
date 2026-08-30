@@ -77,6 +77,7 @@ export function policyFromAgent(agent: AgentRecord): ExperimentContextPolicy {
   return {
     systemPrompt: agent.systemPrompt,
     builtinTools: structuredClone(agent.builtinTools),
+    builtinSkillIds: agent.builtinSkills.filter((item) => item.enabled).map((item) => item.skillId),
     skillInstallationIds: agent.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.enabled).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.skillInstallationId),

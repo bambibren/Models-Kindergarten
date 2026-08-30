@@ -9,6 +9,7 @@ const policy: AgentPolicyValue = {
     { toolId: "read_file", enabled: true, permission: "allow" },
     { toolId: "web_search", enabled: false, permission: "ask" },
   ],
+  builtinSkillIds: ["builtin:sandbox-notes"],
   skillInstallationIds: ["skill-ready"],
   mcps: [],
   historyPolicy: { mode: "recent_turns", maxTurns: 6 },
@@ -54,6 +55,7 @@ describe("AgentPolicyFields", /** 组织这一组相关测试，统一建立场�
   it("复用真实 Tool、Skill 和 MCP 控件，并可隐藏 History/Memory", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     const html = renderToStaticMarkup(<AgentPolicyFields
+      builtinSkills={[{ skillId: "builtin:sandbox-notes", name: "sandbox-notes", description: "记录沙箱笔记" }]}
       builtinToolIds={["read_file", "web_search"]}
       mcps={[mcp]}
       onChange={/** 构造「onChange」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
@@ -67,6 +69,7 @@ describe("AgentPolicyFields", /** 组织这一组相关测试，统一建立场�
     expect(html).toContain("web_search");
     expect(html).toContain("每次询问");
     expect(html).toContain("frontend-design");
+    expect(html).toContain("sandbox-notes");
     expect(html).toContain("Docs MCP");
     expect(html).not.toContain("聊天历史");
     expect(html).not.toContain("Memory");
@@ -75,6 +78,7 @@ describe("AgentPolicyFields", /** 组织这一组相关测试，统一建立场�
   it("在 Agent 编辑页显示 History 和只读 Memory 状态", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     const html = renderToStaticMarkup(<AgentPolicyFields
+      builtinSkills={[]}
       builtinToolIds={["read_file", "web_search"]}
       mcps={[]}
       onChange={/** 构造「onChange」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */

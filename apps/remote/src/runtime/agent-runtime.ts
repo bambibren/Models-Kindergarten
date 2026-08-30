@@ -128,7 +128,7 @@ export interface RuntimeTurnSnapshot {
   model: string;
   agentId: string;
   agentSnapshotHash: string;
-  agentSnapshot: Pick<AgentRecord, "systemPrompt" | "builtinTools" | "skills" | "mcps" | "historyPolicy" | "memoryPolicy">;
+  agentSnapshot: Pick<AgentRecord, "systemPrompt" | "builtinTools" | "builtinSkills" | "skills" | "mcps" | "historyPolicy" | "memoryPolicy">;
   resolvedReasoning: ResolvedReasoningSnapshot;
 }
 
@@ -372,6 +372,7 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
         agentSnapshot: {
           systemPrompt: resolved.agent.systemPrompt,
           builtinTools: structuredClone(resolved.agent.builtinTools),
+          builtinSkills: structuredClone(resolved.agent.builtinSkills),
           skills: structuredClone(resolved.agent.skills),
           mcps: structuredClone(resolved.agent.mcps),
           historyPolicy: structuredClone(resolved.agent.historyPolicy),

@@ -17,6 +17,19 @@ export interface SkillBinding {
   enabled: boolean;
 }
 
+/** 描述随系统发布且不属于任何账号的 Builtin Skill 绑定。 */
+export interface BuiltinSkillBinding {
+  skillId: string;
+  enabled: boolean;
+}
+
+/** 描述 Agent 编辑器可选择的全局 Builtin Skill。 */
+export interface BuiltinSkillOption {
+  skillId: string;
+  name: string;
+  description: string;
+}
+
 /** 描述「McpToolBinding」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface McpToolBinding {
   remoteName: string;
@@ -50,6 +63,7 @@ export interface AgentInput {
   description?: string;
   systemPrompt: string;
   builtinTools: BuiltinToolBinding[];
+  builtinSkillIds: string[];
   skillInstallationIds: string[];
   mcps: McpBinding[];
   historyPolicy: HistoryPolicy;
@@ -57,11 +71,12 @@ export interface AgentInput {
 }
 
 /** 描述「AgentRecord」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
-export interface AgentRecord extends Omit<AgentInput, "skillInstallationIds"> {
+export interface AgentRecord extends Omit<AgentInput, "builtinSkillIds" | "skillInstallationIds"> {
   schemaVersion: 1;
   agentId: string;
   ownerId: string;
   recordKind?: "user" | "system_default" | "experiment_policy";
+  builtinSkills: BuiltinSkillBinding[];
   skills: SkillBinding[];
   createdAt: string;
   updatedAt: string;
@@ -72,6 +87,8 @@ export interface AgentRecord extends Omit<AgentInput, "skillInstallationIds"> {
 export function parseAgentInput(value: unknown): AgentInput {
   if (!isRecord(value)) throw new Error("AgentInput 必须是对象");
   if (!Array.isArray(value.builtinTools)) throw new Error("builtinTools 必须是数组");
+  const builtinSkillIds = value.builtinSkillIds === undefined ? [] : value.builtinSkillIds;
+  if (!Array.isArray(builtinSkillIds)) throw new Error("builtinSkillIds 必须是数组");
   if (!Array.isArray(value.skillInstallationIds)) throw new Error("skillInstallationIds 必须是数组");
   if (!Array.isArray(value.mcps)) throw new Error("mcps 必须是数组");
   const description = optionalString(value, "description", { max: PRODUCT_CONFIG.agent.descriptionMaxCharacters });
@@ -83,6 +100,12 @@ export function parseAgentInput(value: unknown): AgentInput {
       preserveWhitespace: true,
     }),
     builtinTools: value.builtinTools.map(parseBuiltinToolBinding),
+    builtinSkillIds: builtinSkillIds.map((id) => {
+      if (typeof id !== "string" || !id.trim().startsWith("builtin:") || id.trim().length <= "builtin:".length) {
+        throw new Error("builtinSkillIds 包含无效 ID");
+      }
+      return id.trim();
+    }),
     skillInstallationIds: value.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (id) => {
       if (typeof id !== "string" || id.trim().length === 0) throw new Error("skillInstallationIds 包含无效 ID");
@@ -100,7 +123,7 @@ export function parseAgentInput(value: unknown): AgentInput {
     .reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
 (total, item) => total + item.tools.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (tool) => tool.enabled).length, 0);
-  if (parsed.skillInstallationIds.length > PRODUCT_CONFIG.capacity.maxAgentSkills) {
+  if (parsed.builtinSkillIds.length + parsed.skillInstallationIds.length > PRODUCT_CONFIG.capacity.maxAgentSkills) {
     throw new Error(`Agent 绑定 Skill 超过 ${PRODUCT_CONFIG.capacity.maxAgentSkills} 个上限`);
   }
   if (parsed.mcps.length > PRODUCT_CONFIG.capacity.maxAgentMcps) {
@@ -137,6 +160,7 @@ export function canonicalAgentInput(input: AgentInput): AgentInput {
     systemPrompt: input.systemPrompt,
     builtinTools: [...builtin.values()].toSorted(/** 执行「builtinTools」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (a, b) => a.toolId.localeCompare(b.toolId)),
+    builtinSkillIds: [...new Set(input.builtinSkillIds)].toSorted(),
     skillInstallationIds: [...new Set(input.skillInstallationIds)].toSorted(),
     mcps,
   };

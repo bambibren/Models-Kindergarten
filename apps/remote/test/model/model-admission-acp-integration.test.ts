@@ -240,6 +240,7 @@ function agentRecord(): AgentRecord {
     name: "测试 Agent",
     systemPrompt: "你是测试助手。",
     builtinTools: [],
+    builtinSkills: [],
     skills: [],
     mcps: [],
     historyPolicy: { mode: "none" },

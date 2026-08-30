@@ -68,7 +68,7 @@
 5. 工具配置为 `retry: none`，通用失败文案又要求模型不要重复同参。模型只能结束或改参；当前模型选择了错误的改参路径。
 6. 同一仓库不同目录会分别执行发现；发现成功后每个 Skill 安装又会重新 checkout，导致网络耗时和失败概率被放大。
 
-当前数据也说明第一次失败不能靠本地复用规避：安装目录里没有四个用户 Skill，安装记录只有内置 `sandbox-notes`。因此本次第一次 GitHub 下载是必要的；真正需要修复的是下载失败后的任务、错误和恢复链路。
+Builtin Skill 不参与用户安装与复用：`sandbox-notes` 由镜像携带并通过 `builtin:sandbox-notes` 固定引用供所有账号使用。用户首次安装四个外部 Skill 时仍必须完成来源发现和下载；真正需要修复的是下载失败后的任务、错误和恢复链路。
 
 ### 技术栈
 
@@ -448,7 +448,7 @@ interface SkillSourceBinding {
 
 - 不在运行时代码中同时解析 Job v1/v2；Tool 参数仍使用现有 `source_urls` 和 `mode`，不发生这一层合同迁移。
 - 当前仓库属于本地 Demo，部署前把旧 `skill-install-jobs.json` 备份为只读历史文件，新 Job Store 使用 schema v2；旧聊天 Tool 卡片仍保留自身 `rawInput/rawOutput`，不依赖旧 Job 才能展示。
-- 当前只有内置 `sandbox-notes` 安装记录，不需要为用户 Skill 反推 SourceBinding。
+- Builtin `sandbox-notes` 使用全局固定引用，不进入 Installation 或 SourceBinding；这里只迁移真实的用户安装记录。
 - 如果开发开始前出现新的用户安装记录，只对明确的单目录来源执行一次性迁移；无法确认其原始仓库根请求时不猜测，首次 `ensure` 重新发现。
 
 ---

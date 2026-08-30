@@ -15,6 +15,7 @@ import { parseGitHubSkillUrl } from "./github-skill-source.js";
 import type { SkillDiscoveryPort } from "./skill-discovery.js";
 import type { SkillInstallationRepository } from "./skill-installation-repository.js";
 import type { SkillRegistry } from "./skill-registry.js";
+import { builtinSkillId } from "./skill-registry.js";
 import type { SkillInstallRecord } from "./skill-types.js";
 import { SkillSourceUrlPolicy, type ExplicitSkillSourceUrl } from "./skill-source-url.js";
 
@@ -85,8 +86,8 @@ async importExisting(ownerId = "local-admin"): Promise<void> {
         }
         continue;
       }
-      // 用户安装目录没有 owner 元数据；没有持久安装记录时视为孤立内容，不能转赠给 local-admin。
-      if (skill.scope === "user") continue;
+      // Builtin Skill 由 Registry 以固定 ID 全局提供；用户目录没有 owner 元数据时也不能转赠。
+      if (skill.scope === "builtin" || skill.scope === "user") continue;
       const now = new Date().toISOString();
       const skillInstallationId = randomUUID();
       await this.repository.putInstallation({
@@ -104,6 +105,31 @@ async importExisting(ownerId = "local-admin"): Promise<void> {
       });
       this.readyIds.add(skillInstallationId);
     }
+  }
+
+  /** 把历史伪装成 Installation 的 Builtin Skill 转换为全局固定引用。 */
+  async migrateBuiltinInstallations(): Promise<number> {
+    const builtinNames = new Set(this.registry.all()
+      .filter((skill) => skill.scope === "builtin")
+      .map((skill) => skill.name));
+    const legacy = (await this.repository.listInstallations()).filter((installation) =>
+      installation.state !== "uninstalled" &&
+      installation.source.kind === "approved_local" &&
+      builtinNames.has(installation.skillName));
+    if (legacy.length === 0) {
+      await this.agents.migrateBuiltinSkillBindings(new Map());
+      return 0;
+    }
+    const replacements = new Map(legacy.map((installation) => [
+      installation.skillInstallationId,
+      builtinSkillId(installation.skillName),
+    ]));
+    await this.agents.migrateBuiltinSkillBindings(replacements);
+    for (const installation of legacy) {
+      await this.repository.removeInstallation(installation.skillInstallationId);
+      this.readyIds.delete(installation.skillInstallationId);
+    }
+    return legacy.length;
   }
 
   /** 读取「list」所需数据，并遵守作用域、分页与容量边界。 */

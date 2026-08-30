@@ -103,7 +103,19 @@ Provider native request + Turn/model-round facts
 
 Remote 是唯一 MCP Host，每个 Server 对应一个独立 Client。MCP 支持 stdio、Streamable HTTP 和 modern/legacy 自动协商；外部 Tool 适配为现有 PreparedToolCall/ToolOutcome 后统一进入 ToolRuntime。MCP Resource 只按当前 Agent 配置绑定，默认只注入元数据，需要时通过 `read_mcp_resource` 读取。Agent 独占 system prompt 和上下文/能力策略；ModelStudent 的 `generationDefaults` 独占 temperature 等模型默认参数。产品和内部领域模型都不引入 AgentVersion/AgentRevision；Session 只关联 `agentId`。
 
-Skills 按 builtin、project、user 三个作用域发现。Runtime system prompt 带版本化且不含名单的稳定 Skill 使用协议；动态上下文只保留 `name/description/trust` 元数据。`activate_skill` 是保留的协议名称，实际职责是按 SKILL.md 的 `name` 加载完整 SKILL.md；随后才可通过 `read_skill_resource(name,path)` 按需读取 references/assets/scripts。Installation UUID 只作 Agent 绑定键，不暴露给模型；不接受 `skill_id`、`skill:` 前缀或别名兼容。当前不会自动执行 Skill 脚本。
+Skills 按 builtin、project、user 三个作用域发现。Builtin Skill 随镜像发布，由 Registry 以 `builtin:<name>` 固定 ID 向所有账号提供，不创建 Installation、不记录 ownerId、不可卸载；用户安装 Skill 才创建 owner-scoped Installation UUID。两类引用只在 Agent 策略中分开保存，Runtime 解析后统一转换为 SKILL.md 的 `name`。Runtime system prompt 带版本化且不含名单的稳定 Skill 使用协议；动态上下文只保留 `name/description/trust` 元数据。`activate_skill` 是保留的协议名称，实际职责是按 SKILL.md 的 `name` 加载完整 SKILL.md；随后才可通过 `read_skill_resource(name,path)` 按需读取 references/assets/scripts。内部固定 ID 与 Installation UUID 都不暴露给模型；当前不会自动执行 Skill 脚本。
+
+```text
+Skill Registry
+├─ Builtin Skill
+│  ├─ 固定引用 builtin:<name>
+│  ├─ 所有账号共享
+│  └─ 不进入 Installation
+└─ User Skill
+   ├─ Installation UUID
+   ├─ ownerId 隔离
+   └─ 可安装、停用、卸载
+```
 
 D2P-1 在每个 Turn 和模型轮次解析当前 Agent 实际可用能力并保存 generation snapshot。`ensure_agent_skills` 只接受当前用户消息中明确出现的有效来源 URL；安装或复用并绑定当前 Agent 后，只返回安装事实。下一模型轮次从同一次解析原子更新 Tool Schema、能力快照和唯一一份动态 Skill 目录，模型再按稳定协议调用 `activate_skill` 渐进加载正文。完整设计见 [MCP 与 Agent Skills](MCP_SKILLS.md)。
 

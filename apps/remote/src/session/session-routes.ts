@@ -81,6 +81,9 @@ async ({ params, principal }) => {
       sourcePolicy: {
         systemPrompt: found.turn.agentSnapshot.systemPrompt,
         builtinTools: found.turn.agentSnapshot.builtinTools,
+        builtinSkillIds: (found.turn.agentSnapshot.builtinSkills ?? [])
+          .filter((item) => item.enabled)
+          .map((item) => item.skillId),
         skillInstallationIds: found.turn.agentSnapshot.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.enabled).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.skillInstallationId),

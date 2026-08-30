@@ -197,6 +197,7 @@ function policy(systemPrompt: string) {
   return {
     systemPrompt,
     builtinTools: [],
+    builtinSkillIds: [],
     skillInstallationIds: [],
     mcps: [],
     historyPolicy: { mode: "none" as const },
@@ -206,7 +207,7 @@ function policy(systemPrompt: string) {
 
 /** 构造「agentInput」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function agentInput(name: string) {
-  return { name, systemPrompt: "提示", builtinTools: [], skillInstallationIds: [], mcps: [],
+  return { name, systemPrompt: "提示", builtinTools: [], builtinSkillIds: [], skillInstallationIds: [], mcps: [],
     historyPolicy: { mode: "none" as const }, memoryPolicy: { mode: "off" as const } };
 }
 

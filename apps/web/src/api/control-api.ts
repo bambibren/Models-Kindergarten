@@ -1,6 +1,7 @@
 import type {
   AgentInput,
   AgentRecord,
+  BuiltinSkillOption,
   AnyExperimentRecord,
   ExperimentDraftV2,
   ExperimentRecordV2,
@@ -96,6 +97,7 @@ export interface SessionTurnPage {
 /** 描述「CapabilityOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface CapabilityOptions {
   builtinTools: string[];
+  builtinSkills: BuiltinSkillOption[];
   readySkillInstallationIds: string[];
   mcps: Array<{ installationId: string; tools: string[]; resources: string[] }>;
 }

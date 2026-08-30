@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -47,6 +47,23 @@ async () => {
     expect(after.tools.registry.definitions.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (item) => item.function.name)).toEqual(["read_file", "write_file", "edit_file"]);
     expect(after.capabilityHash).not.toBe(before.capabilityHash);
+  });
+
+  it("直接解析全局 Builtin Skill，不经过账号 Installation", async () => {
+    const { resolver, service, agentId } = await setup();
+    await service.update(agentId, agentInput("启用内置 Skill", false, false, ["builtin:sandbox-notes"]));
+
+    const resolved = await resolver.resolve(scope(agentId, "session-builtin"));
+
+    expect(resolved.agent.builtinSkills).toEqual([{ skillId: "builtin:sandbox-notes", enabled: true }]);
+    expect(resolved.agent.skills).toEqual([]);
+    expect(resolved.tools.registry.definitions.map((item) => item.function.name)).toEqual(expect.arrayContaining([
+      "activate_skill",
+      "read_skill_resource",
+    ]));
+    expect(resolved.tools.registry.capabilitySnapshot().skills).toEqual([
+      expect.objectContaining({ name: "sandbox-notes", source: "builtin" }),
+    ]);
   });
 
   it("build_pptx 只在 Agent 明确启用时进入当前 Turn 能力快照", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
@@ -113,10 +130,19 @@ async () => {
 async function setup() {
   const dir = await mkdtemp(join(tmpdir(), "mk-resolver-"));
   dirs.push(dir);
+  const builtinRoot = join(dir, "builtin-skills");
+  const sandboxNotes = join(builtinRoot, "sandbox-notes");
+  await mkdir(sandboxNotes, { recursive: true });
+  await writeFile(join(sandboxNotes, "SKILL.md"), "---\nname: sandbox-notes\ndescription: 记录沙箱笔记\n---\n\n记录任务笔记。\n");
+  const skills = new SkillRegistry([{
+    path: builtinRoot, scope: "builtin", trust: "builtin", source: "builtin",
+  }], new SkillLockStore(join(dir, "skills-lock.json")));
+  await skills.initialize();
   const repository = new AgentRepository(join(dir, "agents.json"));
   const service = new AgentService(repository, {
     builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => ["read_file", "write_file", "build_pptx"],
+    builtinSkills: () => skills.builtinOptions(),
     readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => Promise.resolve([]),
     mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
@@ -130,14 +156,12 @@ async function setup() {
 async () => { throw new Error("不会连接"); } } satisfies McpConnector,
   );
   await mcp.initialize();
-  const skills = new SkillRegistry([], new SkillLockStore(join(dir, "skills-lock.json")));
-  await skills.initialize();
   const resolver = new RuntimeCapabilityResolver(service, new FixtureProvider(), skills, mcp, join(dir, "workspaces"));
   return { resolver, service, skills, mcp, dir, agentId: agent.agentId };
 }
 
 /** 构造「agentInput」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-function agentInput(systemPrompt: string, write: boolean, pptx = false) {
+function agentInput(systemPrompt: string, write: boolean, pptx = false, builtinSkillIds: string[] = []) {
   return {
     name: "测试 Agent",
     systemPrompt,
@@ -146,6 +170,7 @@ function agentInput(systemPrompt: string, write: boolean, pptx = false) {
       { toolId: "write_file", enabled: write, permission: "ask" as const },
       { toolId: "build_pptx", enabled: pptx, permission: "allow" as const },
     ],
+    builtinSkillIds,
     skillInstallationIds: [], mcps: [],
     historyPolicy: { mode: "recent_turns" as const, maxTurns: 4 }, memoryPolicy: { mode: "off" as const },
   };

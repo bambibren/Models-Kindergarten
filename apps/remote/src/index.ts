@@ -170,6 +170,7 @@ const agentService = new AgentService(agentRepository, {
     ...ARTIFACT_TOOL_IDS,
     ...PPTX_TOOL_IDS,
   ],
+  builtinSkills: () => skills.builtinOptions(),
   readySkillInstallationIds: /** 读取「readySkillInstallationIds」所需数据，并遵守作用域、分页与容量边界。 */
 (ownerId) => skillInstallations?.readyInstallationIds(ownerId) ?? Promise.resolve([]),
   mcpCapabilities: /** 执行「mcpCapabilities」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -193,6 +194,7 @@ skillInstallations = new SkillInstallationService(
   skillSourcePolicy,
 );
 await skillInstallations.importExisting();
+await skillInstallations.migrateBuiltinInstallations();
 mcpManagement = new McpManagementService(
   new McpManagementRepository(resolve(dataDir, "mcp-tests.json"), resolve(dataDir, "mcp-installations.json")),
   mcp,
@@ -213,6 +215,9 @@ const defaultAgentInput = async (ownerId: string): Promise<AgentInput> => ({
       enabled: true,
       permission: "allow",
     })),
+    builtinSkillIds: skills.builtinOptions()
+      .filter((item) => capabilityConfig.agentCapabilities.skills.includes(item.name))
+      .map((item) => item.skillId),
     skillInstallationIds: (await skillInstallations.list(ownerId))
       .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.state === "ready" && capabilityConfig.agentCapabilities.skills.includes(item.skillName))
@@ -232,6 +237,9 @@ if (defaultAgent) {
       ...(defaultAgent.description ? { description: defaultAgent.description } : {}),
       systemPrompt,
       builtinTools: defaultAgent.builtinTools,
+      builtinSkillIds: defaultAgent.builtinSkills
+        .filter((item) => item.enabled)
+        .map((item) => item.skillId),
       skillInstallationIds: defaultAgent.skills
         .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.enabled)

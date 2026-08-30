@@ -4,6 +4,7 @@ import {
   parseAgentInput,
   type AgentInput,
   type AgentRecord,
+  type BuiltinSkillOption,
   type CursorPage,
 } from "@kindergarten/contracts";
 import { ApiProblemError } from "../server/api-problem.js";
@@ -12,6 +13,7 @@ import type { AgentRepository } from "./agent-repository.js";
 /** 描述「AgentCapabilitySource」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface AgentCapabilitySource {
   builtinToolIds(): string[];
+  builtinSkills?(): BuiltinSkillOption[];
   readySkillInstallationIds(ownerId: string): Promise<string[]>;
   mcpCapabilities(ownerId: string): Promise<Array<{ installationId: string; tools: string[]; resources: string[] }>>;
   skillInstallationIds?(ownerId: string): Promise<string[]>;
@@ -43,6 +45,7 @@ constructor(
       ...(input.description ? { description: input.description } : {}),
       systemPrompt: input.systemPrompt,
       builtinTools: input.builtinTools,
+      builtinSkills: input.builtinSkillIds.map((skillId) => ({ skillId, enabled: true })),
       skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (skillInstallationId) => ({ skillInstallationId, enabled: true })),
       mcps: input.mcps,
@@ -68,6 +71,7 @@ async create(raw: unknown, ownerId = "local-admin"): Promise<AgentRecord> {
       ...(input.description ? { description: input.description } : {}),
       systemPrompt: input.systemPrompt,
       builtinTools: input.builtinTools,
+      builtinSkills: input.builtinSkillIds.map((skillId) => ({ skillId, enabled: true })),
       skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (skillInstallationId) => ({ skillInstallationId, enabled: true })),
       mcps: input.mcps,
@@ -122,6 +126,7 @@ async update(agentId: string, raw: unknown, ownerId = "local-admin"): Promise<Ag
       ...(input.description ? { description: input.description } : {}),
       systemPrompt: input.systemPrompt,
       builtinTools: input.builtinTools,
+      builtinSkills: input.builtinSkillIds.map((skillId) => ({ skillId, enabled: true })),
       skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (skillInstallationId) => ({ skillInstallationId, enabled: true })),
       mcps: input.mcps,
@@ -164,6 +169,7 @@ async createExperimentPolicy(
       ...(input.description ? { description: input.description } : {}),
       systemPrompt: input.systemPrompt,
       builtinTools: input.builtinTools,
+      builtinSkills: input.builtinSkillIds.map((skillId) => ({ skillId, enabled: true })),
       skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (skillInstallationId) => ({ skillInstallationId, enabled: true })),
       mcps: input.mcps,
@@ -218,6 +224,11 @@ async removeMcpBindings(installationId: string, ownerId = "local-admin"): Promis
     return updated;
   }
 
+  /** 把历史 Builtin Installation 引用原子转换为全局固定引用。 */
+  migrateBuiltinSkillBindings(byInstallationId: ReadonlyMap<string, string>): Promise<AgentRecord[]> {
+    return this.repository.migrateBuiltinSkills(byInstallationId);
+  }
+
   /** 释放或删除「removeSkillBindings」对应资源，重复调用仍保持安全。 */
 async removeSkillBindings(installationId: string, ownerId = "local-admin"): Promise<AgentRecord[]> {
     const affected = (await this.repository.all()).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
@@ -241,6 +252,7 @@ async removeSkillBindings(installationId: string, ownerId = "local-admin"): Prom
 async capabilityOptions(ownerId = "local-admin") {
     return {
       builtinTools: this.capabilities.builtinToolIds(),
+      builtinSkills: this.capabilities.builtinSkills?.() ?? [],
       readySkillInstallationIds: await this.capabilities.readySkillInstallationIds(ownerId),
       mcps: await this.capabilities.mcpCapabilities(ownerId),
     };
@@ -253,6 +265,7 @@ async capabilityOptions(ownerId = "local-admin") {
 
   /** 清理账号历史 Agent 中已经不属于该账号或已失效的 Skill/MCP 引用。 */
   async reconcileCapabilities(ownerId = "local-admin"): Promise<AgentRecord[]> {
+    const builtinSkills = new Set((this.capabilities.builtinSkills?.() ?? []).map((item) => item.skillId));
     const readySkillIds = await this.capabilities.readySkillInstallationIds(ownerId);
     const readyMcpCapabilities = await this.capabilities.mcpCapabilities(ownerId);
     const existingSkills = new Set(this.capabilities.skillInstallationIds
@@ -264,6 +277,7 @@ async capabilityOptions(ownerId = "local-admin") {
 (item) => item.installationId));
     const affected = (await this.repository.all()).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (record) => record.ownerId === ownerId && (
+      record.builtinSkills.some((item) => !builtinSkills.has(item.skillId)) ||
       record.skills.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => !existingSkills.has(item.skillInstallationId)) ||
       record.mcps.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
@@ -274,6 +288,7 @@ async capabilityOptions(ownerId = "local-admin") {
       updated.push(await this.repository.update(agent.agentId, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (record) => ({
         ...record,
+        builtinSkills: record.builtinSkills.filter((item) => builtinSkills.has(item.skillId)),
         skills: record.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => existingSkills.has(item.skillInstallationId)),
         mcps: record.mcps.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
@@ -296,6 +311,8 @@ private async validate(raw: unknown, ownerId: string): Promise<AgentInput> {
     catch (error) { throw new ApiProblemError(400, "VALIDATION_FAILED", errorText(error), false); }
     const tools = new Set(this.capabilities.builtinToolIds());
     for (const binding of input.builtinTools) if (!tools.has(binding.toolId)) throw invalid(`Built-in Tool 不存在: ${binding.toolId}`);
+    const builtinSkills = new Set((this.capabilities.builtinSkills?.() ?? []).map((item) => item.skillId));
+    for (const id of input.builtinSkillIds) if (!builtinSkills.has(id)) throw invalid(`Builtin Skill 不存在: ${id}`);
     const skills = new Set(await this.capabilities.readySkillInstallationIds(ownerId));
     for (const id of input.skillInstallationIds) if (!skills.has(id)) throw invalid(`Skill Installation 不可用: ${id}`);
     const mcps = new Map((await this.capabilities.mcpCapabilities(ownerId)).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */

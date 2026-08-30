@@ -511,6 +511,78 @@ async () => {
     }]);
   });
 
+  it("把跨账号引用的旧 Builtin Installation 迁移为共享固定 ID", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-builtin-migration-"));
+    dirs.push(dir);
+    const builtinRoot = join(dir, "builtin");
+    const skillDir = join(builtinRoot, "sandbox-notes");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), "---\nname: sandbox-notes\ndescription: 记录沙箱笔记\n---\n\n记录任务笔记。\n");
+    const registry = new SkillRegistry([{
+      path: builtinRoot, scope: "builtin", trust: "builtin", source: "builtin",
+    }], new SkillLockStore(join(dir, "lock.json")));
+    await registry.initialize();
+    const repository = new SkillInstallationRepository(join(dir, "installations.json"), join(dir, "jobs.json"));
+    const agentRepository = new AgentRepository(join(dir, "agents.json"));
+    let service: SkillInstallationService | undefined;
+    const agents = new AgentService(agentRepository, {
+      builtinToolIds: () => [],
+      builtinSkills: () => registry.builtinOptions(),
+      readySkillInstallationIds: (ownerId) => service?.readyInstallationIds(ownerId) ?? Promise.resolve([]),
+      mcpCapabilities: () => Promise.resolve([]),
+    });
+    const ownerA = await agents.create({
+      name: "Owner A", systemPrompt: "test", builtinTools: [], builtinSkillIds: [], skillInstallationIds: [], mcps: [],
+      historyPolicy: { mode: "none" }, memoryPolicy: { mode: "off" },
+    }, "owner-a");
+    const ownerB = await agents.create({
+      name: "Owner B", systemPrompt: "test", builtinTools: [], builtinSkillIds: [], skillInstallationIds: [], mcps: [],
+      historyPolicy: { mode: "none" }, memoryPolicy: { mode: "off" },
+    }, "owner-b");
+    await agentRepository.update(ownerA.agentId, (record) => ({
+      ...record,
+      skills: [
+        { skillInstallationId: "legacy-builtin", enabled: true },
+        { skillInstallationId: "user-install", enabled: true },
+      ],
+    }));
+    await agentRepository.update(ownerB.agentId, (record) => ({
+      ...record,
+      skills: [{ skillInstallationId: "legacy-builtin", enabled: true }],
+    }));
+    const now = new Date().toISOString();
+    await repository.putInstallation({
+      schemaVersion: 1, skillInstallationId: "legacy-builtin", ownerId: "local-admin",
+      skillName: "sandbox-notes", state: "ready", source: { kind: "approved_local", sourceId: "sandbox-notes" },
+      createdAt: now, updatedAt: now,
+    });
+    await repository.putInstallation({
+      schemaVersion: 1, skillInstallationId: "user-install", ownerId: "owner-a",
+      skillName: "custom", state: "ready", source: { kind: "approved_local", sourceId: "custom" },
+      createdAt: now, updatedAt: now,
+    });
+    service = new SkillInstallationService(
+      repository,
+      { discoverGitHub: vi.fn(async (source) => [source]) },
+      { install: vi.fn(), uninstall: vi.fn() },
+      registry,
+      agents,
+    );
+
+    await expect(service.migrateBuiltinInstallations()).resolves.toBe(1);
+
+    expect(await agents.get(ownerA.agentId, "owner-a")).toMatchObject({
+      builtinSkills: [{ skillId: "builtin:sandbox-notes", enabled: true }],
+      skills: [{ skillInstallationId: "user-install", enabled: true }],
+    });
+    expect(await agents.get(ownerB.agentId, "owner-b")).toMatchObject({
+      builtinSkills: [{ skillId: "builtin:sandbox-notes", enabled: true }],
+      skills: [],
+    });
+    expect(await repository.getInstallation("legacy-builtin")).toBeUndefined();
+    expect(await repository.getInstallation("user-install")).toBeDefined();
+  });
+
   it("启动时清理目录已不存在的旧 GitHub 安装记录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const { service, repository } = await setup();

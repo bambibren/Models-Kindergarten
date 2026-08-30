@@ -10,7 +10,7 @@ async () => {
     const fixture = new FixtureProvider();
     const policy = {
       systemPrompt: "Agent 可编辑基础指令",
-      builtinTools: [], skillInstallationIds: [], mcps: [],
+      builtinTools: [], builtinSkillIds: [], skillInstallationIds: [], mcps: [],
       historyPolicy: { mode: "recent_turns" as const, maxTurns: 6 },
       memoryPolicy: { mode: "off" as const },
     };

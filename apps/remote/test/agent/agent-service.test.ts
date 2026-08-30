@@ -72,6 +72,8 @@ async () => {
     const service = await makeService();
     await expect(service.create({ ...input("bad"), builtinTools: [{ toolId: "unknown", enabled: true, permission: "allow" }] }))
       .rejects.toThrow("CAPABILITY_REFERENCE_INVALID");
+    await expect(service.create({ ...input("bad"), builtinSkillIds: ["builtin:missing"] }))
+      .rejects.toThrow("Builtin Skill 不存在");
     await expect(service.create({ ...input("bad"), skillInstallationIds: ["missing-skill"] }))
       .rejects.toThrow("CAPABILITY_REFERENCE_INVALID");
     await expect(service.create({
@@ -115,6 +117,7 @@ async () => {
       name: "系统默认 Agent",
       systemPrompt: "test",
       builtinTools: [],
+      builtinSkills: [],
       skills: [{ skillInstallationId: "skill-owner-a", enabled: true }],
       mcps: [{ mcpInstallationId: "mcp-owner-a", enabled: true, tools: [], resources: [] }],
       historyPolicy: { mode: "none" },
@@ -147,6 +150,7 @@ async () => {
       name: "保留禁用资产",
       systemPrompt: "test",
       builtinTools: [],
+      builtinSkills: [],
       skills: [{ skillInstallationId: "skill-disabled", enabled: true }],
       mcps: [{ mcpInstallationId: "mcp-disabled", enabled: true, tools: [], resources: [] }],
       historyPolicy: { mode: "none" },
@@ -235,6 +239,7 @@ async function makeService(): Promise<AgentService> {
   return new AgentService(new AgentRepository(join(dir, "agents.json")), {
     builtinToolIds: /** 构造「builtinToolIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => ["read_file", "write_file"],
+    builtinSkills: () => [{ skillId: "builtin:sandbox-notes", name: "sandbox-notes", description: "记录沙箱笔记" }],
     readySkillInstallationIds: /** 构造「readySkillInstallationIds」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (ownerId) => Promise.resolve(ownerId === "local-admin" ? ["skill-1"] : []),
     mcpCapabilities: /** 构造「mcpCapabilities」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
@@ -250,6 +255,7 @@ function input(name: string) {
     name,
     systemPrompt: "先检查再回答",
     builtinTools: [{ toolId: "read_file", enabled: true, permission: "allow" as const }],
+    builtinSkillIds: [],
     skillInstallationIds: [],
     mcps: [],
     historyPolicy: { mode: "recent_turns" as const, maxTurns: 6 },

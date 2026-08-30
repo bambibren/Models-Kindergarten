@@ -93,7 +93,7 @@ Git 安装最终记录解析后的 40 位 Commit。静态资源公开地址必�
 - 安装成功结果只返回 `installed_skill_names`、`capabilities_changed` 与安装任务事实，不再生成一份容易和最新目录冲突的调用清单。下一模型轮依据更新后的目录和 Tool Schema 选择任务所需 Skill。
 - 产品和内部领域只保留可编辑 Agent，不引入 AgentVersion/AgentRevision。Session 关联 `agentId`，每个新 Turn 使用该 Agent 当前配置。
 
-Runtime system prompt 追加一段版本化的稳定 Skill 使用协议，其中不含任何具体 Skill 名单。运行时动态 `skill_catalog` 只放 `name/description/trust`；`name` 唯一取自 SKILL.md frontmatter，Installation UUID 只供 Agent 绑定，不进入模型参数。模型通过：
+Runtime system prompt 追加一段版本化的稳定 Skill 使用协议，其中不含任何具体 Skill 名单。运行时动态 `skill_catalog` 只放 `name/description/trust`；`name` 唯一取自 SKILL.md frontmatter。Builtin Skill 由 Agent 使用 `builtin:<name>` 固定引用，用户安装 Skill 才使用 owner-scoped Installation UUID；两者都不进入模型参数。模型通过：
 
 - `activate_skill(name)` 是保留的协议名称，真实职责是把完整 SKILL.md 执行指令加载到当前 Turn；
 - `read_skill_resource(name, path)` 按需读取 references/assets/scripts 中的文本。

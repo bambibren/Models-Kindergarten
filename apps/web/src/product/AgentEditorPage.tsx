@@ -34,7 +34,9 @@ function AgentForm({ options, skills, mcps, agent }: {
     name: agent.name, ...(agent.description ? { description: agent.description } : {}), systemPrompt: agent.systemPrompt,
     builtinTools: options.builtinTools.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (toolId) => agent.builtinTools.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.toolId === toolId) ?? { toolId, enabled: false, permission: "allow" }), skillInstallationIds: agent.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.toolId === toolId) ?? { toolId, enabled: false, permission: "allow" }),
+    builtinSkillIds: agent.builtinSkills.filter((item) => item.enabled).map((item) => item.skillId),
+    skillInstallationIds: agent.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.enabled).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.skillInstallationId),
     mcps: agent.mcps, historyPolicy: agent.historyPolicy, memoryPolicy: { mode: "off" },
@@ -46,7 +48,7 @@ function AgentForm({ options, skills, mcps, agent }: {
       enabled: ["read_file", "list_files", "ask_user", "read_artifact", "publish_artifact", "publish_artifact_version", "rollback_artifact"].includes(toolId),
       permission: "allow",
     })),
-    skillInstallationIds: [], mcps: [], historyPolicy: { mode: "recent_turns", maxTurns: 6 }, memoryPolicy: { mode: "off" },
+    builtinSkillIds: [], skillInstallationIds: [], mcps: [], historyPolicy: { mode: "recent_turns", maxTurns: 6 }, memoryPolicy: { mode: "off" },
   });
   const [status, setStatus] = useState<"idle" | "submitting" | "succeeded" | "failed">("idle");
   const [message, setMessage] = useState("");
@@ -64,7 +66,7 @@ function updatePolicy(policy: AgentPolicyValue) { setForm(/** 更新「updatePol
       <section><header><Bot size={16} /><div><strong>基础信息</strong><small>名称只是展示；运行时使用保存的 ID</small></div></header><label><span>名称</span><input required maxLength={80} value={form.name} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setForm({ ...form, name: event.target.value })} /></label><label><span>说明</span><input maxLength={500} value={form.description ?? ""} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setForm({ ...form, description: event.target.value })} /></label></section>
-      <AgentPolicyFields builtinToolIds={options.builtinTools} mcps={mcps} onChange={updatePolicy} skills={skills} value={form} />
+      <AgentPolicyFields builtinSkills={options.builtinSkills} builtinToolIds={options.builtinTools} mcps={mcps} onChange={updatePolicy} skills={skills} value={form} />
       <footer><span className={status}>{message || "最后一次成功保存生效，不需要 ETag 或迁移 Session。"}</span><button disabled={status === "submitting"} type="submit"><Save size={14} />{status === "submitting" ? "正在保存" : "保存 Agent"}</button></footer>
     </form></div>;
 }

@@ -1,6 +1,6 @@
 import { opendir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { PRODUCT_CONFIG } from "@kindergarten/contracts";
+import { PRODUCT_CONFIG, type BuiltinSkillOption } from "@kindergarten/contracts";
 import type { SkillLockStore } from "./skill-lock-store.js";
 import type { SkillInstallRecord, SkillRoot } from "./skill-types.js";
 import { assertSkillResource, parseSkillMarkdown, validateSkillDirectory } from "./skill-validator.js";
@@ -63,8 +63,30 @@ async refresh(): Promise<void> {
   }
 
   /** 执行「all」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-all(): SkillInstallRecord[] {
+  all(): SkillInstallRecord[] {
     return structuredClone([...this.byName.values()]);
+  }
+
+  /** 返回随系统发布的全局 Skill；固定 ID 不包含账号或安装状态。 */
+  builtinOptions(): BuiltinSkillOption[] {
+    return this.all()
+      .filter((skill) => skill.scope === "builtin")
+      .map((skill) => ({
+        skillId: builtinSkillId(skill.name),
+        name: skill.name,
+        description: skill.description,
+      }))
+      .toSorted((left, right) => left.skillId.localeCompare(right.skillId));
+  }
+
+  /** 把 Agent 的 Builtin Skill 固定引用解析为 Registry 名称。 */
+  builtinNames(skillIds: string[]): string[] {
+    return [...new Set(skillIds)].map((skillId) => {
+      const name = builtinSkillName(skillId);
+      const skill = this.byName.get(name);
+      if (!skill || skill.scope !== "builtin") throw new Error(`Builtin Skill 不存在: ${skillId}`);
+      return name;
+    }).toSorted();
   }
 
   /** 执行「selected」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -113,6 +135,19 @@ private require(name: string): SkillInstallRecord {
     if (!skill) throw new Error(`Skill 不存在: ${name}`);
     return skill;
   }
+}
+
+/** 为随系统发布的 Skill 生成跨账号稳定引用。 */
+export function builtinSkillId(name: string): string {
+  return `builtin:${name}`;
+}
+
+/** 从稳定引用提取 Registry 名称，并拒绝其他 Skill 来源。 */
+function builtinSkillName(skillId: string): string {
+  if (!skillId.startsWith("builtin:") || skillId.length <= "builtin:".length) {
+    throw new Error(`Builtin Skill ID 无效: ${skillId}`);
+  }
+  return skillId.slice("builtin:".length);
 }
 
 /** 执行「defaultBase」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

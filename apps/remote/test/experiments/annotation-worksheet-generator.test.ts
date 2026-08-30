@@ -81,7 +81,7 @@ async () => {
 function experiment(): ExperimentRecordV2 {
   const now = new Date().toISOString();
   const policy = {
-    systemPrompt: "test", builtinTools: [], skillInstallationIds: [], mcps: [],
+    systemPrompt: "test", builtinTools: [], builtinSkillIds: [], skillInstallationIds: [], mcps: [],
     historyPolicy: { mode: "none" as const, maxTurns: 0 }, memoryPolicy: { mode: "off" as const },
   };
   return {

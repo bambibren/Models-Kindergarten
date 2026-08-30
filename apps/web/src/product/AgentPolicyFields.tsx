@@ -1,6 +1,7 @@
 import { Check, History, ShieldCheck, Sparkles, Wrench } from "lucide-react";
 import type {
   BuiltinToolBinding,
+  BuiltinSkillOption,
   HistoryPolicy,
   McpBinding,
   McpInstallationView,
@@ -11,6 +12,7 @@ import type {
 export interface AgentPolicyValue {
   systemPrompt: string;
   builtinTools: BuiltinToolBinding[];
+  builtinSkillIds: string[];
   skillInstallationIds: string[];
   mcps: McpBinding[];
   historyPolicy: HistoryPolicy;
@@ -21,6 +23,7 @@ export interface AgentPolicyValue {
 export function AgentPolicyFields({
   value,
   builtinToolIds,
+  builtinSkills,
   skills,
   mcps,
   onChange,
@@ -30,6 +33,7 @@ export function AgentPolicyFields({
 }: {
   value: AgentPolicyValue;
   builtinToolIds: string[];
+  builtinSkills: BuiltinSkillOption[];
   skills: SkillInstallation[];
   mcps: McpInstallationView[];
   onChange: (value: AgentPolicyValue) => void;
@@ -93,12 +97,21 @@ function toggleMcp(mcp: McpInstallationView, enabled: boolean) {
     </section>
     <section className="product-policy-section">
       <header><Sparkles size={16} /><div><strong>Skills</strong><small>这里只绑定 Ready Installation；完整 SKILL.md 仍由模型按需加载</small></div></header>
-      {readySkills.length === 0 ? <p className="product-inline-empty">还没有可用 Skill。</p> : <div className="product-option-grid">{readySkills.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+      {builtinSkills.length === 0 && readySkills.length === 0 ? <p className="product-inline-empty">还没有可用 Skill。</p> : <div className="product-option-grid">
+      {builtinSkills.map((skill) => <label key={skill.skillId}>
+        <input checked={value.builtinSkillIds.includes(skill.skillId)} disabled={readOnly} type="checkbox" onChange={(event) => patch({
+          builtinSkillIds: event.target.checked
+            ? [...value.builtinSkillIds, skill.skillId]
+            : value.builtinSkillIds.filter((id) => id !== skill.skillId),
+        })} />
+        <span><strong>{skill.name}</strong><small>系统内置 · {skill.description}</small></span>
+      </label>)}
+      {readySkills.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (skill) => <label key={skill.skillInstallationId}>
         <input checked={value.skillInstallationIds.includes(skill.skillInstallationId)} disabled={readOnly} type="checkbox" onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => patch({ skillInstallationIds: event.target.checked ? [...value.skillInstallationIds, skill.skillInstallationId] : value.skillInstallationIds.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (id) => id !== skill.skillInstallationId) })} />
-        <span><strong>{skill.displayName ?? skill.skillName ?? "Skill"}</strong><small>{skillSourceLabel(skill)}</small></span>
+        <span><strong>{skill.displayName ?? skill.skillName ?? "Skill"}</strong><small>用户安装 · {skillSourceLabel(skill)}</small></span>
       </label>)}</div>}
     </section>
     <section className="product-policy-section">

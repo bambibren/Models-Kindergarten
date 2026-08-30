@@ -145,9 +145,13 @@ private async resolveAgent(
     const installationIds = agent.skills.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.enabled).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.skillInstallationId);
-    const skillNames = this.skillInstallations
+    const builtinSkillNames = this.skills.builtinNames(agent.builtinSkills
+      .filter((item) => item.enabled)
+      .map((item) => item.skillId));
+    const installedSkillNames = this.skillInstallations
       ? await this.skillInstallations.runtimeSkillNames(installationIds, scope.ownerId)
       : installationIds;
+    const skillNames = [...new Set([...builtinSkillNames, ...installedSkillNames])].toSorted();
     const providers = [
       new ToolRegistry(sandbox, undefined, undefined, builtinBindings),
       new PptxToolProvider(new PptxBuildService(sandbox), builtinBindings),
@@ -174,6 +178,7 @@ private async resolveAgent(
       name: agent.name,
       systemPrompt: agent.systemPrompt,
       builtinTools: agent.builtinTools,
+      builtinSkills: agent.builtinSkills,
       skills: agent.skills,
       mcps: agent.mcps,
       historyPolicy: agent.historyPolicy,
@@ -193,12 +198,13 @@ private async resolveAgent(
 }
 
 /** 执行「agentRecordFields」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function agentRecordFields(input: AgentInput): Pick<AgentRecord, "name" | "description" | "systemPrompt" | "builtinTools" | "skills" | "mcps" | "historyPolicy" | "memoryPolicy"> {
+function agentRecordFields(input: AgentInput): Pick<AgentRecord, "name" | "description" | "systemPrompt" | "builtinTools" | "builtinSkills" | "skills" | "mcps" | "historyPolicy" | "memoryPolicy"> {
   return {
     name: input.name,
     ...(input.description ? { description: input.description } : {}),
     systemPrompt: input.systemPrompt,
     builtinTools: input.builtinTools,
+    builtinSkills: input.builtinSkillIds.map((skillId) => ({ skillId, enabled: true })),
     skills: input.skillInstallationIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (skillInstallationId) => ({ skillInstallationId, enabled: true })),
     mcps: input.mcps,

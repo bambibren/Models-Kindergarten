@@ -239,7 +239,7 @@ async function submit(event: FormEvent) {
 (item) => <option key={item.agentId} value={item.agentId}>{item.name}</option>)}</select><small>只复制到当前 Test；模型和推理级别保持不变。</small></label>
             <LaneModelReasoning lane={activeLane} models={models} onModelChange={changeModel} onReasoningChange={/** 处理「onReasoningChange」事件，校验归属后再推进状态且避免重复提交。 */
 (reasoningProfile) => patchLane({ reasoningProfile })} />
-            <div className="product-policy-stack"><AgentPolicyFields builtinToolIds={options.builtinTools} mcps={mcps} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+            <div className="product-policy-stack"><AgentPolicyFields builtinSkills={options.builtinSkills} builtinToolIds={options.builtinTools} mcps={mcps} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (policy) => patchLane({ policy })} readOnly={false} showHistory={false} showMemory={false} skills={skills} value={activeLane.policy} /></div>
             <HistoryFact policy={activeLane.policy.historyPolicy} />
             <ContextPreviewPanel error={visiblePreview?.error} loading={visiblePreview?.loading} onRefresh={/** 处理「onRefresh」事件，校验归属后再推进状态且避免重复提交。 */
