@@ -9,7 +9,6 @@ describe("deployment config", () => {
     const config = readDeploymentConfig({}, "/tmp/mk-config-test", "/tmp/mk-workspace");
     expect(config).toMatchObject({
       profile: "local-source",
-      managedEndpointPolicy: "any-network",
       host: "127.0.0.1",
       port: 7331,
       dataDir: "/tmp/mk-config-test/.data",
@@ -31,13 +30,8 @@ describe("deployment config", () => {
       PUBLIC_ORIGIN: "https://mk.localhost:8443",
     })).toMatchObject({
       host: "0.0.0.0",
-      managedEndpointPolicy: "public-only",
       masterKeyFile: "/run/secrets/mk_master_key",
     });
-    expect(readDeploymentConfig({
-      DEPLOYMENT_PROFILE: "cloud",
-      PUBLIC_ORIGIN: "https://mk.example.com",
-    })).toMatchObject({ managedEndpointPolicy: "public-only" });
   });
 
   it("显式路径覆盖自动选择结果", () => {

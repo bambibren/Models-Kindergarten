@@ -106,10 +106,7 @@ const secrets = new EncryptedFileSecretStore(
   new LegacyMacKeychainReader(),
 );
 await secrets.initialize();
-const allowManagedPrivateNetwork = deployment.managedEndpointPolicy === "any-network";
-const modelUrlPolicy = new RemoteModelUrlPolicy({
-  allowPrivateNetwork: allowManagedPrivateNetwork,
-});
+const modelUrlPolicy = new RemoteModelUrlPolicy();
 const modelAdmissionRepository = new ModelAdmissionRepository(
   resolve(dataDir, "model-student-tests.json"),
   resolve(dataDir, "model-admission-catalog.json"),
@@ -117,9 +114,7 @@ const modelAdmissionRepository = new ModelAdmissionRepository(
 const mcp = new McpClientManager(
   new McpConfigStore(resolve(process.env.MCP_CONFIG_PATH ?? `${dataDir}/mcp/config.json`)),
   secrets,
-  new SdkMcpConnector(secrets, sandbox.root, {
-    allowPrivateNetwork: allowManagedPrivateNetwork,
-  }),
+  new SdkMcpConnector(secrets, sandbox.root),
 );
 const capabilityConfig = await mcp.initialize();
 const skillLock = new SkillLockStore(

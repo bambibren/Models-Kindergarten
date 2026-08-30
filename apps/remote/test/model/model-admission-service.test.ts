@@ -323,8 +323,8 @@ async () => {
     const prober = new FakeProber(/** 构造「prober」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => capabilitySnapshot());
     const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
-    const policy = new RemoteModelUrlPolicy({ lookup: /** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async () => [{ address: "8.8.8.8" }] });
+    const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8" }]);
 
     expect(await serviceFor(repository, secrets, prober, catalog, policy).restoreInstalled()).toEqual([]);
     expect(await repository.listStudents()).toEqual([]);
@@ -350,8 +350,8 @@ async () => {
     secrets.values.set(first.connection.credentialRef.key, "secret-one");
     secrets.values.set(duplicate.connection.credentialRef.key, "secret-two");
     const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
-    const policy = new RemoteModelUrlPolicy({ lookup: /** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async () => [{ address: "8.8.8.8" }] });
+    const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8" }]);
     const service = serviceFor(repository, secrets, new FakeProber(/** 构造「service」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => capabilitySnapshot()), catalog, policy);
 
@@ -374,8 +374,8 @@ async () => {
     const prober = new FakeProber(/** 构造「prober」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => capabilitySnapshot());
     const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
-    const policy = new RemoteModelUrlPolicy({ lookup: /** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async () => [{ address: "8.8.8.8" }] });
+    const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8" }]);
     const service = serviceFor(repository, secrets, prober, catalog, policy);
     const tested = await service.test(candidate());
     const installed = await service.install({ testId: tested.testId });
@@ -450,8 +450,8 @@ async function environment(options: {
   const prober = new FakeProber(options.probe ?? (/** 构造「prober」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => capabilitySnapshot()));
   const catalog = new ModelStudentCatalog(new FixtureProvider(), "ready");
-  const policy = new RemoteModelUrlPolicy({ lookup: /** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async () => [{ address: "8.8.8.8" }] });
+  const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8" }]);
   const service = serviceFor(repository, secrets, prober, catalog, policy, options.modelInUse);
   return { dir, testsFile, catalogFile, repository, secrets, prober, catalog, policy, service };
 }

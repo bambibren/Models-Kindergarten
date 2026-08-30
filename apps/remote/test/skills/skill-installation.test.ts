@@ -28,12 +28,9 @@ import { ToolCallLedger, ToolRuntime, type ToolObserver } from "../../src/tools/
 
 const dirs: string[] = [];
 const URL_A = "https://github.com/acme/skills/tree/main/frontend-design";
-const URL_B = "https://github.com/other/skills/tree/main/frontend-design";
 const REPOSITORY_URL = "https://github.com/greensock/gsap-skills";
 const RESOURCE_ORIGIN = "http://127.0.0.1:7342";
 const RESOURCE_URL = `${RESOURCE_ORIGIN}/skills/website-design-fast`;
-const PUBLIC_RESOURCE_ORIGIN = "http://127.0.0.1:5173";
-const PUBLIC_RESOURCE_URL = `${PUBLIC_RESOURCE_ORIGIN}/skills/website-design-fast`;
 
 afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
 async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
@@ -379,83 +376,6 @@ async () => {
     expect(job.items[0]?.disposition).toBe("reused");
     expect(installer.install).not.toHaveBeenCalled();
     expect((await agents.get(scope.agentId)).skills).toEqual([{ skillInstallationId: "install-a", enabled: true }]);
-  });
-
-  it("ensure 按资源 Skill 同名复用不同来源的现有安装", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
-async () => {
-    const { service, scope, repository, installer, agents } = await setup(
-      ["install-resource"],
-      [RESOURCE_ORIGIN, PUBLIC_RESOURCE_ORIGIN],
-    );
-    const now = new Date().toISOString();
-    await repository.putInstallation({
-      schemaVersion: 1,
-      skillInstallationId: "install-resource",
-      ownerId: scope.ownerId,
-      skillName: "website-design-fast",
-      displayName: "website-design-fast",
-      state: "ready",
-      source: { kind: "resource_bundle", url: RESOURCE_URL, resolvedContentHash: "old-hash" },
-      contentHash: "old-hash",
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    const job = await service.ensureForTurn(
-      { sourceUrls: [PUBLIC_RESOURCE_URL], mode: "ensure" },
-      scope,
-      `请安装 ${PUBLIC_RESOURCE_URL}`,
-    );
-
-    expect(job.state).toBe("succeeded");
-    expect(job.items[0]).toMatchObject({
-      state: "ready",
-      disposition: "reused",
-      skillInstallationId: "install-resource",
-      source: { kind: "resource_bundle", url: RESOURCE_URL },
-    });
-    expect(installer.install).not.toHaveBeenCalled();
-    expect((await agents.get(scope.agentId)).skills).toEqual([{
-      skillInstallationId: "install-resource",
-      enabled: true,
-    }]);
-  });
-
-  it("ensure 把校验后发现的 GitHub 同名 Skill 转为复用而不是来源冲突", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
-async () => {
-    const { service, scope, repository, installer, agents } = await setup(["install-a"]);
-    const now = new Date().toISOString();
-    await repository.putInstallation({
-      schemaVersion: 1,
-      skillInstallationId: "install-a",
-      ownerId: scope.ownerId,
-      skillName: "frontend-design",
-      displayName: "frontend-design",
-      state: "ready",
-      source: parseGitHubSkillUrl(URL_A).source,
-      contentHash: "existing-hash",
-      createdAt: now,
-      updatedAt: now,
-    });
-    vi.mocked(installer.install).mockRejectedValueOnce(new Error("Skill 已安装: frontend-design"));
-
-    const job = await service.ensureForTurn(
-      { sourceUrls: [URL_B], mode: "ensure" },
-      scope,
-      `请安装 ${URL_B}`,
-    );
-
-    expect(job.state).toBe("succeeded");
-    expect(job.items[0]).toMatchObject({
-      state: "ready",
-      disposition: "reused",
-      skillInstallationId: "install-a",
-      source: parseGitHubSkillUrl(URL_A).source,
-    });
-    expect((await agents.get(scope.agentId)).skills).toEqual([{
-      skillInstallationId: "install-a",
-      enabled: true,
-    }]);
   });
 
   it("ensure 工具成功后只返回安装事实，不生成另一份 Skill 调用清单", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */

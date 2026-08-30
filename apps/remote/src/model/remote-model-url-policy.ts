@@ -5,16 +5,10 @@ import type { ResolvedHttpEndpoint } from "./pinned-http-transport.js";
 /** 描述「RemoteModelLookup」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type RemoteModelLookup = (hostname: string) => Promise<Array<{ address: string; family?: number }>>;
 
-/** 受管模型端点的地址策略；默认严格，只有部署组装层可显式放宽本地网络。 */
-export interface RemoteModelUrlPolicyOptions {
-  lookup?: RemoteModelLookup;
-  allowPrivateNetwork?: boolean;
-}
-
 /** 描述「RemoteModelUrlPolicyError」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class RemoteModelUrlPolicyError extends Error {
   /** 初始化「RemoteModelUrlPolicyError」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-  constructor(
+constructor(
     readonly reason: "not_allowed" | "dns_failed",
     message: string,
   ) {
@@ -23,22 +17,19 @@ export class RemoteModelUrlPolicyError extends Error {
 }
 
 /**
- * 自定义模型端点始终要求 HTTPS；线上型部署还要求全部 A/AAAA 结果均为公网地址。
- * 源码本地开发可接受 VPN Fake-IP、loopback 和局域网，但仍返回固定 DNS 地址票据。
+ * 自定义模型端点只允许公网 HTTPS。域名的全部 A/AAAA 结果都必须为公网地址，
+ * 避免攻击者通过多地址 DNS 把一次请求引向本机、局域网或云元数据服务。
  */
 export class RemoteModelUrlPolicy {
-  private readonly lookup: RemoteModelLookup;
-  private readonly allowPrivateNetwork: boolean;
-
   /** 初始化「RemoteModelUrlPolicy」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-  constructor(options: RemoteModelUrlPolicyOptions = {}) {
-    this.lookup = options.lookup ?? (/** 执行「lookup」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async (hostname) => dnsLookup(hostname, { all: true, verbatim: true }));
-    this.allowPrivateNetwork = options.allowPrivateNetwork === true;
-  }
+constructor(
+    private readonly lookup: RemoteModelLookup = /** 执行「lookup」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+async (hostname) =>
+      dnsLookup(hostname, { all: true, verbatim: true }),
+  ) {}
 
   /** 校验并规范化「assert」输入，非法数据直接返回明确错误。 */
-  async assert(input: URL | string): Promise<void> {
+async assert(input: URL | string): Promise<void> {
     await this.resolve(input);
   }
 
@@ -58,14 +49,13 @@ async (hostname) => dnsLookup(hostname, { all: true, verbatim: true }));
     }
 
     const hostname = stripIpv6Brackets(url.hostname).toLowerCase();
-    if (!hostname || (!this.allowPrivateNetwork &&
-      (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")))) {
+    if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
       throw new RemoteModelUrlPolicyError("not_allowed", "模型 Base URL 必须指向公网主机");
     }
 
     const literalKind = isIP(hostname);
     if (literalKind !== 0) {
-      if (!this.allowPrivateNetwork && !isPublicIp(hostname)) {
+      if (!isPublicIp(hostname)) {
         throw new RemoteModelUrlPolicyError("not_allowed", "模型 Base URL 不能指向私网或保留地址");
       }
       return {
@@ -83,7 +73,7 @@ async (hostname) => dnsLookup(hostname, { all: true, verbatim: true }));
     if (addresses.length === 0) {
       throw new RemoteModelUrlPolicyError("dns_failed", "模型 Base URL 没有可用的 DNS 地址");
     }
-    if (!this.allowPrivateNetwork && addresses.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+    if (addresses.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 ({ address }) => !isPublicIp(address))) {
       throw new RemoteModelUrlPolicyError("not_allowed", "模型 Base URL 的 DNS 结果包含私网或保留地址");
     }

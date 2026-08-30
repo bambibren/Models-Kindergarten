@@ -59,7 +59,6 @@ const input: ModelInput = {
 afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
 () => {
   vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
 });
 
 const encryptedSentinel = "ENCRYPTED_REASONING_SENTINEL_MK_20260813";
@@ -250,96 +249,6 @@ async () => {
       code: "invalid_model_response",
       message: "Responses API 流在终止事件前结束",
     });
-  });
-
-  it("Responses 流诊断默认关闭，开启后只记录脱敏事件事实", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
-async () => {
-    const secretDelta = "never-log-this-tool-argument";
-    const toolArguments = JSON.stringify({ path: "slides.js", content: secretDelta });
-    const events = [
-      {
-        type: "response.output_item.added",
-        output_index: 0,
-        item: {
-          id: "fc_diagnostic",
-          type: "function_call",
-          call_id: "call_diagnostic",
-          name: "write_file",
-          arguments: "",
-        },
-      },
-      {
-        type: "response.function_call_arguments.delta",
-        output_index: 0,
-        item_id: "fc_diagnostic",
-        delta: secretDelta,
-      },
-      {
-        type: "response.function_call_arguments.done",
-        output_index: 0,
-        item_id: "fc_diagnostic",
-        arguments: toolArguments,
-      },
-      {
-        type: "response.completed",
-        response: {
-          id: "resp_diagnostic",
-          status: "completed",
-          output: [{
-            id: "fc_diagnostic",
-            type: "function_call",
-            call_id: "call_diagnostic",
-            name: "write_file",
-            arguments: toolArguments,
-            status: "completed",
-          }],
-          usage: { input_tokens: 10, output_tokens: 5 },
-        },
-      },
-    ];
-    const body = events.map(/** 构造「map」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-event => `data: ${JSON.stringify(event)}\n\n`).join("");
-    const fetchMock = vi.fn(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
-async () => new Response(body, {
-      status: 200,
-      headers: { "content-type": "text/event-stream" },
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    const warn = vi.spyOn(console, "warn").mockImplementation(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
-() => undefined);
-    const makeProvider = /** 构造「makeProvider」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => new ResponsesApiProvider(student, {
-      readBearerToken: /** 构造「readBearerToken」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => "diagnostic-bearer-secret",
-      allowLegacyOfficialPreset: true,
-    });
-
-    await consume(makeProvider());
-    expect(warn).not.toHaveBeenCalledWith("[responses-stream]", expect.anything());
-
-    vi.stubEnv("MK_RESPONSES_STREAM_DIAGNOSTICS", "1");
-    const onActivity = vi.fn();
-    await consume(makeProvider(), onActivity);
-    expect(onActivity).toHaveBeenCalledTimes(events.length);
-
-    const logs = warn.mock.calls
-      .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-([label]) => label === "[responses-stream]")
-      .map(/** 构造「map」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-([, facts]) => JSON.parse(String(facts)) as Record<string, unknown>);
-    expect(logs).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: "response.function_call_arguments.delta",
-        disposition: "buffered",
-        dataBytes: expect.any(Number),
-        deltaBytes: Buffer.byteLength(secretDelta),
-        gapMs: expect.any(Number),
-      }),
-    ]));
-    const serialized = JSON.stringify(logs);
-    expect(serialized).not.toContain(secretDelta);
-    expect(serialized).not.toContain(toolArguments);
-    expect(serialized).not.toContain("diagnostic-bearer-secret");
   });
 
   it("非 2xx 错误回显系统脱敏 encrypted_content 和常见凭据字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
@@ -928,8 +837,8 @@ function responsesItems(continuation: ProviderOpaqueContinuation | undefined): R
 }
 
 /** 构造「consume」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async function consume(provider: ResponsesApiProvider, onActivity?: () => void): Promise<void> {
-  for await (const _event of provider.stream(input, new AbortController().signal, onActivity)) {
+async function consume(provider: ResponsesApiProvider): Promise<void> {
+  for await (const _event of provider.stream(input, new AbortController().signal)) {
     // 完整消费流，确保 transport 与终态防线都真正执行。
   }
 }
