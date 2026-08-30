@@ -4,7 +4,7 @@
   "gitCommit": "8f77228288199513190f28b8f7ddd9e4816eed5c",
   "dataCompatibilityVersion": 1,
   "images": {
-    "web": "ghcr.io/bambibren/models-kindergarten/mk-web@sha256:f9337051ff06a95065676cb521f15afc036e871b37e90a4e3ea3a01637f03752",
+    "web": "ghcr.io/bambibren/models-kindergarten/mk-web@sha256:88ee25b2422b134e4998565fbe7825be24f5d047649e885d04acf40b908355e3",
     "runtime": "ghcr.io/bambibren/models-kindergarten/mk-runtime@sha256:bf3b5440bb802cb243d6cdbc3a510988b0ad490183624ecbfacd09ce41496f8f",
     "onlyoffice": "onlyoffice/documentserver@sha256:e3da62a847b9a5d51a11f73cfea1d9c13c3be3809614490d4edddcf01dcf919b"
   }
