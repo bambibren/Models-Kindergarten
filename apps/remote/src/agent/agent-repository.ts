@@ -1,4 +1,4 @@
-import type { AgentRecord } from "@kindergarten/contracts";
+import type { AgentRecord, BuiltinToolBinding } from "@kindergarten/contracts";
 import { AtomicJsonStore } from "../storage/atomic-json-store.js";
 
 /** 描述「AgentRepository」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -107,6 +107,30 @@ async update(agentId: string, change: (record: AgentRecord) => AgentRecord): Pro
         };
       });
       return { records: migrated, result: migrated };
+    });
+    return result ?? [];
+  }
+
+  /** 原子补齐所有账号系统默认 Agent 缺失的内置工具；已有绑定视为用户选择并保持不变。 */
+  async migrateSystemDefaultTools(defaults: readonly BuiltinToolBinding[]): Promise<AgentRecord[]> {
+    const result = await this.store.update((records) => {
+      const updated: AgentRecord[] = [];
+      const migrated = records.map((record) => {
+        const current = normalizeAgentRecord(record);
+        if (current.recordKind !== "system_default") return record;
+        const bound = new Set(current.builtinTools.map((item) => item.toolId));
+        const additions = defaults.filter((item) => !bound.has(item.toolId));
+        if (additions.length === 0) return record;
+        const next: AgentRecord = {
+          ...current,
+          builtinTools: [...current.builtinTools, ...additions]
+            .toSorted((left, right) => left.toolId.localeCompare(right.toolId)),
+          updatedAt: new Date().toISOString(),
+        };
+        updated.push(next);
+        return next;
+      });
+      return { records: migrated, result: updated };
     });
     return result ?? [];
   }

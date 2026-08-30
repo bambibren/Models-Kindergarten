@@ -229,7 +229,9 @@ const defaultAgentInput = async (ownerId: string): Promise<AgentInput> => ({
     memoryPolicy: { mode: "off" },
   });
 await agentService.reconcileCapabilities(localPrincipal.principalId);
-let defaultAgent = await agentService.ensureDefault(await defaultAgentInput(localPrincipal.principalId), localPrincipal.principalId);
+const startupDefaultAgentInput = await defaultAgentInput(localPrincipal.principalId);
+await agentService.migrateSystemDefaultTools(startupDefaultAgentInput.builtinTools);
+let defaultAgent = await agentService.ensureDefault(startupDefaultAgentInput, localPrincipal.principalId);
 if (defaultAgent) {
   const systemPrompt = removeLegacyModelIdentity(defaultAgent.systemPrompt);
   if (systemPrompt !== defaultAgent.systemPrompt) {

@@ -87,6 +87,36 @@ async () => {
     });
   });
 
+  it("启动迁移会补齐所有账号的系统默认 Agent 且不改普通 Agent", async () => {
+    const service = await makeService();
+    const first = await service.ensureDefault(input("系统默认 Agent"), "user-1");
+    const second = await service.ensureDefault(input("系统默认 Agent"), "user-2");
+    const custom = await service.create(input("普通 Agent"), "user-2");
+    const defaults = [
+      { toolId: "read_file", enabled: true, permission: "allow" as const },
+      { toolId: "build_pptx", enabled: true, permission: "allow" as const },
+    ];
+
+    await service.migrateSystemDefaultTools(defaults);
+
+    expect((await service.get(first.agentId, "user-1")).builtinTools).toContainEqual(defaults[1]);
+    expect((await service.get(second.agentId, "user-2")).builtinTools).toContainEqual(defaults[1]);
+    expect((await service.get(custom.agentId, "user-2")).builtinTools).not.toContainEqual(defaults[1]);
+
+    await service.update(second.agentId, {
+      ...input("系统默认 Agent"),
+      builtinTools: defaults.map((item) => item.toolId === "build_pptx"
+        ? { ...item, enabled: false }
+        : item),
+    }, "user-2");
+    await service.migrateSystemDefaultTools(defaults);
+    expect((await service.get(second.agentId, "user-2")).builtinTools).toContainEqual({
+      toolId: "build_pptx",
+      enabled: false,
+      permission: "allow",
+    });
+  });
+
   it("把账号下同名的历史默认 Agent 提升为系统默认记录", async () => {
     const service = await makeService();
     const legacy = await service.create(input("系统默认 Agent"), "user-1");

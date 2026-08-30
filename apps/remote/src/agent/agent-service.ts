@@ -5,6 +5,7 @@ import {
   type AgentInput,
   type AgentRecord,
   type BuiltinSkillOption,
+  type BuiltinToolBinding,
   type CursorPage,
 } from "@kindergarten/contracts";
 import { ApiProblemError } from "../server/api-problem.js";
@@ -242,6 +243,17 @@ async removeMcpBindings(installationId: string, ownerId = "local-admin"): Promis
   /** 把历史 Builtin Installation 引用原子转换为全局固定引用。 */
   migrateBuiltinSkillBindings(byInstallationId: ReadonlyMap<string, string>): Promise<AgentRecord[]> {
     return this.repository.migrateBuiltinSkills(byInstallationId);
+  }
+
+  /** 为所有既有系统默认 Agent 补齐新增内置工具；不覆盖显式禁用或权限选择。 */
+  migrateSystemDefaultTools(defaults: readonly BuiltinToolBinding[]): Promise<AgentRecord[]> {
+    const available = new Set(this.capabilities.builtinToolIds());
+    const unique = new Map<string, BuiltinToolBinding>();
+    for (const binding of defaults) {
+      if (!available.has(binding.toolId)) throw invalid(`Built-in Tool 不存在: ${binding.toolId}`);
+      if (!unique.has(binding.toolId)) unique.set(binding.toolId, structuredClone(binding));
+    }
+    return this.repository.migrateSystemDefaultTools([...unique.values()]);
   }
 
   /** 释放或删除「removeSkillBindings」对应资源，重复调用仍保持安全。 */

@@ -4,7 +4,7 @@
 
 **Goal:** Make every system default Agent enable `build_pptx` by default, migrate an existing default Agent only when that binding is absent, and publish the verified runtime to `modelskindergarten.fun`.
 
-**Architecture:** Add `build_pptx` to the default Agent input assembled at Remote startup. Extend `AgentService.ensureDefault` so an existing system default Agent receives newly introduced default built-in bindings when the binding is absent, while preserving an explicit `enabled: false` choice. Keep execution inside the existing `PptxToolProvider` and ToolRuntime; do not expose `run_command` or relax `FileSandbox`.
+**Architecture:** Add `build_pptx` to the default Agent input assembled at Remote startup. Extend `AgentService.ensureDefault` for the current account, and run an atomic startup migration across every persisted `system_default` record so inactive accounts are upgraded too. Only absent bindings are added; an explicit `enabled: false` choice is preserved. Keep execution inside the existing `PptxToolProvider` and ToolRuntime; do not expose `run_command` or relax `FileSandbox`.
 
 **Tech Stack:** TypeScript, Vitest, pnpm, Docker Buildx, GHCR, Docker Compose, SSH cloud deployment.
 
@@ -40,6 +40,7 @@ Expected: the new test fails because `ensureDefault` currently returns an existi
 ### Task 2: Enable and migrate the default binding
 
 **Files:**
+- Modify: `apps/remote/src/agent/agent-repository.ts`
 - Modify: `apps/remote/src/agent/agent-service.ts:35-59`
 - Modify: `apps/remote/src/index.ts:204-218`
 
@@ -71,7 +72,11 @@ Change the default tool list to:
 ]
 ```
 
-- [ ] **Step 3: Run the focused tests**
+- [ ] **Step 3: Migrate every persisted system default at startup**
+
+Add an atomic repository migration that visits every `recordKind: "system_default"` record, appends only missing default tool bindings, and leaves ordinary Agents and existing bindings untouched. Invoke it before the local startup default is ensured, so accounts that have not opened the Agent management route are also upgraded.
+
+- [ ] **Step 4: Run the focused tests**
 
 Run:
 
@@ -177,4 +182,3 @@ Read only the target Agent record from `/data/agents.json` and assert it contain
 - [ ] **Step 4: Verify the runtime capability path**
 
 Confirm the deployed bundle contains `build_pptx`, and verify a subsequent Turn for the same default Agent exposes `pptx:tool:build_pptx` in its capability snapshot. Do not mutate or replay the already completed historical Turn.
-
