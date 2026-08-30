@@ -38,7 +38,8 @@ await check("Skills 静态资源", async () => {
 await check("Docker 内部服务地址", async () => {
   const facts = JSON.parse(compose("exec", "-T", "mk-app", "node", "-e", internalOriginProbeSource));
   assert.deepEqual(facts.map((item) => [item.name, item.status]), [
-    ["Web Skills", 200],
+    ["Web Skill list", 200],
+    ["Web Skill bundle", 200],
     ["Runtime", 200],
     ["ONLYOFFICE", 200],
   ]);

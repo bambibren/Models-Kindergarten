@@ -137,19 +137,13 @@ EXPOSE 8080 8081 8082 8443
 - [ ] **Step 1: 编写只读探针**
 
 ```js
-const checks = [
-  ["Web Skills", `${required("MK_WEB_INTERNAL_ORIGIN")}/skills/website-design-fast`, "application/vnd.mk.skill+json"],
-  ["Runtime", `${required("MK_RUNTIME_INTERNAL_ORIGIN")}/health/ready`, "application/json"],
-  ["ONLYOFFICE", `${required("MK_ONLYOFFICE_INTERNAL_ORIGIN")}/healthcheck`, undefined],
-];
-
-for (const [name, url, contentType] of checks) {
-  const response = await fetch(url, { redirect: "error" });
-  if (!response.ok) throw new Error(`${name} 返回 HTTP ${response.status}`);
-  if (contentType && !response.headers.get("content-type")?.includes(contentType)) {
-    throw new Error(`${name} Content-Type 无效`);
-  }
-}
+const webOrigin = required("MK_WEB_INTERNAL_ORIGIN");
+const list = await request("Web Skill list", `${webOrigin}/skills`, "application/json").then((response) => response.json());
+const skillName = list.skills.find((item) => typeof item.name === "string").name;
+const bundle = await request("Web Skill bundle", `${webOrigin}/skills/${encodeURIComponent(skillName)}`, "application/vnd.mk.skill+json").then((response) => response.json());
+if (bundle.kind !== "mk-skill-bundle" || bundle.name !== skillName) throw new Error("Web Skill bundle 结构无效");
+await request("Runtime", `${required("MK_RUNTIME_INTERNAL_ORIGIN")}/health/ready`, "application/json");
+await request("ONLYOFFICE", `${required("MK_ONLYOFFICE_INTERNAL_ORIGIN")}/healthcheck`);
 ```
 
 - [ ] **Step 2: 本机 Smoke 从 mk-app 执行探针**
