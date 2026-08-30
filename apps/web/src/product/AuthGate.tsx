@@ -1,9 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Loader } from "../components/primitives/Loader.js";
-import { readAuthSession } from "./auth-client.js";
+import { readAuthSession, type AuthSessionView } from "./auth-client.js";
+import { AuthSessionProvider } from "./auth-session-context.js";
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [state, setState] = useState<
+    { phase: "loading" } | { phase: "ready"; session: AuthSessionView } | { phase: "error" }
+  >({ phase: "loading" });
 
   useEffect(() => {
     let active = true;
@@ -14,13 +17,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
         location.replace(`/login?next=${encodeURIComponent(next)}`);
         return;
       }
-      setState("ready");
-    }).catch(() => { if (active) setState("error"); });
+      setState({ phase: "ready", session });
+    }).catch(() => { if (active) setState({ phase: "error" }); });
     return () => { active = false; };
   }, []);
 
-  if (state === "ready") return <>{children}</>;
-  if (state === "loading") {
+  if (state.phase === "ready") return <AuthSessionProvider session={state.session}>{children}</AuthSessionProvider>;
+  if (state.phase === "loading") {
     return <main className="product-auth-state"><Loader size="lg" label="正在验证登录状态" /></main>;
   }
   return <main className="product-auth-state"><section><strong>无法检查登录状态</strong><button type="button" onClick={() => location.reload()}>重试</button></section></main>;

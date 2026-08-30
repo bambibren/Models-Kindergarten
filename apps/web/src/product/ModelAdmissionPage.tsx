@@ -178,7 +178,7 @@ async function install() {
     <div className="product-editor-shell product-admission-shell">
       <header className="product-page-heading">
         <a aria-label="返回我的 Models" href="/me?tab=models"><ArrowLeft size={16} /></a>
-        <div><span>ADMIN · MODEL ADMISSION</span><h1>新模型入园</h1><p>选择服务商或协议接入方式。MK 会针对目标模型验证流式输出、Tool 闭环与推理控制，再保存为模型学生。</p></div>
+        <div><span>ACCOUNT · MODEL ADMISSION</span><h1>新模型入园</h1><p>选择服务商或协议接入方式。MK 会针对目标模型验证流式输出、Tool 闭环与推理控制，再保存为模型学生。</p></div>
       </header>
 
       <div className="product-mcp-layout product-admission-layout">

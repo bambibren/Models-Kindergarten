@@ -1,11 +1,20 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { performLogout, ProductNav } from "./ProductNav.js";
+import { AuthSessionProvider } from "./auth-session-context.js";
+
+const passwordSession = {
+  authenticated: true as const,
+  principal: { principalId: "user-1", username: "bengzakalaka", kind: "password_user" as const },
+};
 
 describe("product account menu", () => {
   it("在头像账号区域提供可访问的退出按钮", () => {
-    const html = renderToStaticMarkup(<ProductNav active="home" />);
+    const html = renderToStaticMarkup(<AuthSessionProvider session={passwordSession}><ProductNav active="home" /></AuthSessionProvider>);
     expect(html).toContain("product-account");
+    expect(html).toContain("bengzakalaka");
+    expect(html).not.toContain(">Admin<");
+    expect(html).toContain('aria-label="打开 bengzakalaka 的个人空间"');
     expect(html).toContain('aria-label="退出登录"');
     expect(html).toContain("退出登录");
   });

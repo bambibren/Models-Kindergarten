@@ -6,6 +6,7 @@ import { formatContextWindow, joinMetadata } from "../components/tokens/token-fo
 import { artifactListLabel } from "./artifact-list-label.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { ProductNav } from "./ProductNav.js";
+import { useAuthSession } from "./auth-session-context.js";
 import { useResource } from "./use-resource.js";
 
 type Tab = "artifacts" | "agents" | "models" | "mcps" | "skills";
@@ -16,12 +17,15 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof Braces }> = [
 ];
 /** 渲染「MePage」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function MePage() {
+  const session = useAuthSession();
+  const username = session?.principal.username ?? "Account";
+  const passwordAccount = session?.principal.kind === "password_user";
   const initial = new URLSearchParams(location.search).get("tab") as Tab | null;
   const [tab, setTab] = useState<Tab>(tabs.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.id === initial) ? initial! : "artifacts");
   /** 执行「select」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function select(next: Tab) { setTab(next); const url = new URL(location.href); url.searchParams.set("tab", next); history.replaceState(null, "", url); }
-  return <main className="product-page"><ProductNav active="me" /><div className="product-me-shell"><aside><div><UserRound size={23} /></div><strong>Admin</strong><span>本地管理员</span><p>本轮使用固定 local-admin；账号系统不在当前范围内。</p></aside><section><header><span>ADMIN · PERSONAL SPACE</span><h1>我的</h1></header><nav className="product-tabs">{tabs.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+  return <main className="product-page"><ProductNav active="me" /><div className="product-me-shell"><aside><div><UserRound size={23} /></div><strong>{username}</strong><span>{passwordAccount ? "密码账号" : "本地管理员"}</span><p>{passwordAccount ? "当前账号的数据与其他账号隔离。" : "开发模式使用本地管理员身份。"}</p></aside><section><header><span>ACCOUNT · PERSONAL SPACE</span><h1>我的</h1></header><nav className="product-tabs">{tabs.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => { const Icon = item.icon; return <button className={tab === item.id ? "active" : ""} key={item.id} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
 () => select(item.id)}><Icon size={14} />{item.label}</button>; })}</nav>
     {/* 各 Tab 返回的数据结构不同；切换时必须重建加载状态，不能让新面板读取上一 Tab 的旧数据。 */}

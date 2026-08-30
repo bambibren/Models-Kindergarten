@@ -167,7 +167,7 @@ function mentionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
 (profile) => ({ profile, name: profileLabel(profile, model?.supports.reasoning) }))} label="新会话思考控制" onChange={setReasoningProfile} value={reasoningProfile} />}</div><span>创建后，Agent 与模型固定在该会话中</span><button aria-label="发送" disabled={!prompt.trim() || !modelId || !agentId} type="submit"><ArrowUp size={16} /></button></footer>
       </form>
     </header>
-    <section className="product-recent"><header><span>ADMIN · RECENT SESSIONS</span><h2>最近会话</h2></header>{sessions.length === 0 ? <div className="product-empty"><strong>还没有会话</strong><p>从上方输入一个任务即可开始。</p></div> : <div>{sessions.slice(0, 6).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+    <section className="product-recent"><header><span>ACCOUNT · RECENT SESSIONS</span><h2>最近会话</h2></header>{sessions.length === 0 ? <div className="product-empty"><strong>还没有会话</strong><p>从上方输入一个任务即可开始。</p></div> : <div>{sessions.slice(0, 6).map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (session) => <a href={`/sessions/${encodeURIComponent(session.sessionId)}`} key={session.sessionId}><span><strong>{session.title}</strong><small>{session.preview || "暂无消息"}</small></span><time>{formatDate(session.updatedAt)}</time></a>)}</div>}</section>
   </section></Page>;
 }

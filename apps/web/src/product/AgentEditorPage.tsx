@@ -61,7 +61,7 @@ async function submit(event: FormEvent) {
   /** 更新「updatePolicy」对应状态，并保持写入顺序、原子性与容量约束。 */
 function updatePolicy(policy: AgentPolicyValue) { setForm(/** 更新「updatePolicy」对应状态，并保持写入顺序、原子性与容量约束。 */
 (current) => ({ ...current, ...policy })); }
-  return <div className="product-editor-shell"><header className="product-page-heading"><a href="/me?tab=agents"><ArrowLeft size={16} /></a><div><span>ADMIN · AGENT CONTEXT</span><h1>{agent ? "编辑 Agent" : "创建 Agent"}</h1><p>保存一套可复用的系统提示、工具、Skills、MCP 与历史策略。</p></div></header>
+  return <div className="product-editor-shell"><header className="product-page-heading"><a href="/me?tab=agents"><ArrowLeft size={16} /></a><div><span>ACCOUNT · AGENT CONTEXT</span><h1>{agent ? "编辑 Agent" : "创建 Agent"}</h1><p>保存一套可复用的系统提示、工具、Skills、MCP 与历史策略。</p></div></header>
     <form className="product-form" onSubmit={submit}>
       <section><header><Bot size={16} /><div><strong>基础信息</strong><small>名称只是展示；运行时使用保存的 ID</small></div></header><label><span>名称</span><input required maxLength={80} value={form.name} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setForm({ ...form, name: event.target.value })} /></label><label><span>说明</span><input maxLength={500} value={form.description ?? ""} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
