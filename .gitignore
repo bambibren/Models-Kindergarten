@@ -39,4 +39,7 @@ temp/
 # Docker 预演数据和主密钥只保存在本机，不进入镜像或 Git。
 /deploy/local/*
 !/deploy/local/.gitkeep
-/deploy/releases/
+# 发布 manifest 是可复现部署的一部分；release.env 等临时部署配置不得进入 Git。
+/deploy/releases/*/*
+!/deploy/releases/*/
+!/deploy/releases/*/release-manifest.json
