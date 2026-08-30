@@ -44,8 +44,16 @@ describe("deployment config", () => {
     });
   });
 
-  it("未实现的认证会明确阻止启动", () => {
-    expect(() => assertImplementedDeploymentFeatures(readDeploymentConfig({ AUTH_MODE: "required" })))
-      .toThrow("ACP 身份");
+  it("正式认证只允许 HTTPS 公开 Origin", () => {
+    expect(() => assertImplementedDeploymentFeatures(readDeploymentConfig({
+      DEPLOYMENT_PROFILE: "cloud",
+      AUTH_MODE: "required",
+      PUBLIC_ORIGIN: "http://mk.example.com",
+    }))).toThrow("HTTPS");
+    expect(() => assertImplementedDeploymentFeatures(readDeploymentConfig({
+      DEPLOYMENT_PROFILE: "cloud",
+      AUTH_MODE: "required",
+      PUBLIC_ORIGIN: "https://mk.example.com",
+    }))).not.toThrow();
   });
 });

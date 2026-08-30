@@ -81,6 +81,11 @@ import {
   assertImplementedDeploymentFeatures,
   readDeploymentConfig,
 } from "./config/deployment-config.js";
+import { PasswordAuthStore } from "./auth/password-auth-store.js";
+import { AuthService } from "./auth/auth-service.js";
+import { AUTH_PUBLIC_PATHS, registerAuthRoutes } from "./auth/auth-routes.js";
+import { localPrincipal } from "./server/local-principal.js";
+import type { Principal } from "@kindergarten/contracts";
 
 const workspaceRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const deployment = readDeploymentConfig(process.env, process.cwd(), workspaceRoot);
@@ -325,15 +330,6 @@ const experimentService = new ExperimentService(
 );
 resolver.setExperimentSnapshotResolver(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (experimentId, testId) => experimentService.snapshot(experimentId, testId));
-const bindings = new SessionBindingService({
-  workspaceCwd: "/workspace",
-  agentExists: /** 执行「agentExists」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async (id) => Boolean(await agentRepository.get(id)),
-  modelStudentReady: /** 执行「modelStudentReady」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-(id) => modelStudents.isReady(id),
-  experimentBinding: /** 执行「experimentBinding」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-(experimentId, variantId) => experimentService.binding(experimentId, variantId),
-});
 const runtime = new AgentRuntime(
   undefined,
   new ToolRuntime(catalog),
@@ -341,11 +337,19 @@ const runtime = new AgentRuntime(
   evaluation,
   resolver,
 );
+const authStore = new PasswordAuthStore(
+  resolve(dataDir, "auth/users.json"),
+  resolve(dataDir, "auth/sessions.json"),
+);
+const auth = new AuthService(deployment.authMode, authStore);
 const control = new ControlApi({
   allowedOrigins: (process.env.CONTROL_ALLOWED_ORIGINS ?? deployment.publicOrigin ?? "http://127.0.0.1:5173")
     .split(",").map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.trim()).filter(Boolean),
+  ...(deployment.authMode === "required" ? { resolvePrincipal: (request: Request) => auth.resolve(request) } : {}),
+  publicPaths: AUTH_PUBLIC_PATHS,
 });
+registerAuthRoutes(control.router, auth);
 registerAgentRoutes(control.router, agentService);
 registerSessionRoutes(control.router, sessions, new SessionLaunchService(resolve(dataDir, "session-launches.json"), agentService, modelStudents));
 registerSkillRoutes(control.router, skillInstallations);
@@ -359,15 +363,55 @@ const fileReferences = new FileReferenceService(
 );
 registerFileRoutes(control.router, fileReferences);
 registerArtifactRoutes(control.router, artifacts, new OnlyOfficePreviewService());
-const agent = new KindergartenAgent(sessions, runtime, bindings, experimentService, modelStudents, artifacts).createApp();
+const createAgent = (principal: Principal) => {
+  const bindings = new SessionBindingService({
+    workspaceCwd: "/workspace",
+    ownerId: principal.principalId,
+    agentExists: async (id) => Boolean(await agentService.get(id, principal.principalId).catch(() => undefined)),
+    modelStudentReady: async (id) =>
+      modelStudents.isReady(id) && (await modelAdmissionRepository.listStudents(principal.principalId))
+        .some((item) => item.modelStudentId === id),
+    experimentBinding: (experimentId, variantId) =>
+      experimentService.binding(experimentId, variantId, principal.principalId),
+  });
+  return new KindergartenAgent(
+    sessions,
+    runtime,
+    bindings,
+    experimentService,
+    modelStudents,
+    artifacts,
+    principal.principalId,
+  ).createApp();
+};
+const agent = createAgent(localPrincipal);
+const evaluationHttp = {
+  fetch: async (request: Request, principal?: Principal) => {
+    if (deployment.authMode === "required" && principal) {
+      const match = new URL(request.url).pathname.match(
+        /^\/api\/evaluation\/v1\/turn-evaluations\/([^/]+)\/[^/]+$/u,
+      );
+      if (match?.[1]) {
+        const session = await sessions.getMetadata(decodeURIComponent(match[1])).catch(() => undefined);
+        if (!session || session.ownerId !== principal.principalId) {
+          return Response.json({ error: "尚未生成本轮评测" }, { status: 404 });
+        }
+      }
+    }
+    return evaluation.fetch(request);
+  },
+};
 const server = new RemoteServer(agent, {
   configuredModels: String(modelStudents.all().length),
   readyModels: String(modelStudents.all().filter((item) => item.status === "ready").length),
-}, control, evaluation, {
+}, control, evaluationHttp, {
   dataDirectory: true,
   modelCatalog: true,
   secretStore: true,
-});
+}, deployment.authMode === "required" ? {
+  resolve: (request) => auth.resolve(request),
+  createAgent,
+} : undefined);
 
 await server.listen(host, port);
 console.log(`Kindergarten Remote: ws://${host}:${port}/acp`);

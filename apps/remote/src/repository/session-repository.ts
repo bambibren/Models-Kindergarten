@@ -175,11 +175,11 @@ async get(id: string): Promise<SessionRecord> {
   }
 
   /** Session 列表只读取 V5 小索引，不打开任何 Turn 文件。 */
-  async list(cwd?: string | null, purpose: SessionPurpose = "chat"): Promise<SessionInfo[]> {
+async list(cwd?: string | null, purpose: SessionPurpose = "chat", ownerId?: string): Promise<SessionInfo[]> {
     await this.ensureV5();
     return (await this.readIndex()).sessions
       .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.purpose === purpose && (!cwd || item.cwd === cwd))
+(item) => item.purpose === purpose && (!cwd || item.cwd === cwd) && (!ownerId || item.ownerId === ownerId))
       .toSorted(/** 执行「map」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
@@ -273,6 +273,21 @@ async () => {
       }
       return removed.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.id);
+    });
+  }
+
+  /** 删除账号时移除该账号的全部 Session 分片，并返回对应 Workspace 标识。 */
+  async removeOwner(ownerId: string): Promise<string[]> {
+    return this.enqueueWrite(async () => {
+      await this.ensureV5();
+      const index = await this.readIndex();
+      const removed = index.sessions.filter((item) => item.ownerId === ownerId);
+      for (const item of removed) await rm(this.sessionDir(item.id), { recursive: true, force: true });
+      if (removed.length > 0) {
+        const removedIds = new Set(removed.map((item) => item.id));
+        await this.saveIndex({ version: 5, sessions: index.sessions.filter((item) => !removedIds.has(item.id)) });
+      }
+      return removed.map((item) => item.id);
     });
   }
 

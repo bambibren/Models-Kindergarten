@@ -1,16 +1,20 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import { AcpServer } from "@agentclientprotocol/sdk/experimental/server";
-import { createNodeWebSocketUpgradeHandler } from "@agentclientprotocol/sdk/experimental/node";
 import { WebSocketServer } from "ws";
 import type { AgentApp } from "@agentclientprotocol/sdk";
-import { Readable } from "node:stream";
+import { Duplex, Readable } from "node:stream";
 import type { ControlApi } from "./control-api.js";
-import { PRODUCT_CONFIG } from "@kindergarten/contracts";
+import { PRODUCT_CONFIG, type Principal } from "@kindergarten/contracts";
 
 const MAX_ACP_INCOMING_PAYLOAD_BYTES = 1024 * 1024;
 
 export interface HttpFeature {
-  fetch(request: Request): Promise<Response | undefined>;
+  fetch(request: Request, principal?: Principal): Promise<Response | undefined>;
+}
+
+export interface RemoteServerAuthentication {
+  resolve(request: Request): Promise<Principal | undefined>;
+  createAgent(principal: Principal): AgentApp;
 }
 
 /**
@@ -29,6 +33,7 @@ export class RemoteServer {
     private readonly controlApi?: ControlApi,
     private readonly evaluationApi?: HttpFeature,
     private readonly readiness: Record<string, boolean> = { server: true },
+    private readonly authentication?: RemoteServerAuthentication,
   ) {
     this.acp = new AcpServer({ agent });
     this.ws = new WebSocketServer({
@@ -36,8 +41,6 @@ export class RemoteServer {
       maxPayload: MAX_ACP_INCOMING_PAYLOAD_BYTES,
       perMessageDeflate: false,
     });
-    const upgrade = createNodeWebSocketUpgradeHandler(this.acp, this.ws);
-
     this.http = createServer(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 async (req, res) => {
       try {
@@ -64,7 +67,15 @@ async (req, res) => {
           return;
         }
         const request = toRequest(req);
-        const evaluationResponse = await this.evaluationApi?.fetch(request);
+        let principal: Principal | undefined;
+        if (this.authentication && !isPublicAuthenticationRequest(request)) {
+          principal = await this.authentication.resolve(request);
+          if (!principal) {
+            await sendResponse(res, authenticationRequiredResponse());
+            return;
+          }
+        }
+        const evaluationResponse = await this.evaluationApi?.fetch(request, principal);
         if (evaluationResponse) {
           await sendResponse(res, evaluationResponse);
           return;
@@ -112,8 +123,46 @@ async (req, res) => {
         socket.destroy();
         return;
       }
-      upgrade(req, socket, head);
+      void this.upgrade(req, socket, head);
     });
+  }
+
+  private async upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    try {
+      const principal = this.authentication ? await this.authentication.resolve(toRequest(req)) : undefined;
+      if (this.authentication && !principal) {
+        rejectUpgrade(socket, 401, "Unauthorized");
+        return;
+      }
+      const prepared = this.acp.prepareWebSocketUpgrade(
+        this.authentication && principal ? { agent: this.authentication.createAgent(principal) } : undefined,
+      );
+      let accepted = false;
+      const cleanup = () => {
+        this.ws.off("headers", onHeaders);
+        socket.off("close", onFailed);
+        socket.off("error", onFailed);
+      };
+      const onHeaders = (headers: string[], request: IncomingMessage) => {
+        if (request === req) headers.push(`Acp-Connection-Id: ${prepared.connectionId}`);
+      };
+      const onFailed = () => {
+        if (accepted) return;
+        cleanup();
+        prepared.reject();
+      };
+      this.ws.on("headers", onHeaders);
+      socket.once("close", onFailed);
+      socket.once("error", onFailed);
+      this.ws.handleUpgrade(req, socket, head, (webSocket) => {
+        accepted = true;
+        cleanup();
+        prepared.accept(webSocket);
+      });
+    } catch (error) {
+      console.error("ACP WebSocket 登录校验失败", error);
+      rejectUpgrade(socket, 500, "Internal Server Error");
+    }
   }
 
   /** 读取「listen」所需数据，并遵守作用域、分页与容量边界。 */
@@ -136,6 +185,32 @@ async close(): Promise<void> {
     await closeWebSockets(this.ws);
     await httpClosed;
   }
+}
+
+function isPublicAuthenticationRequest(request: Request): boolean {
+  const path = new URL(request.url).pathname;
+  return path === "/api/control/v1/auth/login" ||
+    path === "/api/control/v1/auth/session" ||
+    path === "/api/control/v1/auth/logout";
+}
+
+function authenticationRequiredResponse(): Response {
+  return Response.json({
+    type: "about:blank",
+    title: "需要登录",
+    status: 401,
+    detail: "请先登录 Models Kindergarten",
+    code: "AUTHENTICATION_REQUIRED",
+    retryable: false,
+  }, {
+    status: 401,
+    headers: { "content-type": "application/problem+json; charset=utf-8" },
+  });
+}
+
+function rejectUpgrade(socket: Duplex, status: number, message: string): void {
+  socket.write(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+  socket.destroy();
 }
 
 /** 根据已校验输入构建「toRequest」结果，不额外持有调用方的大对象。 */

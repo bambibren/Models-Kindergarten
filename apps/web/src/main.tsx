@@ -10,6 +10,8 @@ import { McpPage } from "./product/McpPage.js";
 import { MePage } from "./product/MePage.js";
 import { ArtifactDetailPage } from "./product/ArtifactDetailPage.js";
 import { ModelAdmissionPage } from "./product/ModelAdmissionPage.js";
+import { AuthGate } from "./product/AuthGate.js";
+import { LoginPage } from "./product/LoginPage.js";
 import "./product/product.css";
 import "./styles.css";
 
@@ -44,6 +46,11 @@ const application = route();
 /** 执行「route」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function route() {
   const path = normalize(location.pathname);
+  if (path === "/login") return <LoginPage />;
+  return <AuthGate>{productRoute(path)}</AuthGate>;
+}
+
+function productRoute(path: string) {
   if (path === "/evaluation" || path.startsWith("/evaluation/")) {
     return <Suspense fallback={<main className="product-page"><section className="product-state"><strong>正在打开评测</strong></section></main>}><EvaluationApp /></Suspense>;
   }

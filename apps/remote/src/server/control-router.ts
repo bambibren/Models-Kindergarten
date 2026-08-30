@@ -1,4 +1,4 @@
-import type { LocalPrincipal } from "@kindergarten/contracts";
+import type { Principal } from "@kindergarten/contracts";
 
 /** 描述「ControlRouteContext」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ControlRouteContext {
@@ -6,7 +6,7 @@ export interface ControlRouteContext {
   url: URL;
   params: Record<string, string>;
   requestId: string;
-  principal: LocalPrincipal;
+  principal: Principal;
   json(): Promise<unknown>;
 }
 

@@ -51,6 +51,7 @@ try {
   run("ssh", [server, bootstrapCommand(remoteRelease)], dryRun);
   run("scp", [
     resolve(repoRoot, "deploy/compose.yaml"),
+    resolve(repoRoot, "deploy/scripts/mk-user.sh"),
     envFile,
     manifestFile,
     `${server}:${remoteRelease}/`,
@@ -112,6 +113,8 @@ function bootstrapCommand(remoteRelease) {
     "sudo install -d -m 0750 -o ubuntu -g ubuntu /srv/mk/backups",
     `mkdir -p ${quote(remoteRelease)}`,
     "if ! sudo test -f /srv/mk/secrets/mk_master_key; then sudo sh -c 'umask 077; openssl rand -base64 32 > /srv/mk/secrets/mk_master_key'; fi",
+    "if ! sudo test -f /srv/mk/secrets/onlyoffice_jwt_secret; then sudo sh -c 'umask 077; openssl rand -hex 32 > /srv/mk/secrets/onlyoffice_jwt_secret'; fi",
+    "if ! sudo test -f /srv/mk/secrets/onlyoffice_preview_secret; then sudo sh -c 'umask 077; openssl rand -hex 32 > /srv/mk/secrets/onlyoffice_preview_secret'; fi",
     "sudo chown 10001:10001 /srv/mk/secrets/mk_master_key",
     "sudo chmod 600 /srv/mk/secrets/mk_master_key",
     "sudo sh -c 'test \"$(wc -c < /srv/mk/secrets/mk_master_key)\" -eq 45'",
@@ -119,7 +122,7 @@ function bootstrapCommand(remoteRelease) {
 }
 
 function remoteDeployCommand(remoteRelease, manifestName, settings) {
-  const compose = "docker compose --env-file release.env -f compose.yaml";
+  const compose = "ONLYOFFICE_JWT_SECRET=$(sudo cat /srv/mk/secrets/onlyoffice_jwt_secret) ONLYOFFICE_PREVIEW_SECRET=$(sudo cat /srv/mk/secrets/onlyoffice_preview_secret) docker compose --env-file release.env -f compose.yaml";
   return [
     "set -eu",
     `cd ${quote(remoteRelease)}`,
@@ -129,6 +132,8 @@ function remoteDeployCommand(remoteRelease, manifestName, settings) {
     `${compose} pull`,
     `${compose} up --detach --no-build --wait --wait-timeout 420`,
     `curl --fail --silent --show-error ${quote(settings.probe)} >/dev/null`,
+    `sudo ln -sfn ${quote(remoteRelease)} /srv/mk/current`,
+    "sudo install -m 0755 mk-user.sh /usr/local/bin/mk-user",
   ].join("; ");
 }
 

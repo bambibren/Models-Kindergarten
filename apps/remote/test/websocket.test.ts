@@ -150,6 +150,40 @@ async () => undefined,
     }
   });
 
+  it("正式认证模式在 ACP upgrade 前拒绝无 Cookie 连接", async () => {
+    dir = await mkdtemp(join(tmpdir(), "kindergarten-ws-auth-"));
+    const sessions = new SessionRepository(dir);
+    const sandbox = new FileSandbox(join(dir, "sandbox"));
+    await sandbox.initialize();
+    const agent = new KindergartenAgent(
+      sessions,
+      AgentRuntime.fromRegistry(new FixtureProvider(), new ToolRegistry(sandbox)),
+      new SessionBindingService({
+        workspaceCwd: "/workspace",
+        ownerId: "user-admin",
+        agentExists: () => true,
+        modelStudentReady: () => true,
+        experimentBinding: async () => undefined,
+      }),
+      undefined,
+      undefined,
+      undefined,
+      "user-admin",
+    ).createApp();
+    server = new RemoteServer(agent, {}, undefined, undefined, { server: true }, {
+      resolve: async (request) => request.headers.get("cookie") === "mk_session=valid"
+        ? { schemaVersion: 1, principalId: "user-admin", kind: "password_user", username: "admin" }
+        : undefined,
+      createAgent: () => agent,
+    });
+    await server.listen("127.0.0.1", 0);
+    const port = (server.http.address() as AddressInfo).port;
+    const url = `ws://127.0.0.1:${port}/acp`;
+    expect(await rejectedWebSocketStatus(url)).toBe(401);
+    const accepted = await openRawWebSocket(url, { cookie: "mk_session=valid" });
+    await closeRawWebSocket(accepted);
+  });
+
   it("真实 WebSocket 断开后 Runtime 继续，手动 resume 补齐缺失输出", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     dir = await mkdtemp(join(tmpdir(), "kindergarten-ws-resume-"));
@@ -234,10 +268,10 @@ async () => undefined,
 });
 
 /** 建立一条不发送 ACP 请求的原始连接，用来占用网络壳连接名额。 */
-function openRawWebSocket(url: string): Promise<WebSocket> {
+function openRawWebSocket(url: string, headers?: Record<string, string>): Promise<WebSocket> {
   return new Promise(/** 将 open/error 事件收敛成一次 Promise 结算。 */
 (resolve, reject) => {
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(url, { headers });
     socket.once("open", /** 返回已经进入 WebSocketServer clients 集合的连接。 */
 () => resolve(socket));
     socket.once("error", reject);

@@ -14,6 +14,7 @@
     "dev:resource": "pnpm --filter @kindergarten/resource dev",
     "start:dist": "pnpm --filter @kindergarten/remote start:dist",
     "secret:init": "pnpm --filter @kindergarten/remote secret:init",
+    "auth:user": "pnpm --filter @kindergarten/remote exec tsx src/auth/auth-user-cli.ts",
     "deploy:secret:init": "node deploy/scripts/secret-init.mjs",
     "deploy:build": "sh deploy/scripts/preview-build.sh",
     "deploy:preview": "sh deploy/scripts/preview-all.sh",

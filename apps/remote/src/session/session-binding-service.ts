@@ -11,8 +11,9 @@ interface NewSessionLike {
 /** 描述「SessionBindingServiceOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface SessionBindingServiceOptions {
   workspaceCwd: string;
+  ownerId?: string;
   agentExists(agentId: string): boolean | Promise<boolean>;
-  modelStudentReady(modelStudentId: string): boolean;
+  modelStudentReady(modelStudentId: string): boolean | Promise<boolean>;
   experimentBinding(experimentId: string, variantId: string): Promise<{
     modelStudentId: string;
     agentId: string;
@@ -41,10 +42,10 @@ async resolve(params: NewSessionLike): Promise<CreateSessionInput> {
     if (runRef) {
       const binding = await this.options.experimentBinding(runRef.experimentId, runRef.variantId);
       if (!binding) throw invalid("Experiment lane 不存在或不可运行");
-      if (!this.options.modelStudentReady(binding.modelStudentId)) throw invalid(`ModelStudent 不可用: ${binding.modelStudentId}`);
+      if (!await this.options.modelStudentReady(binding.modelStudentId)) throw invalid(`ModelStudent 不可用: ${binding.modelStudentId}`);
       return {
         cwd: params.cwd,
-        ownerId: "local-admin",
+        ownerId: this.options.ownerId ?? "local-admin",
         purpose: "experiment",
         ...binding,
         experimentRef: { experimentId: runRef.experimentId, variantId: runRef.variantId },
@@ -55,7 +56,7 @@ async resolve(params: NewSessionLike): Promise<CreateSessionInput> {
     await this.assertBinding(binding.modelStudentId, binding.agentId);
     return {
       cwd: params.cwd,
-      ownerId: "local-admin",
+      ownerId: this.options.ownerId ?? "local-admin",
       purpose: "chat",
       modelStudentId: binding.modelStudentId,
       agentId: binding.agentId,
@@ -64,7 +65,7 @@ async resolve(params: NewSessionLike): Promise<CreateSessionInput> {
 
   /** 校验并规范化「assertBinding」输入，非法数据直接返回明确错误。 */
 private async assertBinding(modelStudentId: string, agentId: string): Promise<void> {
-    if (!this.options.modelStudentReady(modelStudentId)) throw invalid(`ModelStudent 不可用: ${modelStudentId}`);
+    if (!await this.options.modelStudentReady(modelStudentId)) throw invalid(`ModelStudent 不可用: ${modelStudentId}`);
     if (!await this.agentExists(agentId)) throw invalid(`Agent 不存在: ${agentId}`);
   }
 }

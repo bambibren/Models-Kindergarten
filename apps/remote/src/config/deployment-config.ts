@@ -59,8 +59,8 @@ export function readDeploymentConfig(
 
 /** 当前阶段仍只有本地开发身份；required 用于阻止部署者误以为认证已经配置完成。 */
 export function assertImplementedDeploymentFeatures(config: DeploymentConfig): void {
-  if (config.authMode !== "development") {
-    throw new Error("AUTH_MODE=required 尚未实现连接级 ACP 身份，不能启动");
+  if (config.authMode === "required" && !config.publicOrigin?.startsWith("https://")) {
+    throw new Error("AUTH_MODE=required 必须使用 HTTPS PUBLIC_ORIGIN");
   }
 }
 

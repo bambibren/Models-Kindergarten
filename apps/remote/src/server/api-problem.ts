@@ -41,6 +41,7 @@ export function problemResponse(error: unknown, requestId: string, headers: Head
 /** 执行「titleFor」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function titleFor(status: number): string {
   if (status === 400) return "请求无效";
+  if (status === 401) return "需要登录";
   if (status === 403) return "请求被拒绝";
   if (status === 404) return "资源不存在";
   if (status === 405) return "方法不允许";

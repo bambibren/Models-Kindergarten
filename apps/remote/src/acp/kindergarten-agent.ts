@@ -98,6 +98,7 @@ constructor(
     private readonly experiments?: ExperimentService,
     private readonly models?: ModelStudentCatalog,
     private readonly artifacts?: ArtifactService,
+    private readonly principalId = "local-admin",
   ) {}
 
   /** 根据已校验输入构建「createApp」结果，不额外持有调用方的大对象。 */
@@ -131,8 +132,8 @@ createApp(): acp.AgentApp {
         this.prompt(params, client, signal),
       )
       .onNotification(acp.methods.agent.session.cancel, /** 根据已校验输入构建「createApp」结果，不额外持有调用方的大对象。 */
-({ params }) =>
-        this.cancel(params.sessionId),
+async ({ params }) =>
+        this.cancelOwned(params.sessionId),
       );
   }
 
@@ -172,7 +173,7 @@ private async newSession(params: acp.NewSessionRequest): Promise<acp.NewSessionR
 
   /** 读取「listSessions」所需数据，并遵守作用域、分页与容量边界。 */
 private async listSessions(params: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
-    return { sessions: await this.sessions.list(params.cwd) };
+    return { sessions: await this.sessions.list(params.cwd, "chat", this.principalId) };
   }
 
   /** 读取「loadSession」所需数据，并遵守作用域、分页与容量边界。 */
@@ -228,6 +229,7 @@ private async resumeSession(
 
   /** 释放或删除「closeSession」对应资源，重复调用仍保持安全。 */
 private async closeSession(params: acp.CloseSessionRequest): Promise<void> {
+    await this.requireOwnedSession(params.sessionId, 0);
     this.cancel(params.sessionId);
     this.channels.get(params.sessionId)?.close();
   }
@@ -246,6 +248,7 @@ async () => {
         throw new acp.RequestError(-32000, "回答生成期间不能修改思考强度");
       }
       const current = await this.sessions.getRecent(params.sessionId, 0);
+      if (current.ownerId !== this.principalId) throw new Error("Session 不存在");
       const capability = this.reasoningCapability(current);
       if (!capability?.adjustable || (value !== "auto" && !capability.supportedProfiles.includes(value))) {
         throw new acp.RequestError(-32602, "当前 ModelStudent 不支持该思考强度");
@@ -292,6 +295,7 @@ async () => {
           params.sessionId,
           PRODUCT_CONFIG.agent.historyRecentTurnsMax,
         );
+        if (current.ownerId !== this.principalId) throw new Error("Session 不存在");
         if (this.models && !this.models.isReady(current.modelStudentId)) {
           throw new acp.RequestError(
             -32002,
@@ -480,6 +484,11 @@ private cancel(sessionId: string): void {
     this.active.get(sessionId)?.abort();
   }
 
+  private async cancelOwned(sessionId: string): Promise<void> {
+    await this.requireOwnedSession(sessionId, 0);
+    this.cancel(sessionId);
+  }
+
   /** 执行「contextWindowState」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 private async contextWindowState(
     session: SessionRecord,
@@ -540,7 +549,14 @@ private async serializeSessionState<T>(sessionId: string, operation: () => Promi
   /** 校验并取得「requireSession」所需对象；缺失或归属不符时立即抛出明确错误。 */
 private async requireSession(id: string, cwd: string, maxTurns?: number): Promise<SessionRecord> {
     const session = maxTurns === undefined ? await this.sessions.get(id) : await this.sessions.getRecent(id, maxTurns);
+    if (session.ownerId !== this.principalId) throw new Error("Session 不存在");
     if (session.cwd !== cwd) throw new Error("会话 cwd 与请求不一致");
+    return session;
+  }
+
+  private async requireOwnedSession(id: string, maxTurns?: number): Promise<SessionRecord> {
+    const session = maxTurns === undefined ? await this.sessions.get(id) : await this.sessions.getRecent(id, maxTurns);
+    if (session.ownerId !== this.principalId) throw new Error("Session 不存在");
     return session;
   }
 }

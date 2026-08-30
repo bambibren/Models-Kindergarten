@@ -3,13 +3,15 @@ import { ApiProblemError, problemResponse } from "./api-problem.js";
 import { ControlRouter } from "./control-router.js";
 import { localPrincipal } from "./local-principal.js";
 import { OriginPolicy } from "./origin-policy.js";
-import { PRODUCT_CONFIG } from "@kindergarten/contracts";
+import { PRODUCT_CONFIG, type Principal } from "@kindergarten/contracts";
 
 /** 描述「ControlApiOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ControlApiOptions {
   allowedOrigins: string[];
   maxJsonBytes?: number;
   maxConcurrentRequests?: number;
+  resolvePrincipal?: (request: Request) => Promise<Principal | undefined>;
+  publicPaths?: string[];
 }
 
 /** 描述「ControlApi」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -22,7 +24,7 @@ export class ControlApi {
   private activeRequests = 0;
 
   /** 初始化「ControlApi」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-constructor(options: ControlApiOptions) {
+constructor(private readonly options: ControlApiOptions) {
     this.origins = new OriginPolicy(options.allowedOrigins);
     this.maxJsonBytes = options.maxJsonBytes ?? 256 * 1024;
     this.maxConcurrentRequests = options.maxConcurrentRequests ?? PRODUCT_CONFIG.server.maxConcurrentControlRequests;
@@ -54,6 +56,18 @@ async fetch(request: Request): Promise<Response | undefined> {
         }
         return problemResponse(new ApiProblemError(404, "NOT_FOUND", "Control API 路由不存在", false), requestId, cors(origin));
       }
+      const principal = this.options.publicPaths?.includes(path)
+        ? localPrincipal
+        : this.options.resolvePrincipal
+          ? await this.options.resolvePrincipal(request)
+          : localPrincipal;
+      if (!principal) {
+        return problemResponse(
+          new ApiProblemError(401, "AUTHENTICATION_REQUIRED", "请先登录", false),
+          requestId,
+          cors(origin),
+        );
+      }
       let jsonLoaded = false;
       let jsonValue: unknown;
       if (this.activeRequests >= this.maxConcurrentRequests) {
@@ -71,7 +85,7 @@ async fetch(request: Request): Promise<Response | undefined> {
           url,
           params: matched.params,
           requestId,
-          principal: localPrincipal,
+          principal,
           json: /** 请求体只解析一次，并继续服从边读边限流的字节上限。 */
 async () => {
             if (jsonLoaded) return jsonValue;

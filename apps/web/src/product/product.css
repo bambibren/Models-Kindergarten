@@ -273,3 +273,13 @@
   .product-admission-form > footer button { width: 100%; min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+/* 登录页使用独立、收敛的单卡片布局，避免未认证状态加载产品工作台结构。 */
+.product-login-page,.product-auth-state{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 18% 12%,#f7efe0 0,transparent 34%),linear-gradient(145deg,#f7f6f1,#ebe9e1);color:#252822}
+.product-login-card{width:min(430px,100%);padding:34px;border:1px solid #d5d1c4;border-radius:20px;background:rgba(255,255,252,.94);box-shadow:0 24px 70px rgba(54,54,43,.13)}
+.product-login-card>header{display:grid;grid-template-columns:56px 1fr;gap:16px;align-items:start;margin-bottom:28px}
+.product-login-card>header>span{display:grid;place-items:center;width:56px;height:56px;border-radius:17px;background:#29342b;color:#fff;font-weight:800;letter-spacing:.05em}
+.product-login-card header small{font-size:10px;letter-spacing:.16em;color:#7e806f}.product-login-card h1{margin:5px 0 6px;font-size:25px}.product-login-card header p{margin:0;color:#747568;font-size:13px}
+.product-login-card form{display:grid;gap:17px}.product-login-card label{display:grid;gap:7px;font-size:12px;font-weight:700;color:#505247}.product-login-card label div{display:flex;align-items:center;gap:9px;padding:0 12px;border:1px solid #cbc8bc;border-radius:11px;background:#fff;color:#77796c}.product-login-card input{width:100%;height:45px;border:0;outline:0;background:transparent;color:#23251f;font:inherit}
+.product-login-card form>button{display:flex;align-items:center;justify-content:center;gap:8px;height:46px;border:0;border-radius:11px;background:#29342b;color:#fff;font-weight:750;cursor:pointer}.product-login-card form>button:disabled{opacity:.58;cursor:wait}
+.product-login-error{margin:0;padding:10px 12px;border-radius:9px;background:#f7e9e5;color:#9a4037;font-size:12px}.product-login-card footer{margin-top:22px;padding-top:16px;border-top:1px solid #e6e3d9;color:#8a8b80;font-size:11px;text-align:center}
+.product-auth-state section{display:grid;gap:14px;justify-items:center;padding:24px 30px;border:1px solid #d8d5ca;border-radius:16px;background:#fff}.product-auth-state button{border:0;border-radius:8px;padding:9px 16px;background:#29342b;color:#fff}

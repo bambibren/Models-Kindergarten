@@ -152,9 +152,9 @@ private async getV2(id: string, ownerId = "local-admin"): Promise<ExperimentReco
   }
 
   /** 执行「binding」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async binding(experimentId: string, testId: string): Promise<{ modelStudentId: string; agentId: string; experimentReasoning: import("@kindergarten/contracts").ResolvedReasoningSnapshot } | undefined> {
+async binding(experimentId: string, testId: string, ownerId?: string): Promise<{ modelStudentId: string; agentId: string; experimentReasoning: import("@kindergarten/contracts").ResolvedReasoningSnapshot } | undefined> {
     const experiment = await this.repository.get(experimentId);
-    if (!experiment || experiment.schemaVersion !== 2 || !["prepared", "running"].includes(experiment.status)) return undefined;
+    if (!experiment || (ownerId && experiment.ownerId !== ownerId) || experiment.schemaVersion !== 2 || !["prepared", "running"].includes(experiment.status)) return undefined;
     const run = experiment.runs.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.testId === testId);
     const snapshot = experiment.snapshots?.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */

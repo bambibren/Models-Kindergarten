@@ -177,7 +177,7 @@ sudo /usr/local/bin/mk-user <command>
             ├─ enable
             │  └─ 恢复登录 ──▶ 原业务数据继续可用
             │
-            └─ delete --username <用户名>
+            └─ delete <用户名>
                │
                ▼
        ┌────────────────────────────────────────────────────────┐
@@ -340,7 +340,7 @@ POST /api/control/v1/auth/logout   Cookie → 撤销会话并清除 Cookie
 - [ ] `/health/live` 和 `/health/ready` 保持公开；其他 Control API 在正式模式下必须先解析登录 Cookie。
 - [ ] ACP 在 WebSocket 升级前验证 Cookie，失败时直接返回 HTTP 401，不创建 ACP 对象。
 - [ ] 每条 ACP 连接绑定服务端解析出的 `principalId`；创建、列出、加载、恢复、对话、关闭和修改 Session 配置都按该 ID 隔离。
-- [ ] 保留开发模式 `local-admin`；正式模式必须使用 HTTPS，并且至少存在一个未禁用账号才能启动。
+- [ ] 保留开发模式 `local-admin`；正式模式必须使用 HTTPS。空账号系统允许服务启动，但所有登录都会失败，首个账号必须通过服务器 SSH 创建。
 - [ ] 运行测试并提交。
 
 ```bash
