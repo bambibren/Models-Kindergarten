@@ -143,7 +143,12 @@ export interface ModelProvider {
   serializeContext(fragment: ModelContextFragment): ModelContextSerialization;
   /** 与 stream 使用同一转换函数生成、但不包含 Secret/Header 的完整请求快照。 */
   serializeInput?(input: ModelInput): ModelContextSerialization;
-  stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent>;
+  /** Adapter 每收到一个原始模型流事件就调用 onActivity，不以聚合后的 ModelEvent 代替。 */
+  stream(
+    input: ModelInput,
+    signal: AbortSignal,
+    onActivity?: () => void,
+  ): AsyncIterable<ModelEvent>;
 }
 
 /** 扣除 Adapter 自有消息与预留空间后，计算 `ModelInput.messages` 的最大数量。 */

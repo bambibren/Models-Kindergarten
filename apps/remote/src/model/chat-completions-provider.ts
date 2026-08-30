@@ -177,8 +177,12 @@ serializeInput(input: ModelInput): ModelContextSerialization {
   }
 
   /** 执行「stream」主流程，传播取消与失败并在结束时清理临时资源。 */
-async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
-    yield* this.streamRequest(input, signal, {});
+async *stream(
+    input: ModelInput,
+    signal: AbortSignal,
+    onActivity?: () => void,
+  ): AsyncIterable<ModelEvent> {
+    yield* this.streamRequest(input, signal, {}, onActivity);
   }
 
   /** 入园探针入口；复用生产序列化器和 SSE Parser，避免体检与运行协议漂移。 */
@@ -196,6 +200,7 @@ private async *streamRequest(
     input: ModelInput,
     signal: AbortSignal,
     options: ChatCompletionsProbeStreamOptions,
+    onActivity?: () => void,
   ): AsyncIterable<ModelEvent> {
     const token = await this.loadToken();
     let response: Response;
@@ -240,6 +245,7 @@ private async *streamRequest(
     let terminal = false;
 
     for await (const message of readSse(response.body)) {
+      onActivity?.();
       if (message.data === "[DONE]") {
         if (finishReason === undefined) {
           throw new ModelProviderError(

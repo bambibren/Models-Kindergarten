@@ -8,6 +8,14 @@
 
 本轮发现 13 组缺少明确需求依据的逻辑，其中 7 组会实际改变产品结果或误导用户，建议优先调整；另有 8 组校验属于明确需求或必要安全边界，应保留。
 
+## 2026-08-30 受管端点环境策略补充
+
+- `local-source`：Model Provider 与 Remote MCP 不做公网、私网或保留 IP 分类，允许 VPN Fake-IP、loopback 和局域网地址。
+- `docker-preview`、`cloud`：Model Provider 与 Remote MCP 继续只允许公网目标。
+- 所有环境继续验证 URL 语法、URL 凭据、协议、重定向、响应大小和超时。自定义公网模型仍要求 HTTPS；本机 Ollama 使用独立协议。
+- `web_fetch` 始终阻止本机和私网，因为目标由模型选择；本地开发身份可以访问 Control API，取消该边界会形成工具越权。
+- Skill 来源白名单、文件沙箱、服务监听地址和 Cloud 部署目标校验不属于本地出站 IP 兼容问题，继续保留。
+
 ## A. 建议优先调整：会改变结果或掩盖事实
 
 | 编号 | 位置 | 当前程序行为 | 问题 | 建议 |
@@ -38,7 +46,7 @@
 | Skill 来源与安装 | 只允许当前用户消息明确给出的 GitHub URL；从 URL 指向目录按层查找，只安装第一次出现 `SKILL.md` 的深度，找到后不继续深入。 | 用户明确决策。既不写死 `tree/skills`，也不会把 Skill 内部渐进资源误装成子 Skill。 |
 | `skill-installer.ts` / `skill-validator.ts` | 固定 Git commit、禁止路径越界和符号链接逃逸、不执行 Skill 自带脚本。 | 防止安装后内容漂移与宿主文件越权。 |
 | `session-binding-service.ts` | 浏览器 `mcpServers=[]`，MCP 只来自已安装并绑定的 Agent；`additionalDirectories` 首版为空。 | 当前受管能力模型的明确设计，防止客户端绕过绑定。 |
-| MCP URL 网络策略 | 生产 HTTPS、拒绝 URL 凭据、阻止公网入口访问本机/私网、逐跳检查重定向。 | SSRF 与 Secret 泄露边界。loopback 仅开发例外。 |
+| MCP URL 网络策略 | 拒绝 URL 凭据、限制协议并逐跳检查重定向；`docker-preview`/`cloud` 额外阻止私网地址。 | 重定向和凭据限制防止 Secret 泄露；私网 IP 分类只在线上型部署启用，源码本地开发允许用户配置任意网络。 |
 | MCP `auth=none` | 页面/API 暂不写入 Bearer Token。 | 用户明确要求 Bearer 小说 MCP 留白。 |
 | 文件与命令沙箱 | 相对路径、真实路径复核、拒绝跨 workspace、命令执行需隔离。 | 防止模型访问或修改产品范围外文件。 |
 | 实验 2～3 lanes | 对照实验只允许 A/B/C，fresh 至少存在两种不同策略，history A 复用原始快照。 | Demo 交互和既有方案均明确表达此产品形态。 |
