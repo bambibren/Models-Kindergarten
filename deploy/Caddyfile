@@ -4,6 +4,13 @@
 	https_port 8443
 }
 
+# 容器内部健康端点不参与公网 HTTP 到 HTTPS 跳转，只验证 Caddy 与 Remote 主链。
+http://127.0.0.1:8090 {
+	handle /health/live {
+		reverse_proxy mk-app:7331
+	}
+}
+
 {$MK_SITE_ADDRESS:http://:8080} {
 	encode zstd gzip
 
