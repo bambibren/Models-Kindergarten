@@ -28,12 +28,13 @@ export async function login(username: string, password: string): Promise<AuthSes
 }
 
 export async function logout(): Promise<void> {
-  await fetch("/api/control/v1/auth/logout", {
+  const response = await fetch("/api/control/v1/auth/logout", {
     method: "POST",
     credentials: "same-origin",
     headers: { "content-type": "application/json" },
     body: "{}",
   });
+  if (!response.ok) throw new Error(`退出登录失败（${response.status}）`);
 }
 
 export function safeNextPath(search: string): string {
