@@ -5,6 +5,7 @@ import {
   type ConcreteReasoningProfile,
   type ModelReasoningCapability,
 } from "./reasoning.js";
+import type { ModelStudentSummary } from "./control-api.js";
 
 /** 描述「ProviderProtocol」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ProviderProtocol =
@@ -151,6 +152,22 @@ export interface ProviderConnectionView {
   credentialHint?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** 已入园模型可安全返回浏览器的完整只读详情；不包含 Secret 引用或明文凭据。 */
+export interface ModelStudentDetailView extends ModelStudentSummary {
+  admission: {
+    schemaVersion: 1;
+    presetId: ReadyModelProviderPresetId;
+    protocol: Exclude<ProviderProtocol, "anthropic_messages">;
+    baseUrl: string;
+    credentialConfigured: boolean;
+    credentialHint?: string;
+    defaultReasoningProfile: ConcreteReasoningProfile;
+    snapshot: ProviderCapabilitySnapshot;
+    createdAt: string;
+    updatedAt: string;
+  };
 }
 
 /** 校验并规范化「parseModelStudentCandidateInput」输入，非法数据直接返回明确错误。 */

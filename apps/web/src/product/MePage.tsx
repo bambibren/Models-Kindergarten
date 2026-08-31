@@ -6,6 +6,7 @@ import { formatContextWindow, joinMetadata } from "../components/tokens/token-fo
 import { artifactListLabel } from "./artifact-list-label.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { ProductNav } from "./ProductNav.js";
+import { modelStudentDetailUrl } from "./ModelDetailPage.js";
 import { useAuthSession } from "./auth-session-context.js";
 import { useResource } from "./use-resource.js";
 
@@ -42,7 +43,7 @@ function ResourcePanel({ tab }: { tab: Tab }) {
 () => controlApi.removeAgent(item.agentId), retry) : undefined} />)}</Panel>}</ResourceLoader>;
   if (tab === "models") return <ResourceLoader load={loadModels}>{/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (data, retry) => <Panel title="我的 Models" action={<a href="/models/new"><Plus size={13} />新模型入园</a>}>{data.items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(item) => <ResourceRow icon={<Bot size={15} />} key={item.modelStudentId} title={item.displayName} detail={joinMetadata([formatContextWindow(item.contextWindowTokens), item.model, item.providerKind])} state={item.status === "ready" ? "可用" : "不可用"} onDelete={item.deletable === true ? /** 处理「onDelete」事件，校验归属后再推进状态且避免重复提交。 */
+(item) => <ResourceRow href={modelStudentDetailUrl(item.modelStudentId)} icon={<Bot size={15} />} key={item.modelStudentId} title={item.displayName} detail={joinMetadata([formatContextWindow(item.contextWindowTokens), item.model, item.providerKind])} state={item.status === "ready" ? "可用" : "不可用"} onDelete={item.deletable === true ? /** 处理「onDelete」事件，校验归属后再推进状态且避免重复提交。 */
 () => remove(`Model「${item.displayName}」`, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 () => controlApi.removeModel(item.modelStudentId), retry) : undefined} />)}</Panel>}</ResourceLoader>;
   if (tab === "mcps") return <ResourceLoader load={loadMcps}>{/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */

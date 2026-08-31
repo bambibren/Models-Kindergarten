@@ -12,6 +12,7 @@ import type {
   McpTestRecord,
   ModelStudentInstallInput,
   ModelStudentCandidateInput,
+  ModelStudentDetailView,
   ModelProviderPresetView,
   ModelStudentSummary,
   ModelStudentTestRecord,
@@ -134,6 +135,8 @@ export const controlApi = {
 () => get<CapabilityOptions>("/capability-options"),
   models: /** 执行「models」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 () => get<{ items: ModelStudentSummary[] }>("/model-students"),
+  model: /** 读取单个模型完整且不含明文凭据的入园详情。 */
+(id: string) => get<ModelStudentDetailView>(`/model-students/${encodeURIComponent(id)}`),
   modelProviderPresets: /** 执行「modelProviderPresets」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 () => get<{ items: ModelProviderPresetView[] }>("/model-provider-presets"),
   testModelStudent: /** 执行「testModelStudent」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

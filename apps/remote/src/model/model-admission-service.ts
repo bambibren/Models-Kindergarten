@@ -4,6 +4,7 @@ import {
   parseModelStudentCandidateInput,
   PRODUCT_CONFIG,
   type ModelProviderPresetView,
+  type ModelStudentDetailView,
   type ModelStudentSummary,
   type ModelStudentTestRecord,
   type ProviderCapabilitySnapshot,
@@ -449,20 +450,37 @@ async list(ownerId = "local-admin"): Promise<ModelStudentSummary[]> {
   }
 
   /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */
-async get(modelStudentId: string, ownerId = "local-admin"): Promise<ModelStudentSummary> {
+async get(modelStudentId: string, ownerId = "local-admin"): Promise<ModelStudentDetailView> {
     const summary = this.catalog.get(modelStudentId, ownerId);
     if (!summary) throw new ApiProblemError(404, "NOT_FOUND", "ModelStudent 不存在", false);
-    if (summary.deletable) {
-      const record = await this.repository.getStudent(modelStudentId);
-      if (!record || record.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "ModelStudent 不存在", false);
+    const record = await this.repository.getStudent(modelStudentId);
+    if (!record || record.ownerId !== ownerId) throw new ApiProblemError(404, "NOT_FOUND", "ModelStudent 不存在", false);
+    const connection = await this.repository.getConnection(record.connectionId);
+    if (!connection || connection.ownerId !== ownerId) {
+      throw new ApiProblemError(500, "INTERNAL_ERROR", "ModelStudent 缺少 ProviderConnection", true);
     }
-    return summary;
+    const view = this.repository.connectionView(connection);
+    return {
+      ...summary,
+      admission: {
+        schemaVersion: 1,
+        presetId: view.presetId,
+        protocol: view.protocol,
+        baseUrl: view.baseUrl,
+        credentialConfigured: view.credentialConfigured,
+        ...(view.credentialHint ? { credentialHint: view.credentialHint } : {}),
+        defaultReasoningProfile: record.generationDefaults.reasoningProfile,
+        snapshot: structuredClone(record.snapshot),
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt > view.updatedAt ? record.updatedAt : view.updatedAt,
+      },
+    };
   }
 
   /** 释放或删除「remove」对应资源，重复调用仍保持安全。 */
 async remove(modelStudentId: string, ownerId = "local-admin"): Promise<{ modelStudentId: string }> {
-    const summary = await this.get(modelStudentId, ownerId);
-    if (!summary.deletable) {
+    const detail = await this.get(modelStudentId, ownerId);
+    if (!detail.deletable) {
       throw new ApiProblemError(409, "CONFLICT", "系统内置 ModelStudent 不可删除", false);
     }
     const stored = await this.repository.getStudent(modelStudentId);

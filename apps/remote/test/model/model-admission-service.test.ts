@@ -26,6 +26,39 @@ async () => Promise.all(dirs.splice(0).map(/** 执行当前测试回调并只断
 
 describe("ModelAdmissionService", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {
+  it("按账号返回完整只读入园详情且不暴露凭据引用或明文", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const setup = await environment();
+    const raw = candidate();
+    const tested = await setup.service.test(raw);
+    const installed = await setup.service.install({
+      testId: tested.testId,
+      contextWindowTokens: 1_050_000,
+    });
+
+    const detail = await setup.service.get(installed.modelStudentId);
+    expect(detail).toMatchObject({
+      schemaVersion: 1,
+      modelStudentId: installed.modelStudentId,
+      displayName: "大聪明",
+      model: "gpt-5.5",
+      contextWindowTokens: 1_050_000,
+      admission: {
+        presetId: "custom_responses",
+        protocol: "openai_responses",
+        baseUrl: "https://api.example.test/v1",
+        credentialConfigured: true,
+        credentialHint: "••••cret",
+        defaultReasoningProfile: "balanced",
+        snapshot: { protocol: "openai_responses" },
+      },
+    });
+    expect(JSON.stringify(detail)).not.toContain(raw.apiKey);
+    expect(JSON.stringify(detail)).not.toContain("credentialRef");
+    await expect(setup.service.get(installed.modelStudentId, "other-owner"))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("OpenAI 固定预设由 Remote 解析官方地址，并以 preset/protocol 持久化", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const setup = await environment();
