@@ -90,7 +90,7 @@ prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
       }, permission, []);
     }
     const artifactType = artifactTypeArg(call.arguments);
-    const artifactId = optionalStringArg(call.arguments, "artifact_id");
+    const artifactId = optionalArtifactIdArg(call.arguments);
     if (name === "publish_artifact_version" && !artifactId) throw new Error("artifact_id 必须是非空字符串");
     const displayName = optionalStringArg(call.arguments, "display_name");
     const source = artifactType === "file"
@@ -162,7 +162,7 @@ async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<To
       return this.publicationResult(call, artifact, "rolled_back");
     }
     const artifactType = artifactTypeArg(call.arguments);
-    const artifactId = optionalStringArg(call.arguments, "artifact_id");
+    const artifactId = optionalArtifactIdArg(call.arguments);
     const common = {
           ownerId: this.scope.ownerId,
           sessionId: this.scope.sessionId,
@@ -310,6 +310,13 @@ function optionalStringArg(input: Record<string, unknown>, name: string): string
   const value = input[name];
   if (value === undefined) return undefined;
   return stringArg(input, name);
+}
+
+/** 首次发布允许模型显式传空 ID，并把它归一为未提供；其他类型错误仍直接暴露。 */
+function optionalArtifactIdArg(input: Record<string, unknown>): string | undefined {
+  const value = input.artifact_id;
+  if (typeof value === "string" && value.trim().length === 0) return undefined;
+  return optionalStringArg(input, "artifact_id");
 }
 
 /** 执行「artifactTypeArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

@@ -391,23 +391,22 @@ private async run(jobId: string, mode: "ensure" | "update", agentId?: string): P
       return this.sourcePolicy.sameSource(candidate.source, source);
     });
     if (existing && mode === "ensure") {
-      return { ...item, state: "ready", skillInstallationId: existing.skillInstallationId, disposition: "reused" };
+      return this.reuseInstallation(item, ownerId, existing);
+    }
+    const sourceName = resourceSkillName(source);
+    const sameName = mode === "ensure" && sourceName
+      ? allInstallations.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.state === "ready" && candidate.skillName === sourceName && candidate.ownerId === ownerId) ??
+        allInstallations.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.state === "ready" && candidate.skillName === sourceName)
+      : undefined;
+    if (sameName) {
+      return this.reuseInstallation(item, ownerId, sameName);
     }
     const shared = allInstallations.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (candidate) => candidate.ownerId !== ownerId && candidate.state === "ready" && this.sourcePolicy.sameSource(candidate.source, source));
     if (!existing && shared) {
-      const id = randomUUID();
-      const now = new Date().toISOString();
-      await this.repository.putInstallation({
-        ...shared,
-        skillInstallationId: id,
-        ownerId,
-        installedPathRef: `skill-root:${id}`,
-        createdAt: now,
-        updatedAt: now,
-      });
-      this.readyIds.add(id);
-      return { ...item, source: shared.source, state: "ready", skillInstallationId: id, disposition: "reused" };
+      return this.reuseInstallation(item, ownerId, shared);
     }
     if (existing && mode === "update" && allInstallations.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (candidate) => candidate.ownerId !== ownerId && candidate.state === "ready" && candidate.skillName === existing.skillName)) {
@@ -445,7 +444,15 @@ private async run(jobId: string, mode: "ensure" | "update", agentId?: string): P
         }, { replaceExisting: Boolean(existing && mode === "update") });
       }
     } catch (error) {
-      if (/Skill 已安装/.test(publicMessage(error))) {
+      const installedName = alreadyInstalledSkillName(error);
+      if (installedName && mode === "ensure") {
+        const reusable = allInstallations.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.state === "ready" && candidate.skillName === installedName && candidate.ownerId === ownerId) ??
+          allInstallations.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(candidate) => candidate.state === "ready" && candidate.skillName === installedName);
+        if (reusable) return this.reuseInstallation(item, ownerId, reusable);
+      }
+      if (installedName) {
         throw new ApiProblemError(409, "SKILL_SOURCE_NAME_CONFLICT", "同名 Skill 已由另一个来源安装", false);
       }
       if (isGitHubFetchFailure(error)) {
@@ -482,6 +489,36 @@ private async run(jobId: string, mode: "ensure" | "update", agentId?: string): P
     this.readyIds.add(id);
     return { ...item, source: persistedSource, state: "ready", skillInstallationId: id, disposition: existing ? "updated" : "installed" };
   }
+
+  /** 复用同名或同源的 ready Skill；跨账号时只创建独立归属记录，不复制物理内容。 */
+  private async reuseInstallation(
+    item: SkillInstallJobItem,
+    ownerId: string,
+    installation: SkillInstallation,
+  ): Promise<SkillInstallJobItem> {
+    if (installation.ownerId === ownerId) {
+      this.readyIds.add(installation.skillInstallationId);
+      return {
+        ...item,
+        source: installation.source,
+        state: "ready",
+        skillInstallationId: installation.skillInstallationId,
+        disposition: "reused",
+      };
+    }
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await this.repository.putInstallation({
+      ...installation,
+      skillInstallationId: id,
+      ownerId,
+      installedPathRef: `skill-root:${id}`,
+      createdAt: now,
+      updatedAt: now,
+    });
+    this.readyIds.add(id);
+    return { ...item, source: installation.source, state: "ready", skillInstallationId: id, disposition: "reused" };
+  }
 }
 
 /** 描述「SkillInstallerPort」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -491,6 +528,18 @@ export interface SkillInstallerPort {
     options?: { replaceExisting?: boolean },
   ): Promise<SkillInstallRecord>;
   uninstall(name: string): Promise<void>;
+}
+
+/** 受管资源 URL 的路径就是公开 Skill 名称，可在下载前用于同名复用。 */
+function resourceSkillName(source: Exclude<SkillSource, { kind: "approved_local" }>): string | undefined {
+  if (source.kind !== "resource_bundle") return undefined;
+  const match = new URL(source.url).pathname.match(/^\/skills\/([a-z0-9-]+)\/?$/);
+  return match?.[1];
+}
+
+/** 安装器完成来源校验后会在冲突消息中返回真实 manifest name。 */
+function alreadyInstalledSkillName(error: unknown): string | undefined {
+  return publicMessage(error).match(/^Skill 已安装:\s*(.+)$/)?.[1]?.trim() || undefined;
 }
 
 /** 校验并规范化「parseEnsureInput」输入，非法数据直接返回明确错误。 */

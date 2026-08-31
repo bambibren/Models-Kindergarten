@@ -45,4 +45,3 @@ D2P-1 在不改变 ACP 主链的前提下新增以下产品事实：
 - [Demo 到真实产品实施 TRD](../DEMO_TO_PRODUCTION_TRD.md)
 - [Demo 需求与差距](../DEMO_TO_PRODUCTION_REQUIREMENTS_AND_GAPS.md)
 - [领域与接口合同](../DEMO_TO_PRODUCTION_CONTRACTS.md)
-- [实施计划](../superpowers/plans/2026-08-11-demo-to-production-implementation.md)
