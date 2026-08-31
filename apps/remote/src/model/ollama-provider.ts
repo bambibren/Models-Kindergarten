@@ -116,11 +116,7 @@ serializeInput(input: ModelInput): ModelContextSerialization {
   }
 
   /** 执行「stream」主流程，传播取消与失败并在结束时清理临时资源。 */
-async *stream(
-    input: ModelInput,
-    signal: AbortSignal,
-    onActivity?: () => void,
-  ): AsyncIterable<ModelEvent> {
+async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
     let response: Response;
     try {
       response = await this.fetchWithResilience(
@@ -150,7 +146,6 @@ async *stream(
     }
 
     for await (const line of readLines(response.body)) {
-      onActivity?.();
       const chunk = parseChunk(line);
       if (chunk.error) {
         throw new ModelProviderError("model_request_failed", `Ollama: ${chunk.error}`, false);

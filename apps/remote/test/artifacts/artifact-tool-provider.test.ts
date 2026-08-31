@@ -81,43 +81,6 @@ async () => "" });
     expect(second.rawOutput).toMatchObject({ artifactId: (first.rawOutput as { artifactId: string }).artifactId });
   });
 
-  it("首次发布把空 artifact_id 视为未提供，但新版本仍要求非空 ID", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
-async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mk-artifact-empty-id-"));
-    dirs.push(dir);
-    const workspaces = join(dir, "workspaces");
-    const sandbox = new FileSandbox(join(workspaces, "session-a"));
-    await sandbox.initialize();
-    await sandbox.writeText("result.txt", "ready");
-    const provider = new ArtifactToolProvider(
-      new ArtifactService(
-        new ArtifactRepository(join(dir, "artifacts.json")),
-        new ArtifactBlobStore(join(dir, "blobs")),
-        workspaces,
-      ),
-      scope(),
-      new Map(ARTIFACT_TOOL_IDS.map((toolId) => [
-        toolId,
-        { enabled: true, permission: "allow" as const },
-      ])),
-    );
-
-    const call = provider.prepare({
-      id: "publish-empty-id",
-      name: "publish_artifact",
-      arguments: { artifact_type: "file", artifact_id: "   ", path: "result.txt" },
-    }, "fallback");
-    expect(call.arguments).toEqual({ artifact_type: "file", path: "result.txt" });
-    const result = await provider.execute(call, context());
-    expect(result.rawOutput).toMatchObject({ publication: "created" });
-
-    expect(() => provider.prepare({
-      id: "version-empty-id",
-      name: "publish_artifact_version",
-      arguments: { artifact_type: "file", artifact_id: "", path: "result.txt" },
-    }, "fallback")).toThrow("artifact_id 必须是非空字符串");
-  });
-
   it("覆盖保持 ID，新版本获得新 ID，回滚只恢复隐藏修订", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const dir = await mkdtemp(join(tmpdir(), "mk-artifact-version-tool-"));

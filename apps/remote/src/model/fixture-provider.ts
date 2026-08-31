@@ -54,16 +54,10 @@ serializeInput(input: ModelInput): ModelContextSerialization {
   }
 
   /** 执行「stream」主流程，传播取消与失败并在结束时清理临时资源。 */
-async *stream(
-    input: ModelInput,
-    signal: AbortSignal,
-    onActivity?: () => void,
-  ): AsyncIterable<ModelEvent> {
+async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
     if (input.systemPrompt?.includes("人工评测题目整理器")) {
       const payload = fixtureWorksheet(input.messages.at(-1)?.content ?? "");
-      onActivity?.();
       yield { type: "text_delta", text: JSON.stringify(payload) };
-      onActivity?.();
       yield { type: "finish", reason: "stop" };
       return;
     }
@@ -77,10 +71,8 @@ async *stream(
 
     for (const part of reply) {
       await wait(5, signal);
-      onActivity?.();
       yield { type: "text_delta", text: `${part}\n` };
     }
-    onActivity?.();
     yield { type: "finish", reason: "stop" };
   }
 }

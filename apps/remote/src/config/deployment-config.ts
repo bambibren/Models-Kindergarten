@@ -2,12 +2,10 @@ import { resolve } from "node:path";
 
 export type DeploymentProfile = "local-source" | "docker-preview" | "cloud";
 export type AuthMode = "development" | "required";
-export type ManagedEndpointPolicy = "any-network" | "public-only";
 
 /** Remote 启动时一次性读取并校验的部署配置；业务模块不再各自解释环境变量。 */
 export interface DeploymentConfig {
   profile: DeploymentProfile;
-  managedEndpointPolicy: ManagedEndpointPolicy;
   host: string;
   port: number;
   publicOrigin?: string;
@@ -47,7 +45,6 @@ export function readDeploymentConfig(
   );
   return {
     profile,
-    managedEndpointPolicy: profile === "local-source" ? "any-network" : "public-only",
     host,
     port: positiveInteger(env.PORT, 7331, "PORT"),
     ...(publicOrigin ? { publicOrigin } : {}),

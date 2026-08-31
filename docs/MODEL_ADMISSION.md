@@ -323,8 +323,6 @@ AnthropicMessagesAdapter（未来）
 - input/output/cached/reasoning usage 映射。
 - response completed/failed/cancelled 终止语义。
 
-Runtime 的模型流空闲计时只由 Adapter 收到的原始流事件重置，不依赖聚合后的 `ModelEvent`。
-
 Responses Adapter 已进入真实 Provider resolver。入园体检会对目标 endpoint 依次验证正式流式终态、`low/medium/high/xhigh`、无副作用 Tool Call 及 `function_call_output` 续轮，并将实测的 `nativeByProfile` 持久化到 ModelStudent；同一 Model ID 在不同 Preset/Base URL 上会独立体检，不共享名称 preset。`store:false` 下的 Provider continuation 使用协议中性信封持久化，只有生成它的确切 ModelStudent/Adapter 可以解释；公开 Session、ACP、Context disclosure、Observation 和 Evaluation 只获得剥离或脱敏投影。上线边界见 [Model Reasoning Policy](REASONING_POLICY.md#10-自定义-responses-入园与-tool-loop-门禁)。
 
 Provider 上游使用 SSE 不改变产品边界：Browser 与 Remote 之间仍然只使用 ACP；Browser 不直接连接硅基流动、自定义 Base URL 或任何 Provider SSE。

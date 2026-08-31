@@ -22,22 +22,16 @@ import type {
 import type { SecretStore } from "./secret-store.js";
 import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 
-/** 部署级 MCP 网络策略；单个 Server 的历史显式例外仍可在其上叠加。 */
-export interface SdkMcpConnectorOptions {
-  allowPrivateNetwork?: boolean;
-}
-
 /** 描述「SdkMcpConnector」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class SdkMcpConnector implements McpConnector {
   /** 初始化「SdkMcpConnector」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-  constructor(
+constructor(
     private readonly secrets: SecretStore,
     private readonly sandboxRoot: string,
-    private readonly options: SdkMcpConnectorOptions = {},
   ) {}
 
   /** 执行「connect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-  async connect(
+async connect(
     server: McpServerConfig,
     auth: AuthProvider | undefined,
     headers: Record<string, string>,
@@ -74,9 +68,7 @@ async (request) => {
       : new StreamableHTTPClientTransport(new URL(server.transport.url), {
           ...(auth ? { authProvider: auth } : {}),
           requestInit: { headers },
-          fetch: createMcpFetch(
-            this.options.allowPrivateNetwork === true || server.transport.allowPrivateNetwork === true,
-          ),
+          fetch: createMcpFetch(server.transport.allowPrivateNetwork === true),
           onInsufficientScope: "throw",
           maxStepUpRetries: 0,
         });
