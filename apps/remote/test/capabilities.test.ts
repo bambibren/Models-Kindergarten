@@ -196,6 +196,9 @@ async () => {
     await expect(new McpConfigStore(file).load()).rejects.toThrow("不存在的 Server");
     await expect(assertMcpUrl(new URL("https://192.168.1.5/mcp"), false)).rejects.toThrow("私有网络");
     await expect(assertMcpUrl(new URL("http://example.com/mcp"), false)).rejects.toThrow("只允许 HTTPS");
+    await expect(assertMcpUrl(new URL("https://192.168.1.5/mcp"), true)).resolves.toBeUndefined();
+    await expect(assertMcpUrl(new URL("http://192.168.1.5/mcp"), true)).rejects.toThrow("只允许 HTTPS");
+    await expect(assertMcpUrl(new URL("https://user:pass@192.168.1.5/mcp"), true)).rejects.toThrow("认证信息");
   });
 });
 

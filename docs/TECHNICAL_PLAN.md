@@ -1,7 +1,7 @@
 # Models Kindergarten 技术方案与演进路线
 
 > 当前实现基线：V1.6 Conventional Single-Agent Runtime + MCP/Agent Skills
-> 当前目标：D2P-1 Demo 产品化；在不改变 ACP Chat 主链的前提下，落地 Agent/Session/Skill/MCP/File/Experiment/人工评分闭环。权威计划见 [Demo 产品化实施计划](superpowers/plans/2026-08-11-demo-to-production-implementation.md)。
+> 当前目标：D2P-1 Demo 产品化；在不改变 ACP Chat 主链的前提下，落地 Agent/Session/Skill/MCP/File/Experiment/人工评分闭环。
 
 ## 1. D2P-1 产品边界
 

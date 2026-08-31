@@ -476,7 +476,7 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
       const streamSignal = AbortSignal.any([signal, idleController.signal]);
       let idleTimer: ReturnType<typeof setTimeout> | undefined;
       let idleExpired = false;
-      const armIdleTimer = /** 每收到一个 Provider 事件就重置看门狗，只把连续静默判为流失活。 */
+      const onActivity = /** 只由模型原始流活动重置看门狗，把连续静默判为流失活。 */
 () => {
         if (idleTimer) clearTimeout(idleTimer);
         idleTimer = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
@@ -487,10 +487,8 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
         idleTimer.unref?.();
       };
       try {
-        armIdleTimer();
-        for await (const event of model.stream(modelInput, streamSignal)) {
-          // 每个 Provider 事件都证明流仍存活；只有连续静默才触发空闲超时。
-          armIdleTimer();
+        onActivity();
+        for await (const event of model.stream(modelInput, streamSignal, onActivity)) {
           if (
             !firstTokenSeen &&
             (event.type === "text_delta" ||

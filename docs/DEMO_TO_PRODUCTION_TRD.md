@@ -12,8 +12,7 @@
 1. [完整需求与差距矩阵](./DEMO_TO_PRODUCTION_REQUIREMENTS_AND_GAPS.md)：逐页交互、状态、验收标准、Demo 与真实实现差距。
 2. [全仓库校验与兜底逻辑审计](./VALIDATION_AND_FALLBACK_AUDIT.md)：区分明确需求、必要安全边界与实现自行添加的限制或静默修正。
 3. [领域模型、数据与接口合同](./DEMO_TO_PRODUCTION_CONTRACTS.md)：前后端数据结构、ACP 扩展、Control API、状态机与错误码。
-4. [分阶段实施计划](./superpowers/plans/2026-08-11-demo-to-production-implementation.md)：按文件、测试和依赖顺序拆分的开发任务。
-5. [实现状态与验证记录](./DEMO_TO_PRODUCTION_IMPLEMENTATION_STATUS.md)：实际落地范围、关键程序路径、自动化结果和真实浏览器验证证据。
+4. [实现状态与验证记录](./DEMO_TO_PRODUCTION_IMPLEMENTATION_STATUS.md)：实际落地范围、关键程序路径、自动化结果和真实浏览器验证证据。
 
 本方案吸收并统一以下既有设计：
 
@@ -25,11 +24,6 @@
 - `docs/ACP_COMPAT.md`
 - `docs/TURN_EVALUATION.md`
 - `docs/ERROR_HANDLING.md`
-- `docs/superpowers/plans/2026-08-11-skill-installation-and-website-development.md`
-- `docs/superpowers/plans/2026-08-11-remote-mcp-demo-flow.md`
-- `docs/superpowers/plans/2026-08-10-agent-strategy-ui-delta.md`
-- `docs/superpowers/plans/2026-08-10-provider-context-source-disclosure.md`
-- `docs/superpowers/plans/2026-08-10-token-usage-projection.md`
 - 外部参考 TRD：`model-kindergarten-ai-design-trd.md` 及其 appendix。
 
 若上述文档与本方案冲突，以本方案为本轮 Demo 产品化的统一裁决；协议底线仍以 `AGENTS.md` 为最高约束。实施前必须先更新 `AGENTS.md` 的版本边界，使 Agent 管理、上下文实验和产品级 Control API 成为明确的新版本范围，不能让代码与仓库约束长期相互矛盾。
@@ -567,7 +561,7 @@ Evaluation 是同一 Web 应用中的页面模块，不是第三方网站或独�
 - Web 不保存 Runtime state；
 - observation/evaluation 失败不使 Turn 失败。
 
-具体测试文件和命令见[实施计划](./superpowers/plans/2026-08-11-demo-to-production-implementation.md)。
+具体测试文件和命令以各模块测试目录与仓库脚本为准。
 
 ---
 
@@ -643,8 +637,6 @@ Flag 必须是服务端和前端共同可见的 capability，不允许只在前�
 | M4 Session/Artifact | 真实 Session Shell、文件引用和预览 | 首页→Session→文件 E2E 通过 |
 | M5 Context Experiment | Snapshot、Lab、2～3 lane ACP 运行、三维人工注释、Runtime 执行分与四维图表 | fresh/history、量表保存、执行分、四维总分/雷达/排名/winner E2E 通过 |
 | M6 迁移收口 | feature flag 切换、观测、文档和清理 | 全量 E2E、安全测试、回滚演练通过 |
-
-详细任务依赖和文件级步骤见[实施计划](./superpowers/plans/2026-08-11-demo-to-production-implementation.md)。
 
 ---
 

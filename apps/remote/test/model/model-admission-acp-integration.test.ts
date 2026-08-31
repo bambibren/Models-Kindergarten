@@ -52,8 +52,8 @@ async () => {
       join(dir, "model-tests.json"),
       join(dir, "model-catalog.json"),
     );
-    const policy = new RemoteModelUrlPolicy(/** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async () => [{ address: "8.8.8.8", family: 4 }]);
+    const policy = new RemoteModelUrlPolicy({ lookup: /** 构造「policy」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+async () => [{ address: "8.8.8.8", family: 4 }] });
     const responses = new ResponsesAdmissionAdapter(
       { probe: /** 构造「probe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => maxSnapshot() },

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { ModelProviderError } from "./model-error.js";
 import type {
   ConcreteReasoningProfile,
@@ -76,6 +77,17 @@ interface FunctionCallState {
 interface SseEvent {
   event?: string;
   data: string;
+}
+
+type ResponsesStreamDisposition = "yielded" | "buffered" | "ignored" | "terminal";
+
+interface ResponsesStreamDiagnostics {
+  record(
+    message: SseEvent,
+    type: string,
+    event: Record<string, unknown> | undefined,
+    disposition: ResponsesStreamDisposition,
+  ): void;
 }
 
 const MAX_SSE_LINE_BYTES = 1024 * 1024;
@@ -163,8 +175,12 @@ serializeInput(input: ModelInput): ModelContextSerialization {
   }
 
   /** 执行「stream」主流程，传播取消与失败并在结束时清理临时资源。 */
-async *stream(input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
-    yield* this.streamRequest(input, signal, {});
+async *stream(
+    input: ModelInput,
+    signal: AbortSignal,
+    onActivity?: () => void,
+  ): AsyncIterable<ModelEvent> {
+    yield* this.streamRequest(input, signal, {}, onActivity);
   }
 
   /** 入园体检专用；复用正式 SSE/终态解析，但允许限制输出并强制无副作用探针 Tool。 */
@@ -181,6 +197,7 @@ private async *streamRequest(
     input: ModelInput,
     signal: AbortSignal,
     options: ResponsesProbeStreamOptions,
+    onActivity?: () => void,
   ): AsyncIterable<ModelEvent> {
     const token = await this.loadToken();
     let response: Response;
@@ -221,9 +238,12 @@ private async *streamRequest(
     const calls = new Map<number, FunctionCallState>();
     const itemIndexes = new Map<string, number>();
     let terminal = false;
+    const diagnostics = createResponsesStreamDiagnostics();
 
     for await (const message of readSse(response.body)) {
+      onActivity?.();
       if (message.data === "[DONE]") {
+        diagnostics?.record(message, "[DONE]", undefined, "terminal");
         // [DONE] 只是传输层尾帧；只有 response.completed/incomplete/cancelled
         // 才能证明 response.output 已完整到达并可安全续接。
         continue;
@@ -232,6 +252,7 @@ private async *streamRequest(
       const event = parseSseJson(message);
       const type = stringValue(event.type) ?? message.event;
       if (!type) continue;
+      diagnostics?.record(message, type, event, responsesStreamDisposition(type));
 
       if (type === "response.output_text.delta") {
         const delta = stringValue(event.delta);
@@ -392,6 +413,57 @@ private async fetchResponse(
       url = new URL(location, url);
     }
   }
+}
+
+/**
+ * 只在显式诊断开关下记录原始 SSE 的时间和大小事实。
+ * 严禁写入 data、delta、请求体、端点或凭据，避免诊断日志成为第二份 Session/Secret。
+ */
+function createResponsesStreamDiagnostics(): ResponsesStreamDiagnostics | undefined {
+  if (process.env.MK_RESPONSES_STREAM_DIAGNOSTICS !== "1") return undefined;
+  const requestId = randomUUID();
+  const startedAt = Date.now();
+  let previousEventAt = startedAt;
+  return {
+    record(message, type, event, disposition) {
+      const now = Date.now();
+      const delta = event ? stringValue(event.delta) : undefined;
+      console.warn("[responses-stream]", JSON.stringify({
+        requestId,
+        at: new Date(now).toISOString(),
+        elapsedMs: now - startedAt,
+        gapMs: now - previousEventAt,
+        type,
+        dataBytes: Buffer.byteLength(message.data),
+        deltaBytes: delta ? Buffer.byteLength(delta) : 0,
+        disposition,
+      }));
+      previousEventAt = now;
+    },
+  };
+}
+
+/** 归类 Adapter 对原始 Responses 事件的处理方式，只暴露固定枚举而不复制事件内容。 */
+function responsesStreamDisposition(type: string): ResponsesStreamDisposition {
+  if (
+    type === "response.output_text.delta"
+    || type === "response.reasoning_summary_text.delta"
+    || type === "response.reasoning_text.delta"
+    || type === "response.function_call_arguments.done"
+    || type === "response.output_item.done"
+  ) return "yielded";
+  if (
+    type === "response.output_item.added"
+    || type === "response.function_call_arguments.delta"
+  ) return "buffered";
+  if (
+    type === "response.completed"
+    || type === "response.incomplete"
+    || type === "response.cancelled"
+    || type === "response.failed"
+    || type === "error"
+  ) return "terminal";
+  return "ignored";
 }
 
 /** 根据已校验输入构建「toResponsesRequest」结果，不额外持有调用方的大对象。 */

@@ -449,6 +449,34 @@ async () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("模型流空闲计时只由 onActivity 重置，不依赖 ModelEvent", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const budget = { ...PRODUCT_CONFIG.runtime, modelStreamIdleTimeoutMs: 40 };
+    const makeRunner = /** 构造「makeRunner」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+(provider: ModelProvider, sandbox: FileSandbox) => new AgentRunner(
+      provider,
+      new ToolRuntime(new ToolRegistry(sandbox)),
+      new ContextAssembler(),
+      noopRuntimeObservationSink,
+      undefined,
+      budget,
+    );
+
+    const activeRunner = makeRunner(new ActivityOnlyProvider(), await makeSandbox());
+    await expect(activeRunner.run(
+      { text: "持续收到原始流", sessionEntries: [] },
+      new TestObserver(true),
+      new AbortController().signal,
+    )).resolves.toMatchObject({ reason: "stop" });
+
+    const eventOnlyRunner = makeRunner(new EventWithoutActivityProvider(), await makeSandbox());
+    await expect(eventOnlyRunner.run(
+      { text: "只有聚合事件", sessionEntries: [] },
+      new TestObserver(true),
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: "MODEL_STREAM_IDLE_TIMEOUT" });
+  });
+
   it("模型收到重复无效参数时继续按正常轮次处理，不再按模型大小提前终止", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const sandbox = await makeSandbox();
@@ -578,6 +606,52 @@ async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
   }
 }
 
+class ActivityOnlyProvider implements ModelProvider {
+  readonly student: ModelStudent = {
+    id: "activity-only",
+    name: "Activity Only",
+    sizeClass: "large",
+    provider: { kind: "openai-compatible", model: "fixture", baseUrl: "http://127.0.0.1" },
+    generationDefaults: {},
+  };
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+  async *stream(
+    _input: ModelInput,
+    signal: AbortSignal,
+    onActivity?: () => void,
+  ): AsyncIterable<ModelEvent> {
+    for (let index = 0; index < 5; index += 1) {
+      await waitFor(15, signal);
+      onActivity?.();
+    }
+    yield { type: "text_delta", text: "完成" };
+    yield { type: "finish", reason: "stop" };
+  }
+}
+
+class EventWithoutActivityProvider implements ModelProvider {
+  readonly student: ModelStudent = {
+    id: "event-without-activity",
+    name: "Event Without Activity",
+    sizeClass: "large",
+    provider: { kind: "openai-compatible", model: "fixture", baseUrl: "http://127.0.0.1" },
+    generationDefaults: {},
+  };
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+  async *stream(
+    _input: ModelInput,
+    signal: AbortSignal,
+  ): AsyncIterable<ModelEvent> {
+    yield { type: "text_delta", text: "这个 ModelEvent 不应重置计时器" };
+    await waitFor(80, signal);
+    yield { type: "finish", reason: "stop" };
+  }
+}
+
 class ScriptedResponseProvider implements ModelProvider {
   readonly student: ModelStudent = {
     id: "scripted-response",
@@ -680,6 +754,24 @@ function serializeTestContext(
     format: "json",
     value: JSON.stringify(value, null, 2),
   };
+}
+
+function waitFor(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>(/** 构造「Promise」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+  (resolve, reject) => {
+    const finish = /** 构造「finish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const abort = /** 构造「abort」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 class TestObserver implements RunObserver {
