@@ -8,11 +8,20 @@ describe("production home page capabilities", /** 组织这一组相关测试，
 () => {
     const html = renderToStaticMarkup(<HomeCapabilities onSelectPptx={/** 构造「onSelectPptx」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => undefined} onSelectWebsite={/** 构造「onSelectWebsite」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-() => undefined} />);
+() => undefined} experimentsEnabled={false} />);
     expect(html.indexOf("网站开发")).toBeLessThan(html.indexOf("PPT 制作"));
     expect(html.indexOf("PPT 制作")).toBeLessThan(html.indexOf("模型上下文实验"));
     expect(html).toContain("模型上下文实验（功能调研中）");
     expect(html).not.toContain("href=\"/context-lab\"");
+  });
+
+  it("opens the context lab entry when explicitly enabled", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+() => {
+    const html = renderToStaticMarkup(<HomeCapabilities onSelectPptx={/** 构造「onSelectPptx」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => undefined} onSelectWebsite={/** 构造「onSelectWebsite」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+() => undefined} experimentsEnabled />);
+    expect(html).toContain("href=\"/context-lab\"");
+    expect(html).toContain("比较 2–3 种真实配置");
   });
 
   it("uses the requested website task prompt verbatim", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */

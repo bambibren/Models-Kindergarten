@@ -2,10 +2,8 @@
 export type AgentId = "base" | "context" | "skill";
 /** 描述「AgentTone」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type AgentTone = "slate" | "blue" | "green";
-/** 描述「ViewMode」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
-export type ViewMode = "answer" | "annotation";
 /** 描述「AnnotationTabId」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
-export type AnnotationTabId = "understanding" | "planning" | "output" | "execution" | "summary";
+export type AnnotationTabId = "answer" | "understanding" | "planning" | "output" | "execution" | "summary";
 /** 描述「ScoreTabId」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ScoreTabId = "understanding" | "planning" | "output";
 /** 描述「MarkColor」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -20,7 +18,27 @@ export type DemoAgentStreamItem =
   | { id: string; type: "context"; title: string; detail: string; tokens: number; raw: string }
   | { id: string; type: "thought"; title: string; text: string; tokens: number }
   | { id: string; type: "tool"; name: string; status: "completed" | "failed"; input: string; output: string; tokens: number }
-  | { id: string; type: "answer"; text: string; tokens: number };
+  | { id: string; type: "answer"; text: string; tokens: number; artifactIds?: string[] };
+
+/** 描述 Demo 原始回答中可跳转查看的产物。 */
+export interface DemoEvaluationArtifact {
+  id: string;
+  name: string;
+  kind: "markdown" | "html";
+  summary: string;
+  content: string;
+}
+
+/** 描述 Runtime 执行轨迹中的一条稳定事件。 */
+export interface DemoExecutionTraceItem {
+  id: string;
+  round: number;
+  type: "model" | "tool" | "result";
+  title: string;
+  detail: string;
+  duration: string;
+  status: "completed" | "failed";
+}
 
 /** 描述「DemoRequirement」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface DemoRequirement {
@@ -59,6 +77,7 @@ export interface DemoExecution {
   modelRounds: number;
   toolCalls: number;
   outputTokens: number;
+  trace: DemoExecutionTraceItem[];
 }
 
 /** 描述「DemoAgent」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -86,7 +105,6 @@ export interface DemoSavedComparison {
 
 /** 描述「DemoTask」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface DemoTask {
-  title: string;
   prompt: string;
   requirements: DemoRequirement[];
 }

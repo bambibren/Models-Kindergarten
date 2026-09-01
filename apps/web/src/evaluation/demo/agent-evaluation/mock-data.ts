@@ -1,7 +1,6 @@
-import type { DemoAgent, DemoSavedComparison, DemoTask } from "./types.js";
+import type { DemoAgent, DemoEvaluationArtifact, DemoSavedComparison, DemoTask } from "./types.js";
 
 export const demoTask: DemoTask = {
-  title: "React 首屏性能诊断",
   prompt: "请分析当前 React 项目首屏加载缓慢的问题，在不更换技术栈的前提下给出可执行的优化方案，并说明实施顺序与验证方式。",
   requirements: [
     { id: "diagnose", label: "先定位首屏性能瓶颈，而不是直接给通用建议", sources: ["上下文", "Agent A", "Agent B", "Agent C"] },
@@ -12,6 +11,30 @@ export const demoTask: DemoTask = {
     { id: "independent-rollback", label: "异常改动必须能够独立回退", sources: ["Agent B", "Agent C"] },
   ],
 };
+
+export const demoArtifacts: DemoEvaluationArtifact[] = [
+  {
+    id: "artifact-performance-observations",
+    name: "performance-observations.md",
+    kind: "markdown",
+    summary: "首屏观察记录 · Markdown",
+    content: "# 首屏性能观察\n\n## 当前判断\n\n- 先确认长任务、资源加载和组件渲染耗时。\n- 对首屏体积较大的依赖进行拆分验证。\n- 每次改动后复测首屏时间和功能回归。",
+  },
+  {
+    id: "artifact-performance-baseline",
+    name: "performance-baseline.md",
+    kind: "markdown",
+    summary: "基线与复测清单 · Markdown",
+    content: "# 性能基线与复测清单\n\n## 基线\n\n- LCP / INP\n- 首屏 JS 体积\n- 主线程长任务\n- Network 请求瀑布\n\n## 复测\n\n每项改动独立提交，并在相同设备、网络条件下重新采集指标。",
+  },
+  {
+    id: "artifact-performance-plan",
+    name: "performance-plan.html",
+    kind: "html",
+    summary: "分阶段优化路线 · HTML",
+    content: "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><style>html{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;color:#30312e;background:#f7f7f4}body{margin:0;padding:48px}main{max-width:760px;margin:auto}small{color:#858780;letter-spacing:.12em}h1{font-size:36px;letter-spacing:-.035em}.step{display:grid;grid-template-columns:34px 1fr;gap:12px;padding:18px 0;border-top:1px solid #deded8}.step b{font-size:12px}.step p{margin:4px 0 0;color:#666862;line-height:1.7}</style></head><body><main><small>PERFORMANCE PLAN</small><h1>首屏性能分阶段优化路线</h1><section class=\"step\"><b>01</b><div><strong>建立基线</strong><p>固定设备和网络条件，记录 LCP、长任务与首屏传输体积。</p></div></section><section class=\"step\"><b>02</b><div><strong>处理阻塞链路</strong><p>依次检查未使用依赖、同步路由与串行请求。</p></div></section><section class=\"step\"><b>03</b><div><strong>隔离验证</strong><p>每项改动独立提交；指标或功能恶化时直接回退。</p></div></section></main></body></html>",
+  },
+];
 
 export const demoAgents: DemoAgent[] = [
   {
@@ -25,7 +48,7 @@ export const demoAgents: DemoAgent[] = [
       { id: "a-context", type: "context", title: "历史原始上下文", detail: "系统提示 · 工具 · 最近 6 轮聊天", tokens: 892, raw: "{\n  \"snapshotId\": \"turn-demo-731\",\n  \"policy\": \"historical\",\n  \"messages\": 9\n}" },
       { id: "a-thought", type: "thought", title: "已思考", text: "需要先定位性能瓶颈，再按影响与风险安排优化顺序。", tokens: 135 },
       { id: "a-tool", type: "tool", name: "read_file · package.json", status: "completed", input: "{ \"path\": \"package.json\" }", output: "已读取依赖与构建脚本。", tokens: 58 },
-      { id: "a-answer", type: "answer", text: "建议先使用浏览器 Performance 面板观察首屏加载过程，重点检查长任务、资源加载和组件渲染耗时。\n\n可以采用代码分割、图片压缩和组件懒加载。对于体积较大的依赖，通过动态 import 延迟加载；对于列表页面，可以减少首屏渲染的数据量。\n\n实施后对比优化前后的首屏时间，并观察页面是否出现功能异常。", tokens: 684 },
+      { id: "a-answer", type: "answer", text: "建议先使用浏览器 Performance 面板观察首屏加载过程，重点检查长任务、资源加载和组件渲染耗时。\n\n可以采用代码分割、图片压缩和组件懒加载。对于体积较大的依赖，通过动态 import 延迟加载；对于列表页面，可以减少首屏渲染的数据量。\n\n实施后对比优化前后的首屏时间，并观察页面是否出现功能异常。", tokens: 684, artifactIds: ["artifact-performance-observations"] },
     ],
     answerSections: [
       { id: "a-diagnosis", label: "问题定位", summary: "先观察长任务、资源与渲染耗时", tone: "analysis", text: "建议先使用浏览器 Performance 面板观察首屏加载过程，重点检查长任务、资源加载和组件渲染耗时。" },
@@ -42,7 +65,19 @@ export const demoAgents: DemoAgent[] = [
       { id: "a-2", title: "执行优化", detail: "加入懒加载并压缩资源。" },
       { id: "a-3", title: "重新测试", detail: "比较首屏加载耗时。" },
     ],
-    execution: { score: 78, duration: "18.4 s", modelRounds: 2, toolCalls: 1, outputTokens: 684 },
+    execution: {
+      score: 78,
+      duration: "18.4 s",
+      modelRounds: 2,
+      toolCalls: 1,
+      outputTokens: 684,
+      trace: [
+        { id: "a-trace-model-1", round: 1, type: "model", title: "生成诊断方向", detail: "读取当前上下文，决定先检查依赖与构建脚本。", duration: "2.8 s", status: "completed" },
+        { id: "a-trace-tool-1", round: 1, type: "tool", title: "read_file · package.json", detail: "读取依赖与构建脚本，返回成功。", duration: "184 ms", status: "completed" },
+        { id: "a-trace-model-2", round: 2, type: "model", title: "整理最终回答", detail: "根据单次文件读取结果生成优化建议。", duration: "15.1 s", status: "completed" },
+        { id: "a-trace-result", round: 2, type: "result", title: "Prompt Turn 完成", detail: "生成回答与 performance-observations.md。", duration: "18.4 s", status: "completed" },
+      ],
+    },
   },
   {
     id: "context",
@@ -56,7 +91,7 @@ export const demoAgents: DemoAgent[] = [
       { id: "b-thought", type: "thought", title: "已思考", text: "需要用可复现指标建立基线，并逐项隔离改动，避免同时重写所有组件。", tokens: 196 },
       { id: "b-tool-1", type: "tool", name: "read_file · vite.config.ts", status: "completed", input: "{ \"path\": \"vite.config.ts\" }", output: "发现首屏 bundle 未配置手动拆包。", tokens: 64 },
       { id: "b-tool-2", type: "tool", name: "read_file · src/routes.tsx", status: "completed", input: "{ \"path\": \"src/routes.tsx\" }", output: "当前三个非首屏路由均为同步导入。", tokens: 77 },
-      { id: "b-answer", type: "answer", text: "我会先建立基线，再决定改动。记录 LCP、INP、首屏 JS 体积和主线程长任务，同时保存一次 Performance trace，避免只凭体感优化。\n\n根据项目结构，第一步检查入口 bundle 与同步依赖；第二步检查路由级和组件级代码分割；第三步检查首屏请求是否串行。优先处理阻塞链路，而不是同时重写所有组件。\n\n每个改动单独提交并复测同一组指标。若懒加载造成布局跳动或请求瀑布恶化，则回退该改动。", tokens: 1_126 },
+      { id: "b-answer", type: "answer", text: "我会先建立基线，再决定改动。记录 LCP、INP、首屏 JS 体积和主线程长任务，同时保存一次 Performance trace，避免只凭体感优化。\n\n根据项目结构，第一步检查入口 bundle 与同步依赖；第二步检查路由级和组件级代码分割；第三步检查首屏请求是否串行。优先处理阻塞链路，而不是同时重写所有组件。\n\n每个改动单独提交并复测同一组指标。若懒加载造成布局跳动或请求瀑布恶化，则回退该改动。", tokens: 1_126, artifactIds: ["artifact-performance-baseline"] },
     ],
     answerSections: [
       { id: "b-baseline", label: "基线诊断", summary: "先记录核心指标和 Performance Trace", tone: "analysis", text: "我会先建立基线，再决定改动。记录 LCP、INP、首屏 JS 体积和主线程长任务，同时保存一次 Performance trace，避免只凭体感优化。" },
@@ -77,7 +112,23 @@ export const demoAgents: DemoAgent[] = [
       { id: "b-3", title: "最小改动优化", detail: "按影响逐项处理代码分割和资源加载。" },
       { id: "b-4", title: "同条件复测", detail: "逐个提交比较，保留明确有效的改动。" },
     ],
-    execution: { score: 91, duration: "24.7 s", modelRounds: 3, toolCalls: 4, outputTokens: 1_126 },
+    execution: {
+      score: 91,
+      duration: "24.7 s",
+      modelRounds: 3,
+      toolCalls: 4,
+      outputTokens: 1_126,
+      trace: [
+        { id: "b-trace-model-1", round: 1, type: "model", title: "建立诊断基线", detail: "确定需要检查入口、路由和首屏请求。", duration: "3.4 s", status: "completed" },
+        { id: "b-trace-tool-1", round: 1, type: "tool", title: "read_file · vite.config.ts", detail: "读取构建配置，发现未配置手动拆包。", duration: "126 ms", status: "completed" },
+        { id: "b-trace-tool-2", round: 1, type: "tool", title: "read_file · src/routes.tsx", detail: "确认三个非首屏路由均为同步导入。", duration: "91 ms", status: "completed" },
+        { id: "b-trace-model-2", round: 2, type: "model", title: "补充运行证据", detail: "决定继续读取入口依赖和请求关系。", duration: "4.2 s", status: "completed" },
+        { id: "b-trace-tool-3", round: 2, type: "tool", title: "read_file · src/main.tsx", detail: "确认入口包含非首屏模块。", duration: "104 ms", status: "completed" },
+        { id: "b-trace-tool-4", round: 2, type: "tool", title: "read_file · src/api.ts", detail: "确认两个首屏请求可以并行。", duration: "83 ms", status: "completed" },
+        { id: "b-trace-model-3", round: 3, type: "model", title: "生成可回退方案", detail: "按阻塞程度整理实施顺序与复测方式。", duration: "16.6 s", status: "completed" },
+        { id: "b-trace-result", round: 3, type: "result", title: "Prompt Turn 完成", detail: "生成回答与 performance-baseline.md。", duration: "24.7 s", status: "completed" },
+      ],
+    },
   },
   {
     id: "skill",
@@ -91,7 +142,7 @@ export const demoAgents: DemoAgent[] = [
       { id: "c-thought", type: "thought", title: "已思考", text: "按下载、解析执行、数据等待和渲染四段拆解；优先复用仓库已有诊断能力。", tokens: 248 },
       { id: "c-tool-1", type: "tool", name: "activate_skill · performance-diagnosis", status: "completed", input: "{ \"skill\": \"performance-diagnosis\" }", output: "已载入四阶段诊断流程与验证清单。", tokens: 91 },
       { id: "c-tool-2", type: "tool", name: "read_file · reports/lighthouse.json", status: "completed", input: "{ \"path\": \"reports/lighthouse.json\" }", output: "LCP 4.2s；主线程长任务 3 个；首屏 JS 612KB。", tokens: 88 },
-      { id: "c-answer", type: "answer", text: "先把问题拆成下载、解析执行、数据等待和渲染四段。使用 Lighthouse 获取实验室基线，再用 Performance 与 Network 面板确认真实瓶颈。\n\n实施顺序建议为：移除首屏未使用依赖；将非关键路由和重型组件改为动态加载；合并或并行首屏数据请求；为图片声明尺寸并生成合适规格；最后再处理高频渲染。\n\n验证时固定设备与网络条件，至少记录三次中位数。每个改动保留独立提交；出现功能回归、CLS 上升或请求链增长时直接回退对应步骤。", tokens: 1_438 },
+      { id: "c-answer", type: "answer", text: "先把问题拆成下载、解析执行、数据等待和渲染四段。使用 Lighthouse 获取实验室基线，再用 Performance 与 Network 面板确认真实瓶颈。\n\n实施顺序建议为：移除首屏未使用依赖；将非关键路由和重型组件改为动态加载；合并或并行首屏数据请求；为图片声明尺寸并生成合适规格；最后再处理高频渲染。\n\n验证时固定设备与网络条件，至少记录三次中位数。每个改动保留独立提交；出现功能回归、CLS 上升或请求链增长时直接回退对应步骤。", tokens: 1_438, artifactIds: ["artifact-performance-plan"] },
     ],
     answerSections: [
       { id: "c-diagnosis", label: "分段诊断", summary: "拆分下载、执行、数据与渲染阶段", tone: "analysis", text: "先把问题拆成下载、解析执行、数据等待和渲染四段。使用 Lighthouse 获取实验室基线，再用 Performance 与 Network 面板确认真实瓶颈；如果仓库已有 Bundle Analyzer，则直接复用，不新增另一套分析工具。" },
@@ -114,7 +165,26 @@ export const demoAgents: DemoAgent[] = [
       { id: "c-4", title: "隔离实施", detail: "每项优化使用独立提交和同条件复测。" },
       { id: "c-5", title: "回归与回退", detail: "检查功能、CLS 和请求链变化。" },
     ],
-    execution: { score: 95, duration: "31.2 s", modelRounds: 4, toolCalls: 6, outputTokens: 1_438 },
+    execution: {
+      score: 95,
+      duration: "31.2 s",
+      modelRounds: 4,
+      toolCalls: 6,
+      outputTokens: 1_438,
+      trace: [
+        { id: "c-trace-model-1", round: 1, type: "model", title: "选择诊断 Skill", detail: "识别首屏性能问题并优先复用仓库能力。", duration: "2.9 s", status: "completed" },
+        { id: "c-trace-tool-1", round: 1, type: "tool", title: "activate_skill · performance-diagnosis", detail: "载入四阶段诊断流程与验证清单。", duration: "238 ms", status: "completed" },
+        { id: "c-trace-model-2", round: 2, type: "model", title: "读取现有测量结果", detail: "决定复用 Lighthouse 报告和 Bundle 数据。", duration: "3.6 s", status: "completed" },
+        { id: "c-trace-tool-2", round: 2, type: "tool", title: "read_file · reports/lighthouse.json", detail: "读取 LCP、长任务和首屏 JS 数据。", duration: "117 ms", status: "completed" },
+        { id: "c-trace-tool-3", round: 2, type: "tool", title: "read_file · reports/bundle.json", detail: "目标文件暂不存在，保留错误并继续诊断。", duration: "64 ms", status: "failed" },
+        { id: "c-trace-model-3", round: 3, type: "model", title: "调整证据读取路径", detail: "根据失败结果改读已有 stats 文件，不隐藏错误。", duration: "3.1 s", status: "completed" },
+        { id: "c-trace-tool-4", round: 3, type: "tool", title: "list_files · reports", detail: "定位已有 vite-stats.json。", duration: "73 ms", status: "completed" },
+        { id: "c-trace-tool-5", round: 3, type: "tool", title: "read_file · reports/vite-stats.json", detail: "确认首屏同步依赖和体积分布。", duration: "142 ms", status: "completed" },
+        { id: "c-trace-tool-6", round: 3, type: "tool", title: "read_file · src/routes.tsx", detail: "确认非关键路由仍为同步加载。", duration: "86 ms", status: "completed" },
+        { id: "c-trace-model-4", round: 4, type: "model", title: "生成分阶段方案", detail: "汇总诊断、实施顺序、验证标准和回退条件。", duration: "20.8 s", status: "completed" },
+        { id: "c-trace-result", round: 4, type: "result", title: "Prompt Turn 完成", detail: "生成回答与 performance-plan.html。", duration: "31.2 s", status: "completed" },
+      ],
+    },
   },
 ];
 

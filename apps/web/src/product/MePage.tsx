@@ -1,4 +1,4 @@
-import { Archive, Blocks, Bot, Braces, Download, ExternalLink, FileBox, Plus, RotateCcw, Sparkles, Trash2, UserRound } from "lucide-react";
+import { Archive, Beaker, Blocks, Bot, Braces, Download, ExternalLink, FileBox, Plus, RotateCcw, Sparkles, Trash2, UserRound } from "lucide-react";
 import { Children, useState } from "react";
 import type { SkillSource } from "@kindergarten/contracts";
 import { controlApi } from "../api/control-api.js";
@@ -9,10 +9,12 @@ import { ProductNav } from "./ProductNav.js";
 import { modelStudentDetailUrl } from "./ModelDetailPage.js";
 import { useAuthSession } from "./auth-session-context.js";
 import { useResource } from "./use-resource.js";
+import { contextExperimentsEnabled } from "../feature-flags.js";
 
-type Tab = "artifacts" | "agents" | "models" | "mcps" | "skills";
+type Tab = "experiments" | "artifacts" | "agents" | "models" | "mcps" | "skills";
+const experimentsEnabled = contextExperimentsEnabled();
 const tabs: Array<{ id: Tab; label: string; icon: typeof Braces }> = [
-  // 上下文实验功能调研期间不展示“我的对照实验”板块。
+  ...(experimentsEnabled ? [{ id: "experiments" as const, label: "我的对照实验", icon: Beaker }] : []),
   { id: "artifacts", label: "我的 Artifacts", icon: FileBox }, { id: "agents", label: "我的 Agents", icon: Braces },
   { id: "models", label: "我的 Models", icon: Bot }, { id: "mcps", label: "我的 MCPs", icon: Blocks }, { id: "skills", label: "我的 Skills", icon: Sparkles },
 ];
@@ -23,7 +25,7 @@ export function MePage() {
   const passwordAccount = session?.principal.kind === "password_user";
   const initial = new URLSearchParams(location.search).get("tab") as Tab | null;
   const [tab, setTab] = useState<Tab>(tabs.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.id === initial) ? initial! : "artifacts");
+(item) => item.id === initial) ? initial! : experimentsEnabled ? "experiments" : "artifacts");
   /** 执行「select」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function select(next: Tab) { setTab(next); const url = new URL(location.href); url.searchParams.set("tab", next); history.replaceState(null, "", url); }
   return <main className="product-page"><ProductNav active="me" /><div className="product-me-shell"><aside><div><UserRound size={23} /></div><strong>{username}</strong><span>{passwordAccount ? "密码账号" : "本地管理员"}</span><p>{passwordAccount ? "当前账号的数据与其他账号隔离。" : "开发模式使用本地管理员身份。"}</p></aside><section><header><span>ACCOUNT · PERSONAL SPACE</span><h1>我的</h1></header><nav className="product-tabs">{tabs.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
@@ -34,6 +36,11 @@ function select(next: Tab) { setTab(next); const url = new URL(location.href); u
 }
 /** 渲染「ResourcePanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function ResourcePanel({ tab }: { tab: Tab }) {
+  if (tab === "experiments") return <ResourceLoader load={loadExperiments}>{/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+(data, retry) => <Panel title="已保存的 Contexts">{data.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => <ResourceRow href={experimentUrl(item.experimentId)} icon={<Beaker size={15} />} key={item.experimentId} title={item.name} detail={item.promptText} state={item.status} onDelete={/** 处理「onDelete」事件，校验归属后再推进状态且避免重复提交。 */
+() => remove(`Context「${item.name}」`, /** 执行当前调用点的回调步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+() => controlApi.removeExperiment(item.experimentId), retry)} />)}</Panel>}</ResourceLoader>;
   if (tab === "artifacts") return <ResourceLoader load={loadArtifacts}>{/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (data, retry) => <ArtifactList items={data.items} retry={retry} />}</ResourceLoader>;
   if (tab === "agents") return <ResourceLoader load={loadAgents}>{/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
@@ -69,7 +76,8 @@ const loadMcps = /** 读取「loadMcps」所需数据，并遵守作用域、分
 () => controlApi.mcps();
 const loadSkills = /** 读取「loadSkills」所需数据，并遵守作用域、分页与容量边界。 */
 () => controlApi.skills();
-// 上下文实验功能调研期间不从“我的”加载或展示实验记录。
+const loadExperiments = /** 读取当前账号已保存的上下文实验。 */
+() => controlApi.experiments(true);
 const loadArtifacts = /** 读取「loadArtifacts」所需数据，并遵守作用域、分页与容量边界。 */
 async () => {
   const [artifacts, sessions] = await Promise.all([
@@ -153,3 +161,6 @@ function skillSourceLabel(source: SkillSource): string {
   if (source.kind === "github_tree") return `${source.repository}/${source.subdirectory}`;
   return source.kind === "resource_bundle" ? source.url : source.sourceId;
 }
+
+/** 评测页与产品页由同一个 Web 应用提供，保持同源账号会话。 */
+function experimentUrl(id: string): string { return `/evaluation/experiments/${encodeURIComponent(id)}`; }

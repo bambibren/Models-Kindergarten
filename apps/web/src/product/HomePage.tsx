@@ -10,6 +10,7 @@ import { ProductNav } from "./ProductNav.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { useResource } from "./use-resource.js";
 import { publicSkillUrl } from "../skills/public-skill-url.js";
+import { contextExperimentsEnabled } from "../feature-flags.js";
 
 export const websitePrompt = `请先把以下 Skills 安装到当前 Agent 并自动启用，全部就绪后再开始任务：
 ${publicSkillUrl("website-design-fast")}
@@ -173,12 +174,17 @@ function mentionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
 }
 
 /** 渲染「HomeCapabilities」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-export function HomeCapabilities({ onSelectPptx, onSelectWebsite }: { onSelectPptx: () => void; onSelectWebsite: () => void }) {
+export function HomeCapabilities({ onSelectPptx, onSelectWebsite, experimentsEnabled = contextExperimentsEnabled() }: {
+  onSelectPptx: () => void;
+  onSelectWebsite: () => void;
+  experimentsEnabled?: boolean;
+}) {
   return <div className="product-capability-cards">
     <button type="button" onClick={onSelectWebsite}><Code2 size={17} /><span><strong>网站开发</strong><small>显式安装网页设计 Skills 后生成 HTML</small></span></button>
     <button type="button" onClick={onSelectPptx}><Presentation size={17} /><span><strong>PPT 制作</strong><small>使用 PPTX Skill 生成可预览演示文稿</small></span></button>
-    {/* 上下文实验保留实现；功能调研期间只展示状态，不开放入口。 */}
-    <button aria-label="模型上下文实验（功能调研中）" disabled type="button"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>功能调研中</small></span></button>
+    {experimentsEnabled
+      ? <a href="/context-lab"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>比较 2–3 种真实配置</small></span></a>
+      : <button aria-label="模型上下文实验（功能调研中）" disabled type="button"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>功能调研中</small></span></button>}
   </div>;
 }
 

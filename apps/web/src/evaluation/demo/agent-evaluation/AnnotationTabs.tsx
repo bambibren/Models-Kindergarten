@@ -1,7 +1,8 @@
-import { BadgeCheck, BarChart3, BrainCircuit, CircleCheck, Gauge, Highlighter, Pencil, Route } from "lucide-react";
+import { BadgeCheck, BarChart3, BrainCircuit, CircleCheck, Gauge, Highlighter, MessageSquareText, Pencil, Route } from "lucide-react";
 import type { AnnotationTabId, ScoreTabId } from "./types.js";
 
 const tabs = [
+  { id: "answer", label: "原始回答", icon: MessageSquareText },
   { id: "understanding", label: "理解能力", icon: BrainCircuit },
   { id: "planning", label: "规划能力", icon: Route },
   { id: "output", label: "输出结果", icon: Highlighter },
@@ -19,7 +20,7 @@ export function AnnotationTabs({
   completed: Partial<Record<ScoreTabId, boolean>>;
   onChange: (tab: AnnotationTabId) => void;
 }) {
-  return <nav className="annotation-tabs" aria-label="人工标注模块" role="tablist">
+  return <nav className="annotation-tabs" aria-label="上下文实验结果模块" role="tablist">
     {tabs.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (tab) => {
       const Icon = tab.icon;

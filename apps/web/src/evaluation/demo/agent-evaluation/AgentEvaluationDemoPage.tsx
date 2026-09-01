@@ -1,15 +1,19 @@
 import {
+  AlertTriangle,
   ArrowLeft,
   BarChart3,
+  BrainCircuit,
   BookmarkCheck,
   BookmarkPlus,
   Check,
+  CheckCircle2,
   CircleDot,
   Clock3,
   Highlighter,
   MessageSquareText,
   MousePointer2,
   Route,
+  TerminalSquare,
   Wrench,
   X,
 } from "lucide-react";
@@ -20,7 +24,7 @@ import { ComparisonHistoryRail } from "./ComparisonHistoryRail.js";
 import { DemoAgentStream } from "./DemoAgentStream.js";
 import { MarkerText } from "./MarkerText.js";
 import { RadarChart } from "./RadarChart.js";
-import { demoAgents, demoTask, savedComparisons } from "./mock-data.js";
+import { demoAgents, demoArtifacts, demoTask, savedComparisons } from "./mock-data.js";
 import type { DemoSavedComparison } from "./types.js";
 import type {
   AgentId,
@@ -29,7 +33,6 @@ import type {
   MarkColor,
   ScoreTabId,
   TextMark,
-  ViewMode,
 } from "./types.js";
 import "./agent-evaluation-demo.css";
 
@@ -41,8 +44,7 @@ export function AgentEvaluationDemoPage() {
   const [comparisonRecords, setComparisonRecords] = useState<DemoSavedComparison[]>(savedComparisons);
   const [selectedComparisonId, setSelectedComparisonId] = useState<string | null>(linkedComparisonId);
   const [saveState, setSaveState] = useState<"unsaved" | "saved">(linkedComparisonId ? "saved" : "unsaved");
-  const [mode, setMode] = useState<ViewMode>("answer");
-  const [activeTab, setActiveTab] = useState<AnnotationTabId>("understanding");
+  const [activeTab, setActiveTab] = useState<AnnotationTabId>("answer");
   const [selectedRequirements, setSelectedRequirements] = useState<string[]>([]);
   const [hasOtherRequirement, setHasOtherRequirement] = useState(false);
   const [listedRequirementsWeight, setListedRequirementsWeight] = useState(80);
@@ -132,58 +134,50 @@ function saveComparison(): void {
     </header>
 
     <section className="task-panel">
-      <div className="task-label"><span>USER TASK</span><strong>{demoTask.title}</strong></div>
       <p>{demoTask.prompt}</p>
-      <div className="mode-switch" aria-label="页面模式">
-        <button className={mode === "answer" ? "active" : ""} onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-() => setMode("answer")} type="button"><MessageSquareText size={14} />回答模式</button>
-        <button className={mode === "annotation" ? "active" : ""} onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-() => setMode("annotation")} type="button"><Highlighter size={14} />标注模式</button>
-      </div>
     </section>
 
-    {mode === "answer"
-      ? <AnswerMode />
-      : <section className="annotation-mode">
-        <AnnotationTabs active={activeTab} completed={completedTabs} onChange={setActiveTab} />
-        <div className="annotation-context">
+    <section className="annotation-mode">
+      <AnnotationTabs active={activeTab} completed={completedTabs} onChange={setActiveTab} />
+      {activeTab === "answer" && <RawAnswerPanel />}
+      {(activeTab === "understanding" || activeTab === "planning" || activeTab === "output") && <div className="annotation-context">
           <span><MousePointer2 size={12} />理解、规划和输出由人工标注</span>
           <span>执行能力自动完成 · 未标注模块默认 100</span>
-        </div>
-        {activeTab === "understanding" && <UnderstandingPanel
-          hasOtherRequirement={hasOtherRequirement}
-          listedRequirementsWeight={listedRequirementsWeight}
-          onOtherRequirementToggle={toggleOtherRequirement}
-          onWeightChange={/** 处理「onWeightChange」事件，校验归属后再推进状态且避免重复提交。 */
+      </div>}
+      {activeTab === "understanding" && <UnderstandingPanel
+        hasOtherRequirement={hasOtherRequirement}
+        listedRequirementsWeight={listedRequirementsWeight}
+        onOtherRequirementToggle={toggleOtherRequirement}
+        onWeightChange={/** 处理「onWeightChange」事件，校验归属后再推进状态且避免重复提交。 */
 (value) => {
-            completeTab("understanding");
-            setListedRequirementsWeight(value);
-          }}
-          selectedRequirements={selectedRequirements}
-          onToggle={toggleRequirement}
-        />}
-        {activeTab === "planning" && <PlanningPanel
-          marks={planMarks}
-          onMark={togglePlanMark}
-        />}
-        {activeTab === "output" && <OutputPanel
-          marks={textMarks}
-          onMarksChange={setAgentTextMarks}
-        />}
-        {activeTab === "execution" && <ExecutionPanel />}
-        {activeTab === "summary" && <SummaryPanel scoreFor={scoreFor} />}
-      </section>}
+          completeTab("understanding");
+          setListedRequirementsWeight(value);
+        }}
+        selectedRequirements={selectedRequirements}
+        onToggle={toggleRequirement}
+      />}
+      {activeTab === "planning" && <PlanningPanel
+        marks={planMarks}
+        onMark={togglePlanMark}
+      />}
+      {activeTab === "output" && <OutputPanel
+        marks={textMarks}
+        onMarksChange={setAgentTextMarks}
+      />}
+      {activeTab === "execution" && <ExecutionPanel />}
+      {activeTab === "summary" && <SummaryPanel scoreFor={scoreFor} />}
+    </section>
     </main>
   </div>;
 }
 
-/** 渲染「AnswerMode」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-function AnswerMode() {
-  return <section className="demo-section">
-    <SectionHeading icon={<MessageSquareText size={17} />} title="Agent回答对比" detail="每栏按上下文、思考、工具与回答的原始顺序投影；历史版本不会重新运行。" />
+/** 原始回答只负责消息流投影；产物跳转策略由当前页面环境决定。 */
+function RawAnswerPanel() {
+  return <section className="tab-panel raw-answer-panel" role="tabpanel">
+    <SectionHeading icon={<MessageSquareText size={17} />} title="原始回答" detail="按上下文、思考、工具与回答的原始顺序展示；产物在新页面中打开。" />
     <AgentComparisonGrid agents={demoAgents} className="answer-grid">
       {/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
-(agent) => <DemoAgentStream agent={agent} />}
+(agent) => <DemoAgentStream agent={agent} artifacts={demoArtifacts} />}
     </AgentComparisonGrid>
   </section>;
 }
@@ -360,20 +354,37 @@ function SummaryPanel({ scoreFor }: { scoreFor: (tab: ScoreTabId, agentId: Agent
 /** 渲染「ExecutionPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function ExecutionPanel() {
   return <section className="execution-panel" role="tabpanel">
-    <SectionHeading icon={<Wrench size={17} />} title="执行能力" detail="根据 Runtime Trace 自动生成，不需要人工标注。" />
-    <div className="execution-grid">
-      {demoAgents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(agent) => <article className={`execution-card tone-${agent.tone}`} key={agent.id}>
-        <header><div><span>{agent.name}</span><strong>{agent.variant}</strong></div><b>{agent.execution.score}</b></header>
+    <SectionHeading icon={<TerminalSquare size={17} />} title="执行能力" detail="Runtime 摘要与执行轨迹集中展示，包括每轮模型调用、工具耗时和错误状态。" />
+    <AgentComparisonGrid agents={demoAgents} className="execution-trace-grid" headerScore={(agent) => agent.execution.score} headerScoreLabel="Runtime 自动评分">
+      {(agent) => <div className="execution-column">
         <div className="execution-metrics">
           <span><Clock3 size={13} /><strong>{agent.execution.duration}</strong><small>总耗时</small></span>
           <span><CircleDot size={13} /><strong>{agent.execution.modelRounds}</strong><small>Rounds</small></span>
           <span><Wrench size={13} /><strong>{agent.execution.toolCalls}</strong><small>Tools</small></span>
           <span><MessageSquareText size={13} /><strong>{agent.execution.outputTokens}</strong><small>Tokens</small></span>
         </div>
-      </article>)}
-    </div>
+        <ol className="execution-trace">
+          {agent.execution.trace.map((item) => <li className={`trace-${item.type} status-${item.status}`} key={item.id}>
+            <span className="execution-trace-marker">{item.status === "failed"
+              ? <AlertTriangle size={12} />
+              : item.type === "tool" ? <Wrench size={12} /> : item.type === "model" ? <BrainCircuit size={12} /> : <CheckCircle2 size={12} />}</span>
+            <div>
+              <header><small>ROUND {item.round} · {traceTypeLabel(item.type)}</small><strong>{item.title}</strong></header>
+              <p>{item.detail}</p>
+              <footer><span><Clock3 size={11} />{item.duration}</span><span>{item.status === "failed" ? "发生错误" : "已完成"}</span></footer>
+            </div>
+          </li>)}
+        </ol>
+      </div>}
+    </AgentComparisonGrid>
   </section>;
+}
+
+/** 将轨迹类型转换为稳定的界面文案。 */
+function traceTypeLabel(type: "model" | "tool" | "result"): string {
+  if (type === "model") return "MODEL";
+  if (type === "tool") return "TOOL";
+  return "RESULT";
 }
 
 /** 渲染「SectionHeading」界面投影，所有业务事实仍由上层状态与服务端提供。 */

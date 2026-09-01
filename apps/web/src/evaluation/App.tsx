@@ -24,12 +24,14 @@ import type {
 import { loadTurnEvaluation } from "./api.js";
 import { buildRuntimeTree } from "./runtime-tree.js";
 import { AgentEvaluationDemoPage } from "./demo/agent-evaluation/AgentEvaluationDemoPage.js";
+import { DemoArtifactPage } from "./demo/agent-evaluation/DemoArtifactPage.js";
 import { ExperimentEvaluationPage } from "./experiment/ExperimentEvaluationPage.js";
 import "./styles.css";
 
 type PageRoute =
   | { kind: "turn"; sessionId: string; turnId: string }
   | { kind: "agent-evaluation-demo" }
+  | { kind: "agent-evaluation-demo-artifact"; artifactId: string }
   | { kind: "experiment"; experimentId: string };
 
 type PageState =
@@ -50,6 +52,7 @@ export default function App() {
       return;
     }
     if (route.kind === "agent-evaluation-demo") return;
+    if (route.kind === "agent-evaluation-demo-artifact") return;
     if (route.kind === "experiment") return;
     let disposed = false;
     void loadTurnEvaluation(route.sessionId, route.turnId)
@@ -65,6 +68,7 @@ export default function App() {
   }, [route]);
 
   if (route?.kind === "agent-evaluation-demo") return <AgentEvaluationDemoPage />;
+  if (route?.kind === "agent-evaluation-demo-artifact") return <DemoArtifactPage artifactId={route.artifactId} />;
   if (route?.kind === "experiment") return <ExperimentEvaluationPage experimentId={route.experimentId} />;
   if (state.phase === "loading") return <CenteredState title="正在读取本轮评测" detail="等待 Runtime Trace 完成上传…" />;
   if (state.phase === "not_found") return <CenteredState title="尚未生成本轮评测" detail="该 Turn 可能仍在后台写入，或 Evaluation 模块当前不可用。" />;
@@ -208,6 +212,8 @@ function CenteredState({ title, detail, failed = false }: { title: string; detai
 
 /** 读取「readRoute」所需数据，并遵守作用域、分页与容量边界。 */
 function readRoute(): PageRoute | null {
+  const demoArtifact = location.pathname.match(/^\/evaluation\/demo\/agent-comparison\/artifacts\/([^/]+)\/?$/)?.[1];
+  if (demoArtifact) return { kind: "agent-evaluation-demo-artifact", artifactId: decodeURIComponent(demoArtifact) };
   if (/^\/evaluation\/demo\/agent-comparison\/?$/.test(location.pathname)) {
     return { kind: "agent-evaluation-demo" };
   }
