@@ -2,7 +2,7 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
-import { TURN_STATE_NOTIFICATION, makePromptMeta, makeSessionBindingMeta, readTurnStateNotification, type TurnState } from "@kindergarten/contracts";
+import { TURN_STATE_NOTIFICATION, makePromptMeta, makeSessionBindingMeta, readMessageMeta, readTurnStateNotification, type TurnState } from "@kindergarten/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KindergartenAgent } from "../src/acp/kindergarten-agent.js";
 import type {
@@ -20,6 +20,7 @@ import { FileSandbox } from "../src/tools/sandbox.js";
 import { ToolRegistry } from "../src/tools/tool-registry.js";
 import { ToolCallLedger, ToolRuntime, type ToolObserver } from "../src/tools/tool-runtime.js";
 import { SessionBindingService } from "../src/session/session-binding-service.js";
+import { messageEvents, toolCallEvents } from "./support/model-events.js";
 
 const tempDirs: string[] = [];
 
@@ -129,6 +130,64 @@ async () => {
     expect(replayedTools).toHaveLength(3);
     expect(replayedTools.every(/** 构造「toBe」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (item) => item.status === "completed")).toBe(true);
+
+    client.close();
+    await client.closed;
+  });
+
+  it("在长工具参数生成前关闭思考，并区分准备与真实执行", async () => {
+    const dir = await tempDir();
+    const sandbox = new FileSandbox(join(dir, "sandbox"));
+    await sandbox.initialize();
+    const sessions = new SessionRepository(join(dir, "data"));
+    const agent = new KindergartenAgent(
+      sessions,
+      AgentRuntime.fromRegistry(new LifecycleToolProvider(), new ToolRegistry(sandbox)),
+      testBindings(),
+    ).createApp();
+    const updates: acp.SessionNotification[] = [];
+    const client = acp.client({ name: "lifecycle-test-client" })
+      .onNotification(acp.methods.client.session.update, ({ params }) => { updates.push(params); })
+      .onRequest(acp.methods.client.session.requestPermission, () => ({
+        outcome: { outcome: "selected", optionId: "allow-once" },
+      }))
+      .connect(agent);
+    await client.agent.request(acp.methods.agent.initialize, {
+      protocolVersion: acp.PROTOCOL_VERSION,
+      clientCapabilities: {},
+    });
+    const session = await client.agent.request(acp.methods.agent.session.new, {
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: makeSessionBindingMeta({ schemaVersion: 1, modelStudentId: "student-1", agentId: "agent-1" }),
+    });
+
+    await client.agent.request(acp.methods.agent.session.prompt, {
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "生成页面" }],
+      _meta: makePromptMeta({ schemaVersion: 1, turnId: "lifecycle-turn" }),
+    });
+
+    const thoughtFinal = updates.findIndex(({ update }) =>
+      update.sessionUpdate === "agent_thought_chunk" && readMessageMeta(update._meta)?.final === true);
+    const messageFinal = updates.findIndex(({ update }) =>
+      update.sessionUpdate === "agent_message_chunk" && readMessageMeta(update._meta)?.final === true);
+    const pending = updates.findIndex(({ update }) =>
+      update.sessionUpdate === "tool_call" && update.toolCallId === "call-long-write" && update.status === "pending");
+    const running = updates.findIndex(({ update }) =>
+      update.sessionUpdate === "tool_call_update" && update.toolCallId === "call-long-write" && update.status === "in_progress");
+    const completed = updates.findIndex(({ update }) =>
+      update.sessionUpdate === "tool_call_update" && update.toolCallId === "call-long-write" && update.status === "completed");
+
+    expect(thoughtFinal).toBeGreaterThanOrEqual(0);
+    expect(messageFinal).toBeGreaterThan(thoughtFinal);
+    expect(pending).toBeGreaterThan(messageFinal);
+    expect(running).toBeGreaterThan(pending);
+    expect(completed).toBeGreaterThan(running);
+    expect(await readFile(join(dir, "sandbox", "index.html"), "utf8")).toHaveLength(29 * 1024);
+    const record = await sessions.get(session.sessionId);
+    expect(record.sessionEntries.filter((entry) => entry.type === "tool_call" && entry.toolCallId === "call-long-write"))
+      .toHaveLength(1);
 
     client.close();
     await client.closed;
@@ -349,7 +408,7 @@ async () => {
       arguments: { path: "denied/result.html", content: "should-not-exist" },
     }, "fallback");
     const observer: ToolObserver = {
-      toolStart: /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+      toolExecutionStarted: /** 构造工具实际执行开始的测试观察器。 */
 async () => undefined,
       toolFinish: /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => undefined,
@@ -568,9 +627,7 @@ async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     const results = input.messages.filter(/** 构造「results」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (item) => item.role === "tool");
     if (results.length === 0) {
-      yield {
-        type: "tool_calls",
-        calls: [
+      yield* toolCallEvents([
           {
             id: "ollama-write",
             name: "write_file",
@@ -581,20 +638,45 @@ async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
             name: "ask_user",
             arguments: { question: "你喜欢什么颜色？" },
           },
-        ],
-      };
+        ]);
     } else if (results.length === 2) {
-      yield {
-        type: "tool_calls",
-        calls: [{
+      yield* toolCallEvents([{
           id: "ollama-read",
           name: "read_file",
           arguments: { path: "notes/answer.txt" },
-        }],
-      };
+        }]);
     } else {
-      yield { type: "text_delta", text: "工具链已完成" };
+      yield* messageEvents("工具链已完成");
     }
+    yield { type: "finish", reason: "stop" };
+  }
+}
+
+class LifecycleToolProvider extends ScriptedToolProvider {
+  override async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
+    if (input.messages.some((item) => item.role === "tool")) {
+      yield* messageEvents("页面已完成");
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+    yield { type: "output_item_started", item: { id: "reasoning-long", kind: "reasoning" } };
+    yield { type: "output_item_delta", itemId: "reasoning-long", delta: { kind: "text", text: "先规划页面。" } };
+    yield { type: "output_item_completed", item: { id: "reasoning-long", kind: "reasoning", text: "先规划页面。" } };
+    yield { type: "output_item_started", item: { id: "message-long", kind: "message" } };
+    yield { type: "output_item_delta", itemId: "message-long", delta: { kind: "text", text: "开始编写网站。" } };
+    yield { type: "output_item_completed", item: { id: "message-long", kind: "message", text: "开始编写网站。" } };
+    const content = "x".repeat(29 * 1024);
+    const call = { id: "call-long-write", name: "write_file", arguments: { path: "index.html", content } };
+    yield {
+      type: "output_item_started",
+      item: { id: "tool-long", kind: "tool_call", callId: call.id, name: call.name },
+    };
+    yield {
+      type: "output_item_delta",
+      itemId: "tool-long",
+      delta: { kind: "tool_arguments", text: JSON.stringify(call.arguments) },
+    };
+    yield { type: "output_item_completed", item: { id: "tool-long", kind: "tool_call", call } };
     yield { type: "finish", reason: "stop" };
   }
 }
@@ -604,14 +686,11 @@ class WriteThenFailProvider extends ScriptedToolProvider {
 override async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     if (!input.messages.some(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
 (item) => item.role === "tool")) {
-      yield {
-        type: "tool_calls",
-        calls: [{
+      yield* toolCallEvents([{
           id: "write-before-failure",
           name: "write_file",
           arguments: { path: "index.html", content: "<h1>完成</h1>" },
-        }],
-      };
+        }]);
       yield { type: "finish", reason: "stop" };
       return;
     }
@@ -636,20 +715,17 @@ continueSecondRound(): void { this.secondRoundContinued(); }
 override async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     if (!input.messages.some(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
 (item) => item.role === "tool")) {
-      yield {
-        type: "tool_calls",
-        calls: [{
+      yield* toolCallEvents([{
           id: "streamed-write",
           name: "write_file",
           arguments: { path: "index.html", content: "<h1>完成</h1>" },
-        }],
-      };
+        }]);
       yield { type: "finish", reason: "stop" };
       return;
     }
     this.secondRoundStarted();
     await this.continuation;
-    yield { type: "text_delta", text: "文件已经完成" };
+    yield* messageEvents("文件已经完成");
     yield { type: "finish", reason: "stop" };
   }
 }
@@ -671,20 +747,17 @@ continueSecondRound(): void { this.secondRoundContinued(); }
 override async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     if (!input.messages.some(/** 执行当前测试回调并只断言公开结果；场景状态由所属用例独立建立和释放。 */
 (item) => item.role === "tool")) {
-      yield {
-        type: "tool_calls",
-        calls: [{
+      yield* toolCallEvents([{
           id: "streamed-command",
           name: "run_command",
           arguments: { command: "printf '<h1>新版本</h1>' > index.html; false" },
-        }],
-      };
+        }]);
       yield { type: "finish", reason: "stop" };
       return;
     }
     this.secondRoundStarted();
     await this.continuation;
-    yield { type: "text_delta", text: "命令修改已完成" };
+    yield* messageEvents("命令修改已完成");
     yield { type: "finish", reason: "stop" };
   }
 }

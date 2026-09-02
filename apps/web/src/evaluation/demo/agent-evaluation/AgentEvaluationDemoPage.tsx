@@ -1,14 +1,10 @@
 import {
-  AlertTriangle,
   ArrowLeft,
   BarChart3,
   BrainCircuit,
   BookmarkCheck,
   BookmarkPlus,
   Check,
-  CheckCircle2,
-  CircleDot,
-  Clock3,
   Highlighter,
   MessageSquareText,
   MousePointer2,
@@ -22,7 +18,11 @@ import { AgentComparisonGrid } from "./AgentComparisonGrid.js";
 import { AnnotationTabs } from "./AnnotationTabs.js";
 import { ComparisonHistoryRail } from "./ComparisonHistoryRail.js";
 import { DemoAgentStream } from "./DemoAgentStream.js";
+import { ExecutionTrace } from "./ExecutionTrace.js";
 import { MarkerText } from "./MarkerText.js";
+import { PlanMarkerList } from "./PlanMarkerList.js";
+import { RequirementSelector } from "./RequirementSelector.js";
+import { SectionHeading } from "./SectionHeading.js";
 import { RadarChart } from "./RadarChart.js";
 import { demoAgents, demoArtifacts, demoTask, savedComparisons } from "./mock-data.js";
 import type { DemoSavedComparison } from "./types.js";
@@ -102,7 +102,7 @@ function setAgentTextMarks(agentId: AgentId, marks: TextMark[]): void {
 function scoreFor(tab: ScoreTabId, agentId: AgentId): number {
     const agent = demoAgents.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.id === agentId);
-    if (!agent) return 100;
+    if (!agent) return 0;
     if (tab === "understanding") return understandingScore(agent, selectedRequirements, hasOtherRequirement, listedRequirementsWeight);
     if (tab === "planning") return planningScore(agent, planMarks);
     return outputMarkScore(agent, textMarks).score;
@@ -142,7 +142,7 @@ function saveComparison(): void {
       {activeTab === "answer" && <RawAnswerPanel />}
       {(activeTab === "understanding" || activeTab === "planning" || activeTab === "output") && <div className="annotation-context">
           <span><MousePointer2 size={12} />理解、规划和输出由人工标注</span>
-          <span>执行能力自动完成 · 未标注模块默认 100</span>
+          <span>执行能力自动完成 · 未标注模块默认 0</span>
       </div>}
       {activeTab === "understanding" && <UnderstandingPanel
         hasOtherRequirement={hasOtherRequirement}
@@ -202,44 +202,15 @@ function UnderstandingPanel({
   return <section className="tab-panel understanding-panel" role="tabpanel">
     <div className="understanding-workspace">
       <SectionHeading icon={<Check size={17} />} title="需求理解能力 打分" detail="上下文与三个 Agent 思考结果合并去重后，只需要人工标注一次。" />
-      <div className="requirement-pool">
-        <header><div><span>待标注 LIST</span><strong>请选出您真正的需求</strong></div><small>{selectedRequirements.length}{hasOtherRequirement ? " + 其他" : ""} 已选</small></header>
-        <div className="requirement-pool-list">
-          {demoTask.requirements.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(requirement) => {
-            const selected = selectedRequirements.includes(requirement.id);
-            return <button className={selected ? "selected" : ""} key={requirement.id} onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-() => onToggle(requirement.id)} type="button">
-              <span className="pool-check">{selected && <Check size={12} />}</span>
-              <span className="pool-content">
-                <strong className="pool-title">{requirement.label}</strong>
-                <small className="pool-source">来源：{requirement.sources.join(" · ")}</small>
-              </span>
-            </button>;
-          })}
-        </div>
-        <div className={`other-requirement ${hasOtherRequirement ? "selected" : ""}`}>
-          <button className="other-requirement-toggle" onClick={onOtherRequirementToggle} type="button">
-            <span className="pool-check">{hasOtherRequirement && <Check size={11} />}</span>
-            <span className="pool-content"><strong className="pool-title">其他需求</strong><small className="pool-source">当前合并列表未覆盖的真实需求</small></span>
-          </button>
-          {hasOtherRequirement && <div className="other-requirement-controls">
-            <label>
-              <span><strong>已列需求合计权重 {listedRequirementsWeight}%</strong><small>其他需求占 {100 - listedRequirementsWeight}%</small></span>
-              <input
-                aria-label="已列需求权重"
-                max="100"
-                min="0"
-                onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
-(event) => onWeightChange(Number(event.target.value))}
-                type="range"
-                value={listedRequirementsWeight}
-              />
-              <span className="weight-scale"><i>0%</i><i>100%</i></span>
-            </label>
-          </div>}
-        </div>
-      </div>
+      <RequirementSelector
+        hasOtherRequirement={hasOtherRequirement}
+        listedRequirementsWeight={listedRequirementsWeight}
+        onOtherRequirementToggle={onOtherRequirementToggle}
+        onToggle={onToggle}
+        onWeightChange={onWeightChange}
+        requirements={demoTask.requirements.map((requirement) => ({ id: requirement.id, label: requirement.label, sources: requirement.sources }))}
+        selectedIds={selectedRequirements}
+      />
       <div className="mapping-heading"><span>AGENT REQUIREMENT MAPPING</span><strong>Agent 真实需求命中率 对比</strong><p>左侧选中需求后，对应命中与标题得分实时更新。</p></div>
       <AgentComparisonGrid
         agents={demoAgents}
@@ -278,19 +249,7 @@ function PlanningPanel({
 (agent) => planningScore(agent, marks)}>
       {/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (agent) => <div className="annotation-column-body">
-        <div className="plan-flow">
-          {agent.plan.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(step, index) => <div className={`plan-step ${marks[step.id] ? `marked-${marks[step.id]}` : ""}`} key={step.id}>
-            <span className="plan-number">{String(index + 1).padStart(2, "0")}</span>
-            <div><strong>{step.title}</strong><p>{step.detail}</p></div>
-            <div className="plan-marker-actions">
-              <button aria-label="蓝色标记" className="blue" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-() => onMark(step.id, "blue")} type="button" />
-              <button aria-label="红色标记" className="red" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-() => onMark(step.id, "red")} type="button" />
-            </div>
-          </div>)}
-        </div>
+        <PlanMarkerList marks={marks} onMark={onMark} steps={agent.plan.map((step) => ({ id: step.id, title: step.title, detail: step.detail }))} />
       </div>}
     </AgentComparisonGrid>
   </section>;
@@ -331,7 +290,7 @@ function SummaryPanel({ scoreFor }: { scoreFor: (tab: ScoreTabId, agentId: Agent
   return <section className="summary-panel" role="tabpanel">
     <div className="summary-grid">
       <div className="summary-chart-card">
-        <SectionHeading icon={<BarChart3 size={17} />} title="综合能力分布" detail="未填写的人工模块按默认满分展示。" />
+        <SectionHeading icon={<BarChart3 size={17} />} title="综合能力分布" detail="未填写的人工模块按 0 分展示。" />
         <RadarChart agents={demoAgents} scoreFor={/** 执行「scoreFor」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (tab, agent) => scoreFor(tab, agent.id)} />
       </div>
@@ -354,42 +313,11 @@ function SummaryPanel({ scoreFor }: { scoreFor: (tab: ScoreTabId, agentId: Agent
 /** 渲染「ExecutionPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function ExecutionPanel() {
   return <section className="execution-panel" role="tabpanel">
-    <SectionHeading icon={<TerminalSquare size={17} />} title="执行能力" detail="Runtime 摘要与执行轨迹集中展示，包括每轮模型调用、工具耗时和错误状态。" />
+    <SectionHeading icon={<TerminalSquare size={17} />} title="执行能力" detail="Runtime 摘要与执行轨迹集中展示，包括每次模型调用（含自动重试）、工具执行、错误状态和节点耗时。" />
     <AgentComparisonGrid agents={demoAgents} className="execution-trace-grid" headerScore={(agent) => agent.execution.score} headerScoreLabel="Runtime 自动评分">
-      {(agent) => <div className="execution-column">
-        <div className="execution-metrics">
-          <span><Clock3 size={13} /><strong>{agent.execution.duration}</strong><small>总耗时</small></span>
-          <span><CircleDot size={13} /><strong>{agent.execution.modelRounds}</strong><small>Rounds</small></span>
-          <span><Wrench size={13} /><strong>{agent.execution.toolCalls}</strong><small>Tools</small></span>
-          <span><MessageSquareText size={13} /><strong>{agent.execution.outputTokens}</strong><small>Tokens</small></span>
-        </div>
-        <ol className="execution-trace">
-          {agent.execution.trace.map((item) => <li className={`trace-${item.type} status-${item.status}`} key={item.id}>
-            <span className="execution-trace-marker">{item.status === "failed"
-              ? <AlertTriangle size={12} />
-              : item.type === "tool" ? <Wrench size={12} /> : item.type === "model" ? <BrainCircuit size={12} /> : <CheckCircle2 size={12} />}</span>
-            <div>
-              <header><small>ROUND {item.round} · {traceTypeLabel(item.type)}</small><strong>{item.title}</strong></header>
-              <p>{item.detail}</p>
-              <footer><span><Clock3 size={11} />{item.duration}</span><span>{item.status === "failed" ? "发生错误" : "已完成"}</span></footer>
-            </div>
-          </li>)}
-        </ol>
-      </div>}
+      {(agent) => <ExecutionTrace execution={agent.execution} />}
     </AgentComparisonGrid>
   </section>;
-}
-
-/** 将轨迹类型转换为稳定的界面文案。 */
-function traceTypeLabel(type: "model" | "tool" | "result"): string {
-  if (type === "model") return "MODEL";
-  if (type === "tool") return "TOOL";
-  return "RESULT";
-}
-
-/** 渲染「SectionHeading」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-function SectionHeading({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
-  return <div className="demo-section-heading">{icon}<div><h2>{title}</h2><p>{detail}</p></div></div>;
 }
 
 /** 执行「understandingScore」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -399,7 +327,7 @@ function understandingScore(
   hasOtherRequirement: boolean,
   listedRequirementsWeight: number,
 ): number {
-  if (selectedRequirements.length === 0 && !hasOtherRequirement) return 100;
+  if (selectedRequirements.length === 0 && !hasOtherRequirement) return 0;
   const availableWeight = hasOtherRequirement ? listedRequirementsWeight : 100;
   return Math.round(understandingMatchCount(agent, selectedRequirements) / demoTask.requirements.length * availableWeight);
 }
@@ -416,7 +344,7 @@ function understandingMatchCount(agent: DemoAgent, selectedRequirements: string[
 function planningScore(agent: DemoAgent, marks: Record<string, MarkColor>): number {
   const selected = agent.plan.flatMap(/** 执行「selected」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (step) => marks[step.id] ? [marks[step.id]] : []);
-  if (selected.length === 0) return 100;
+  if (selected.length === 0) return 0;
   const weighted = selected.reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
 (sum, color) => sum + (color === "red" ? 1 : .5), 0);
   return Math.round(weighted / agent.plan.length * 100);
@@ -431,7 +359,7 @@ function outputMarkScore(agent: DemoAgent, marks: TextMark[]): {
 } {
   const agentMarks = marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (mark) => mark.agentId === agent.id);
-  if (agentMarks.length === 0) return { score: 100, redPercent: 0, bluePercent: 0, started: false };
+  if (agentMarks.length === 0) return { score: 0, redPercent: 0, bluePercent: 0, started: false };
   const totalCharacters = agent.answerSections.reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
 (sum, section) => sum + effectiveCharacters(section.text), 0);
   let redCharacters = 0;

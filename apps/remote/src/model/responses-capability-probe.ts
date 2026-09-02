@@ -247,9 +247,9 @@ private async run(
 
 /** 执行「collect」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function collect(result: ProbeRunResult, event: ModelEvent): void {
-  if (event.type === "text_delta") result.text += event.text;
-  if (event.type === "thinking_delta") result.thought += event.text;
-  if (event.type === "tool_calls") result.calls.push(...event.calls);
+  if (event.type === "output_item_completed" && event.item.kind === "message") result.text += event.item.text;
+  if (event.type === "output_item_completed" && event.item.kind === "reasoning") result.thought += event.item.text;
+  if (event.type === "output_item_completed" && event.item.kind === "tool_call") result.calls.push(event.item.call);
   if (event.type === "provider_continuation") result.continuation = event.continuation;
   if (event.type === "usage") result.usage = true;
   if (event.type === "finish") result.finishReason = event.reason;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Beaker, Bot, GraduationCap, LogOut, UserRound } from "lucide-react";
+import { Beaker, Bot, GraduationCap, LogOut, Store, UserRound } from "lucide-react";
 import { contextExperimentsEnabled } from "../feature-flags.js";
 import { logout } from "./auth-client.js";
 import { useAuthSession } from "./auth-session-context.js";
@@ -14,7 +14,7 @@ export async function performLogout(
 }
 
 /** 渲染「ProductNav」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-export function ProductNav({ active }: { active: "home" | "context" | "me" | "chat" | "agent" }) {
+export function ProductNav({ active }: { active: "home" | "context" | "me" | "chat" | "agent" | "skills" }) {
   const [logoutState, setLogoutState] = useState<"idle" | "pending" | "failed">("idle");
   const session = useAuthSession();
   const username = session?.principal.username ?? "Account";
@@ -32,6 +32,7 @@ export function ProductNav({ active }: { active: "home" | "context" | "me" | "ch
     <nav>
       {contextExperimentsEnabled() && <a className={active === "context" ? "active" : ""} href="/context-lab"><Beaker size={14} />上下文实验</a>}
       <a className={active === "agent" ? "active" : ""} href="/agents/new"><Bot size={14} />新建 Agent</a>
+      <a className={active === "skills" ? "active" : ""} href="/skill-market" rel="noopener noreferrer" target="_blank"><Store size={14} />Skill 市场</a>
       <div className="product-account">
         <a aria-label={`打开 ${username} 的个人空间`} className={`product-account-trigger ${active === "me" ? "active" : ""}`} href="/me"><UserRound size={14} /><span>{username}</span></a>
         <div className="product-account-menu">

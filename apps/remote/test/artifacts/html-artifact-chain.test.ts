@@ -33,7 +33,7 @@ async () => {
     const permission = vi.fn(/** 构造「permission」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => true);
     const observer: ToolObserver = {
-      toolStart: /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+      toolExecutionStarted: /** 构造工具实际执行开始的测试观察器。 */
 async () => undefined,
       toolFinish: /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => undefined,

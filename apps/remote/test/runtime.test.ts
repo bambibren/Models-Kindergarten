@@ -9,6 +9,8 @@ import type {
   ModelContextSerialization,
   ModelEvent,
   ModelInput,
+  ModelOutputItemDelta,
+  ModelOutputItemStarted,
   ModelProvider,
   ModelStudent,
 } from "../src/model/model-provider.js";
@@ -23,6 +25,7 @@ import type { PreparedToolCall, ToolOutcome } from "../src/tools/tool-registry.j
 import { ToolRegistry } from "../src/tools/tool-registry.js";
 import { ToolCallLedger, ToolRuntime } from "../src/tools/tool-runtime.js";
 import { WebAccess } from "../src/tools/web-access.js";
+import { messageEvents, reasoningEvents, toolCallEvents } from "./support/model-events.js";
 
 const dirs: string[] = [];
 afterEach(/** 在每个测试后释放临时资源，保证后续场景从干净状态开始。 */
@@ -280,12 +283,70 @@ async () => new Response("oversized", {
   it("Provider 失败在 Runner 边界转换成保留原因的 RunFailure", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const sandbox = await makeSandbox();
-    const runtime = AgentRuntime.fromRegistry(new FailedProvider(), new ToolRegistry(sandbox));
+    const provider = new FailedProvider();
+    const runtime = new AgentRuntime(
+      provider,
+      new ToolRuntime(new ToolRegistry(sandbox)),
+      new ContextAssembler(),
+      noopRuntimeObservationSink,
+      undefined,
+      {
+        ...PRODUCT_CONFIG.runtime,
+        modelRequestRetryInitialDelayMs: 1,
+        modelRequestRetryMaxDelayMs: 1,
+      },
+    );
     await expect(runtime.run(
       { text: "你好", sessionEntries: [] },
       new TestObserver(true),
       new AbortController().signal,
     )).rejects.toMatchObject({ name: "RunFailure", message: "Ollama 不可用" });
+    expect(provider.requests).toBe(6);
+  });
+
+  it("模型重试复用冻结 modelInput，并用成功 Attempt 替换失败的部分流式正文", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const sandbox = await makeSandbox();
+    const provider = new RetryThenSuccessProvider();
+    const observer = new TestObserver(true);
+    const runtime = new AgentRuntime(
+      provider,
+      new ToolRuntime(new ToolRegistry(sandbox)),
+      new ContextAssembler(),
+      noopRuntimeObservationSink,
+      undefined,
+      {
+        ...PRODUCT_CONFIG.runtime,
+        modelRequestRetryInitialDelayMs: 1,
+        modelRequestRetryMaxDelayMs: 1,
+      },
+    );
+
+    const result = await runtime.run(
+      { text: "重试当前模型调用", sessionEntries: [] },
+      observer,
+      new AbortController().signal,
+    );
+
+    expect(result.reason).toBe("stop");
+    expect(result.usage.modelRequests).toBe(2);
+    expect(provider.inputs).toHaveLength(2);
+    expect(provider.inputs[0]).toBe(provider.inputs[1]);
+    expect(observer.attemptIndexes).toEqual([0, 1]);
+    expect(observer.textOutput).toBe("完整回答");
+  });
+
+  it("Provider 明确标记为不可重试的错误只请求一次", async () => {
+    const sandbox = await makeSandbox();
+    const provider = new FailedProvider(false);
+    const runtime = AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox));
+
+    await expect(runtime.run(
+      { text: "非法模型参数", sessionEntries: [] },
+      new TestObserver(true),
+      new AbortController().signal,
+    )).rejects.toMatchObject({ retryable: false });
+    expect(provider.requests).toBe(1);
   });
 
   it("系统提示明确每轮必须返回工具调用或非空最终正文", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
@@ -326,7 +387,7 @@ async () => {
     const sandbox = await makeSandbox();
     const provider = new ScriptedResponseProvider([
       [
-        { type: "thinking_delta", text: "我还应该继续处理" },
+        ...reasoningEvents("我还应该继续处理"),
         { type: "finish", reason: "stop" },
       ],
     ]);
@@ -371,7 +432,7 @@ async () => {
     const sandbox = await makeSandbox();
     const provider = new ScriptedResponseProvider([
       [
-        { type: "text_delta", text: "尚未写完的回答" },
+        ...messageEvents("尚未写完的回答"),
         { type: "finish", reason: "length" },
       ],
     ]);
@@ -394,7 +455,7 @@ async () => {
     const sandbox = await makeSandbox();
     const provider = new ScriptedResponseProvider([
       [
-        { type: "text_delta", text: "抱歉，我不能协助完成这个请求。" },
+        ...messageEvents("抱歉，我不能协助完成这个请求。"),
         { type: "finish", reason: "stop" },
       ],
     ]);
@@ -449,9 +510,26 @@ async () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("Provider 在开放 item 期间 cancelled 时显式收口且不执行工具", async () => {
+    const sandbox = await makeSandbox();
+    const observer = new TestObserver(true);
+    const runtime = AgentRuntime.fromRegistry(new OpenItemCancelledProvider(), new ToolRegistry(sandbox));
+
+    const result = await runtime.run(
+      { text: "取消尚未生成完成的工具参数", sessionEntries: [] },
+      observer,
+      new AbortController().signal,
+    );
+
+    expect(result.reason).toBe("cancelled");
+    expect(observer.abortedReasons).toEqual(["cancelled"]);
+    expect(observer.toolStartCount).toBe(0);
+    expect(observer.permissionCount).toBe(0);
+  });
+
   it("模型流空闲计时只由 onActivity 重置，不依赖 ModelEvent", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
-    const budget = { ...PRODUCT_CONFIG.runtime, modelStreamIdleTimeoutMs: 40 };
+    const budget = { ...PRODUCT_CONFIG.runtime, modelStreamIdleTimeoutMs: 40, modelRequestMaxRetries: 0 };
     const makeRunner = /** 构造「makeRunner」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (provider: ModelProvider, sandbox: FileSandbox) => new AgentRunner(
       provider,
@@ -530,19 +608,16 @@ serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
 async *stream(): AsyncIterable<ModelEvent> {
     this.round += 1;
     if (this.round > this.invalidRounds) {
-      yield { type: "text_delta", text: "已停止尝试错误参数" };
+      yield* messageEvents("已停止尝试错误参数");
       yield { type: "finish", reason: "stop" };
       return;
     }
-    yield {
-      type: "tool_calls",
-      calls: [{
+    yield* toolCallEvents([{
         name: "read_file",
         arguments: this.round === 1
           ? { fileName: "a.txt", extra: true }
           : { extra: true, fileName: "a.txt" },
-      }],
-    };
+      }]);
     yield { type: "finish", reason: "stop" };
   }
 }
@@ -561,14 +636,36 @@ serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
   }
   /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async *stream(): AsyncIterable<ModelEvent> {
-    yield {
-      type: "tool_calls",
-      calls: [{
+    yield* toolCallEvents([{
         id: "cancelled-write",
         index: 0,
         name: "write_file",
         arguments: { path: "cancelled.txt", content: "不应写入" },
-      }],
+      }]);
+    yield { type: "finish", reason: "cancelled" };
+  }
+}
+
+class OpenItemCancelledProvider implements ModelProvider {
+  readonly student: ModelStudent = {
+    id: "open-item-cancelled",
+    name: "Open Item Cancelled",
+    sizeClass: "large",
+    provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
+    generationDefaults: {},
+  };
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+  async *stream(): AsyncIterable<ModelEvent> {
+    yield {
+      type: "output_item_started",
+      item: { id: "open-tool-item", kind: "tool_call", callId: "open-tool-call", name: "write_file" },
+    };
+    yield {
+      type: "output_item_delta",
+      itemId: "open-tool-item",
+      delta: { kind: "tool_arguments", text: "{\"path\":\"never-written.txt\"" },
     };
     yield { type: "finish", reason: "cancelled" };
   }
@@ -601,7 +698,7 @@ serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
   /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     this.lastInput = structuredClone(input);
-    yield { type: "text_delta", text: "已完成" };
+    yield* messageEvents("已完成");
     yield { type: "finish", reason: "stop" };
   }
 }
@@ -626,7 +723,7 @@ class ActivityOnlyProvider implements ModelProvider {
       await waitFor(15, signal);
       onActivity?.();
     }
-    yield { type: "text_delta", text: "完成" };
+    yield* messageEvents("完成");
     yield { type: "finish", reason: "stop" };
   }
 }
@@ -646,7 +743,7 @@ class EventWithoutActivityProvider implements ModelProvider {
     _input: ModelInput,
     signal: AbortSignal,
   ): AsyncIterable<ModelEvent> {
-    yield { type: "text_delta", text: "这个 ModelEvent 不应重置计时器" };
+    yield* messageEvents("这个 ModelEvent 不应重置计时器");
     await waitFor(80, signal);
     yield { type: "finish", reason: "stop" };
   }
@@ -679,6 +776,8 @@ async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
 }
 
 class FailedProvider implements ModelProvider {
+  requests = 0;
+  constructor(private readonly retryable = true) {}
   readonly student: ModelStudent = {
     id: "failed",
     name: "Failed",
@@ -692,7 +791,33 @@ serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
   }
   /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async *stream(): AsyncIterable<ModelEvent> {
-    throw new ModelProviderError("dependency_unavailable", "Ollama 不可用", true);
+    this.requests += 1;
+    throw new ModelProviderError("dependency_unavailable", "Ollama 不可用", this.retryable);
+  }
+}
+
+class RetryThenSuccessProvider implements ModelProvider {
+  readonly student: ModelStudent = {
+    id: "retry-then-success",
+    name: "Retry Then Success",
+    sizeClass: "large",
+    provider: { kind: "ollama", model: "fixture", baseUrl: "http://127.0.0.1" },
+    generationDefaults: {},
+  };
+  readonly inputs: ModelInput[] = [];
+
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+
+  async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
+    this.inputs.push(input);
+    if (this.inputs.length === 1) {
+      yield* messageEvents("未完成回答");
+      throw new TypeError("terminated");
+    }
+    yield* messageEvents("完整回答");
+    yield { type: "finish", reason: "stop" };
   }
 }
 
@@ -722,15 +847,12 @@ constructor(
 async *stream(_input: ModelInput): AsyncIterable<ModelEvent> {
     this.rounds += 1;
     if (this.rounds > 3) {
-      yield { type: "text_delta", text: "模型已完成重复调用" };
+      yield* messageEvents("模型已完成重复调用");
       yield { type: "usage", inputTokens: 100 + this.rounds, outputTokens: 10 };
       yield { type: "finish", reason: "stop" };
       return;
     }
-    yield {
-      type: "tool_calls",
-      calls: [{ name: this.name, arguments: this.argumentsValue }],
-    };
+    yield* toolCallEvents([{ name: this.name, arguments: this.argumentsValue }]);
     yield { type: "usage", inputTokens: 100 + this.rounds, outputTokens: 10 };
     yield { type: "finish", reason: "stop" };
   }
@@ -780,19 +902,28 @@ class TestObserver implements RunObserver {
   textOutput = "";
   permissionCount = 0;
   toolStartCount = 0;
+  abortedReasons: Array<"failed" | "cancelled"> = [];
+  attemptIndexes: number[] = [];
+  private readonly itemKinds = new Map<string, ModelOutputItemStarted["kind"]>();
 
   /** 构造「TestObserver」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 constructor(private readonly permission: boolean) {}
   /** 构造「context」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async context(summary: ContextSummary): Promise<void> { this.contextSummaries.push(summary); }
-  /** 构造「text」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async text(_round: number, value: string): Promise<void> { this.textOutput += value; }
-  /** 构造「thought」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async thought(): Promise<void> {}
-  /** 构造「roundComplete」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async roundComplete(): Promise<void> {}
-  /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async toolStart(_call: PreparedToolCall): Promise<void> { this.toolStartCount += 1; }
+  async modelAttemptStarted(_round: number, facts: import("../src/runtime/agent-runtime.js").RuntimeModelAttemptSnapshot): Promise<void> {
+    this.attemptIndexes.push(facts.attemptIndex);
+    if (facts.attemptIndex > 0) this.textOutput = "";
+  }
+  async modelOutputItemStarted(_round: number, item: ModelOutputItemStarted): Promise<void> {
+    this.itemKinds.set(item.id, item.kind);
+  }
+  async modelOutputItemDelta(_round: number, itemId: string, delta: ModelOutputItemDelta): Promise<void> {
+    if (this.itemKinds.get(itemId) === "message" && delta.kind === "text") this.textOutput += delta.text;
+  }
+  async modelOutputItemsAborted(_round: number, reason: "failed" | "cancelled"): Promise<void> {
+    this.abortedReasons.push(reason);
+  }
+  async toolExecutionStarted(_call: PreparedToolCall): Promise<void> { this.toolStartCount += 1; }
   /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async toolFinish(_call: PreparedToolCall, _status: "pending" | "in_progress" | "completed" | "failed", outcome: ToolOutcome): Promise<void> {
     this.outcomes.push(outcome);

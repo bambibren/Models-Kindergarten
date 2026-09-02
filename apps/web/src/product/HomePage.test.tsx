@@ -11,6 +11,7 @@ describe("production home page capabilities", /** 组织这一组相关测试，
 () => undefined} experimentsEnabled={false} />);
     expect(html.indexOf("网站开发")).toBeLessThan(html.indexOf("PPT 制作"));
     expect(html.indexOf("PPT 制作")).toBeLessThan(html.indexOf("模型上下文实验"));
+    expect(html).not.toContain("Skill 市场");
     expect(html).toContain("模型上下文实验（功能调研中）");
     expect(html).not.toContain("href=\"/context-lab\"");
   });

@@ -32,12 +32,11 @@ async ({ params, json, principal }) =>
   router.register("POST", "/experiments/:experimentId/annotation-worksheet", /** 执行「registerExperimentRoutes」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async ({ params, json, principal }) => {
     const body = await json().catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
-() => ({})) as { force?: unknown; worksheetModelStudentId?: unknown };
+() => ({})) as { force?: unknown };
     return service.generateAnnotationWorksheet(
       params.experimentId ?? "",
       body.force === true,
       principal.principalId,
-      typeof body.worksheetModelStudentId === "string" ? body.worksheetModelStudentId : undefined,
     );
   });
   router.register("POST", "/experiments/:experimentId/variants/:variantId/client-failure", /** 执行「registerExperimentRoutes」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

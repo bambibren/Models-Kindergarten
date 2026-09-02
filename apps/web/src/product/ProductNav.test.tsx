@@ -14,9 +14,19 @@ describe("product account menu", () => {
     expect(html).toContain("product-account");
     expect(html).toContain("bengzakalaka");
     expect(html).not.toContain(">Admin<");
+    expect(html).toContain('href="/skill-market"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html.indexOf("Skill 市场")).toBeLessThan(html.indexOf("product-account"));
     expect(html).toContain('aria-label="打开 bengzakalaka 的个人空间"');
     expect(html).toContain('aria-label="退出登录"');
     expect(html).toContain("退出登录");
+  });
+
+  it("市场页面使用独立路由并标记导航入口", () => {
+    const html = renderToStaticMarkup(<AuthSessionProvider session={passwordSession}><ProductNav active="skills" /></AuthSessionProvider>);
+    expect(html).toContain('class="active" href="/skill-market"');
+    expect(html).toContain('target="_blank"');
   });
 
   it("退出成功后进入登录页", async () => {

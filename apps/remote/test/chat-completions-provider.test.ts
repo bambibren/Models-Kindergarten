@@ -138,10 +138,11 @@ async () => {
         reasoning: reasoningSnapshot("balanced", { enable_thinking: true }),
       }, new AbortController().signal));
 
-      expect(events.filter(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(event) => event.type === "tool_calls")).toEqual([{
-        type: "tool_calls",
-        calls: [
+      expect(events.flatMap((event) =>
+        event.type === "output_item_completed" && event.item.kind === "tool_call"
+          ? [event.item.call]
+          : [],
+      )).toEqual([
           {
             id: "call_a",
             index: 0,
@@ -154,8 +155,7 @@ async () => {
             name: "write_file",
             arguments: { path: "notes/b.md", content: "B" },
           },
-        ],
-      }]);
+        ]);
       expect(events).toContainEqual({
         type: "usage",
         inputTokens: 41,
@@ -169,6 +169,35 @@ async () => {
         url: "/v1/chat/completions",
         headers: { authorization: "Bearer test-token" },
       });
+    } finally {
+      await mock.close();
+    }
+  });
+
+  it("长工具参数生成开始时已经关闭 reasoning 和说明文字", async () => {
+    const mock = await startChatCompletionsMockServer({ thinking: "toggle", longToolContentBytes: 32 * 1024 });
+    try {
+      const events = await collect(createProvider(student(mock.baseUrl)).stream({
+        systemPrompt: "You are a test assistant.",
+        messages: [{ role: "user", content: "build a page" }],
+        tools,
+        reasoning: reasoningSnapshot("balanced", { enable_thinking: true }),
+      }, new AbortController().signal));
+      const reasoningDone = events.findIndex((event) => event.type === "output_item_completed" && event.item.kind === "reasoning");
+      const messageDone = events.findIndex((event) => event.type === "output_item_completed" && event.item.kind === "message");
+      const toolStarted = events.findIndex((event) => event.type === "output_item_started" && event.item.kind === "tool_call");
+      const toolDone = events.findIndex((event) => event.type === "output_item_completed" && event.item.kind === "tool_call");
+      const argumentBytes = events.reduce((total, event) =>
+        total + (event.type === "output_item_delta" && event.delta.kind === "tool_arguments"
+          ? Buffer.byteLength(event.delta.text)
+          : 0), 0);
+
+      expect(reasoningDone).toBeGreaterThanOrEqual(0);
+      expect(messageDone).toBeGreaterThan(reasoningDone);
+      expect(toolStarted).toBeGreaterThan(messageDone);
+      expect(toolDone).toBeGreaterThan(toolStarted);
+      expect(argumentBytes).toBeGreaterThan(32 * 1024);
+      expect(events.at(-1)).toEqual({ type: "finish", reason: "stop" });
     } finally {
       await mock.close();
     }
@@ -199,10 +228,9 @@ async () => {
         reasoning: reasoningSnapshot("fast", { enable_thinking: false }),
       }, new AbortController().signal));
 
-      expect(events.filter(/** 构造「map」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(event) => event.type === "text_delta")
-        .map(/** 构造「join」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(event) => event.type === "text_delta" ? event.text : "").join(""))
+      expect(events.flatMap((event) =>
+        event.type === "output_item_completed" && event.item.kind === "message" ? [event.item.text] : [],
+      ).join(""))
         .toBe("MK_TOOL_CONTINUATION_OK");
       expect(mock.requests[0]?.body).toMatchObject({
         enable_thinking: false,
@@ -226,11 +254,9 @@ async () => {
         tools: [],
         reasoning: reasoningSnapshot("balanced", { enable_thinking: true }),
       }, new AbortController().signal));
-      expect(events.filter(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(event) => event.type === "thinking_delta")).toEqual([
-        { type: "thinking_delta", text: "先计算，" },
-        { type: "thinking_delta", text: "再作答。" },
-      ]);
+      expect(events.flatMap((event) =>
+        event.type === "output_item_completed" && event.item.kind === "reasoning" ? [event.item.text] : [],
+      )).toEqual(["先计算，再作答。"]);
       expect(events).toContainEqual({
         type: "usage",
         inputTokens: 41,
@@ -444,14 +470,8 @@ function noopRunObserver(): RunObserver {
   return {
     /** 构造「context」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async context() {},
-    /** 构造「text」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async text() {},
-    /** 构造「thought」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async thought() {},
-    /** 构造「roundComplete」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async roundComplete() {},
-    /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async toolStart() {},
+    async toolPrepared() {},
+    async toolExecutionStarted() {},
     /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async toolFinish() {},
     /** 构造「requestPermission」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */

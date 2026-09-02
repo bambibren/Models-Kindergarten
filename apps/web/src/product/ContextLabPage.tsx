@@ -80,7 +80,6 @@ function ContextLabReady({ agents, models, options, skills, mcps, source }: {
 () => initialContextLanes(initialAgent, initialPolicy, initialModelId, importedReasoning));
   const [activeTestId, setActiveTestId] = useState(/** 执行「[activeTestId, setActiveTestId]」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 () => lanes[0]?.testId ?? "");
-  const [worksheetModelStudentId, setWorksheetModelStudentId] = useState(initialModelId);
   const [toolExpected, setToolExpected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -181,7 +180,6 @@ async function submit(event: FormEvent) {
         schemaVersion: 2, name, promptText: prompt,
         ...(source ? { sourceRef: { kind: "turn", id: source.turn.turnId } } : {}),
         toolUseWasExpected: toolExpected,
-        worksheetModelStudentId,
         tests: lanes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (lane) => ({
           testId: lane.testId, label: lane.label, sourceAgent: lane.sourceAgent,
@@ -217,8 +215,7 @@ async function submit(event: FormEvent) {
 (event) => setName(event.target.value)} /></label>
         <label><span>公共用户提示词</span><textarea required rows={4} value={prompt} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setPrompt(event.target.value)} placeholder="输入所有 Test 都要回答的问题…" /></label>
-        <div><label><span>评测辅助模型</span><select value={worksheetModelStudentId} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
-(event) => setWorksheetModelStudentId(event.target.value)}>{models.map(modelOption)}</select><small>只用于整理人工标注题目，不参与被测回答和自动评分。</small></label><label className="product-checkbox"><input checked={toolExpected} type="checkbox" onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+        <div><label className="product-checkbox"><input checked={toolExpected} type="checkbox" onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setToolExpected(event.target.checked)} /><span>这个任务预期必须使用 Tool</span></label></div>
       </section>
       <section className="product-lanes">

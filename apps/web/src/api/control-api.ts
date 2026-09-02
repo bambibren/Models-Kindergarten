@@ -75,6 +75,7 @@ export type SessionHistoryEntry =
       status: ToolCallStatus;
       rawInput: unknown;
       rawOutput?: unknown;
+      outcomeStatus?: "success" | "error" | "denied" | "duplicate_blocked";
       content: ToolCallContent[];
       locations: ToolCallLocation[];
       createdAt: string;

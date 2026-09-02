@@ -1,11 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
+  makeAcpMeta,
   makePromptMeta,
   readContextSummaryNotification,
   readContextWindowUsageNotification,
+  readMessageMeta,
   readPromptMeta,
   readTokenUsageNotification,
 } from "./index.js";
+
+describe("Model attempt message meta", () => {
+  it("保留 Attempt 代次和整体重置标记", () => {
+    expect(readMessageMeta(makeAcpMeta({
+      schemaVersion: 1,
+      turnId: "turn-1",
+      chunkIndex: 0,
+      modelAttempt: { id: "attempt-1", index: 1, reset: true },
+    }))).toMatchObject({
+      modelAttempt: { id: "attempt-1", index: 1, reset: true },
+    });
+  });
+});
 
 describe("Context window usage notification", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {

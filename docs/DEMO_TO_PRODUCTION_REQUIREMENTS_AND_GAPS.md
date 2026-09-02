@@ -360,7 +360,7 @@ Context Lab 与 Evaluation 使用同一个 Web 应用。Evaluation 已有真实 
 - 每 lane 的 Agent 配置快照哈希、模型、context sources、能力、raw provider input 摘要、usage、stop reason；
 - 结构化差异视图和原始回答切换；
 - 完整人工注释量表：理解、规划、输出三个 0～100 维度，保留各自的需求勾选/映射、Workflow 步骤标记和最终输出文本标注语义；
-- 每次实验完成后调用当前 ModelStudent 生成标注题目：将原始需求分析合并为公共选项、逐 lane 提取 Workflow、逐 lane 完整切分结果。模型只生成可供人工判断的题目，不输出任何 verdict 或分数；结果随 Experiment 持久化，失败可重试，显式重新生成会使旧 Scorecard 失效；
+- 每次实验完成后调用当前 ModelStudent 生成标注题目：理解候选项的独立调用只接收用户 Prompt 与每个实验 Turn 的第一条非空思考，不接收最终回答、后续思考、Tool、Runtime 结果或其他 Turn；工作流与结果分段在另一调用中按各自证据生成。模型只生成可供人工判断的题目，不输出任何 verdict 或分数；结果随 Experiment 持久化，失败可重试，显式重新生成会使旧 Scorecard 失效；
 - 执行维度：根据同一 lane 的 Runtime Trace 和版本化 `ExecutionScorePolicy` 自动计算 0～100 分，这是确定性规则计算，不是自动评分模型调用；
 - 四维固定为理解、规划、输出、执行，默认各占 25%；服务端计算四维总分、排名和并列规则，前端显示四轴雷达图与 winner；
 - 保存标记和回到 Context Lab。

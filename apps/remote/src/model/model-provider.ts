@@ -121,12 +121,31 @@ export interface ModelInputMessageLimits {
   initialToolRoundHeadroom: number;
 }
 
-/** 描述「ModelEvent」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
+/** Runtime 只消费规范化后的模型输出项；Provider 私有事件不得越过 Adapter。 */
+export type ModelOutputItemStarted =
+  | { id: string; kind: "reasoning" | "message" }
+  | { id: string; kind: "tool_call"; callId: string; name?: string };
+
+/** item delta 只描述生成中的增量；完整内容以 completed 快照为准。 */
+export type ModelOutputItemDelta =
+  | { kind: "text"; text: string }
+  | { kind: "tool_name"; text: string }
+  | { kind: "tool_arguments"; text: string };
+
+/** completed 是 item 终态权威值，不能从 delta 是否静默推断。 */
+export type ModelOutputItemCompleted =
+  | { id: string; kind: "reasoning" | "message"; text: string }
+  | { id: string; kind: "tool_call"; call: ModelToolCall };
+
+/**
+ * item.id 标识一次模型流中的输出项；tool callId 是 Provider 后续回填结果所需身份。
+ * 两者在 Responses 等协议中并不相同，调用方不得互换。
+ */
 export type ModelEvent =
-  | { type: "text_delta"; text: string }
-  | { type: "thinking_delta"; text: string }
+  | { type: "output_item_started"; item: ModelOutputItemStarted }
+  | { type: "output_item_delta"; itemId: string; delta: ModelOutputItemDelta }
+  | { type: "output_item_completed"; item: ModelOutputItemCompleted }
   | ({ type: "usage" } & ModelUsage)
-  | { type: "tool_calls"; calls: ModelToolCall[] }
   | { type: "provider_continuation"; continuation: ProviderOpaqueContinuation }
   | { type: "finish"; reason: "stop" | "length" | "cancelled" };
 

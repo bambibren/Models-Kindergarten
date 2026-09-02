@@ -8,19 +8,27 @@ import type { ReactNode } from "react";
 const ARTIFACT_FRAGMENT = "#mk-artifact=";
 const OPAQUE_ID = /^[A-Za-z0-9_-]{8,160}$/;
 const INTERNAL_TAGS = { "mk-artifact": ["artifact_id"] };
-const INTERNAL_COMPONENTS: Components = {
-  "mk-artifact": InternalArtifactLink,
-};
+
+export interface ArtifactNavigation {
+  href: (artifactId: string) => string;
+}
 
 /** 渲染「ContentRenderer」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-export function ContentRenderer({ content, streaming = false }: { content: ContentBlock[]; streaming?: boolean }) {
+export function ContentRenderer({ content, streaming = false, artifactNavigation }: {
+  content: ContentBlock[];
+  streaming?: boolean;
+  artifactNavigation?: ArtifactNavigation | undefined;
+}) {
+  const components: Components = {
+    "mk-artifact": (props) => <InternalArtifactLink {...props} navigation={artifactNavigation} />,
+  };
   return <div className="content-blocks">
     {content.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item, index) => {
       if (item.type === "text") return <Streamdown
         allowedTags={INTERNAL_TAGS}
         animated={streaming}
-        components={INTERNAL_COMPONENTS}
+        components={components}
         isAnimating={streaming}
         key={index}
         literalTagContent={["mk-artifact"]}
@@ -32,12 +40,15 @@ export function ContentRenderer({ content, streaming = false }: { content: Conte
       if (item.type === "resource_link" && item.uri.startsWith("mk-file://")) {
         return <span key={index}>{item.title ?? item.name}</span>;
       }
-      if (item.type === "resource_link") return <a href={item.uri} key={index} onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+      if (item.type === "resource_link") {
+        const artifactId = parseArtifactUri(item.uri);
+        return <a href={artifactId && artifactNavigation ? artifactNavigation.href(artifactId) : item.uri} key={index} onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => {
-        if (!item.uri.startsWith("artifact://")) return;
+        if (!artifactId || artifactNavigation) return;
         event.preventDefault();
-        window.dispatchEvent(new CustomEvent("mk-open-artifact", { detail: item.uri.slice("artifact://".length) }));
-      }} rel="noreferrer" target="_blank">{item.title ?? item.name}</a>;
+        window.dispatchEvent(new CustomEvent("mk-open-artifact", { detail: artifactId }));
+        }} rel="noreferrer" target="_blank">{item.title ?? item.name}</a>;
+      }
       return <details key={index}><summary>{item.resource.uri}</summary><pre>{"text" in item.resource ? item.resource.text : "二进制资源"}</pre></details>;
     })}
   </div>;
@@ -57,17 +68,20 @@ export function rewriteInternalMarkdownLinks(markdown: string): string {
     .replace(/\[([^\]\n]+)\]\(artifact:\/\/([A-Za-z0-9_-]{8,160})\)/g, /** 执行「replace」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (_match, label: string, id: string) =>
       `<mk-artifact artifact_id="${id}">${escapeTagText(label)}</mk-artifact>`)
+    .replace(/`?artifact:\/\/([A-Za-z0-9_-]{8,160})`?/g, (_match, id: string) =>
+      `<mk-artifact artifact_id="${id}">打开产物</mk-artifact>`)
     .replace(/\[([^\]\n]+)\]\(mk-file:\/\/[A-Za-z0-9_-]{8,160}\)/g, "$1");
 }
 
 /** 渲染「InternalArtifactLink」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-function InternalArtifactLink(props: Record<string, unknown>): ReactNode {
-  return <InternalLink id={props.artifact_id}>{props.children as ReactNode}</InternalLink>;
+function InternalArtifactLink(props: Record<string, unknown> & { navigation?: ArtifactNavigation | undefined }): ReactNode {
+  return <InternalLink id={props.artifact_id} navigation={props.navigation}>{props.children as ReactNode}</InternalLink>;
 }
 
 /** 渲染「InternalLink」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-function InternalLink({ children, id }: { children: ReactNode; id: unknown }) {
+function InternalLink({ children, id, navigation }: { children: ReactNode; id: unknown; navigation?: ArtifactNavigation | undefined }) {
   if (typeof id !== "string" || !OPAQUE_ID.test(id)) return <span>{children}</span>;
+  if (navigation) return <a className="markdown-internal-link" href={navigation.href(id)} rel="noreferrer" target="_blank">{children}</a>;
   return <button className="markdown-internal-link" type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
 () => window.dispatchEvent(new CustomEvent(
     "mk-open-artifact",

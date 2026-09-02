@@ -18,6 +18,9 @@ import {
   modelInputMessageCapacity,
   type ModelProvider,
   type ModelMessage,
+  type ModelOutputItemCompleted,
+  type ModelOutputItemDelta,
+  type ModelOutputItemStarted,
   type ModelToolCall,
   type ModelToolDefinition,
   type ModelUsage,
@@ -59,6 +62,8 @@ import {
   PRODUCT_CONFIG,
   type RuntimeExecutionBudget,
 } from "@kindergarten/contracts";
+import { ModelProviderError } from "../model/model-error.js";
+import { ModelOutputLifecycle } from "./model-output-lifecycle.js";
 
 const MODEL_OUTPUT_CONTRACT = [
   "【每轮响应契约】",
@@ -106,16 +111,21 @@ export interface RunObserver {
   turnSnapshot?(facts: RuntimeTurnSnapshot): Promise<void>;
   capabilitySnapshot?(generation: number, hash: string, snapshot: RuntimeCapabilitySnapshot): Promise<void>;
   modelRoundStarted?(facts: RuntimeModelRoundSnapshot): Promise<void>;
+  modelAttemptStarted?(round: number, facts: RuntimeModelAttemptSnapshot): Promise<void>;
+  modelAttemptFailed?(round: number, facts: RuntimeModelAttemptFailureSnapshot): Promise<void>;
+  modelAttemptCompleted?(round: number, facts: RuntimeModelAttemptCompletionSnapshot): Promise<void>;
   modelRoundCompleted?(round: number, completedAt: string): Promise<void>;
-  text(round: number, value: string): Promise<void>;
-  thought(round: number, value: string): Promise<void>;
-  roundComplete(round: number): Promise<void>;
+  modelOutputItemStarted?(round: number, item: ModelOutputItemStarted): Promise<void>;
+  modelOutputItemDelta?(round: number, itemId: string, delta: ModelOutputItemDelta): Promise<void>;
+  modelOutputItemCompleted?(round: number, item: ModelOutputItemCompleted): Promise<void>;
+  modelOutputItemsAborted?(round: number, reason: "failed" | "cancelled"): Promise<void>;
   providerContinuation?(
     round: number,
     continuation: ProviderOpaqueContinuation,
     calls: ModelToolCall[],
   ): Promise<void>;
-  toolStart(call: PreparedToolCall): Promise<void>;
+  toolPrepared?(call: PreparedToolCall): Promise<void>;
+  toolExecutionStarted?(call: PreparedToolCall): Promise<void>;
   toolFinish(call: PreparedToolCall, status: ToolCallStatus, result: ToolOutcome): Promise<void>;
   requestPermission(call: PreparedToolCall): Promise<boolean>;
   askUser(question: string, toolCallId: string): Promise<string>;
@@ -140,6 +150,30 @@ export interface RuntimeModelRoundSnapshot {
   providerInput: ModelContextSerialization;
   startedAt: string;
   resolvedReasoning: ResolvedReasoningSnapshot;
+}
+
+/** 同一逻辑 Model Round 内的一次 Provider 请求；index=0 是首次请求。 */
+export interface RuntimeModelAttemptSnapshot {
+  attemptId: string;
+  attemptIndex: number;
+  maxAttempts: number;
+  startedAt: string;
+}
+
+/** 一次 Provider 请求失败后的终态事实；retryDelayMs 仅在 Runtime 将自动重试时存在。 */
+export interface RuntimeModelAttemptFailureSnapshot {
+  attemptId: string;
+  attemptIndex: number;
+  completedAt: string;
+  error: { code: string; message: string; retryable: boolean };
+  retryDelayMs?: number;
+}
+
+/** 一次 Provider 请求成功结束后的终态事实。 */
+export interface RuntimeModelAttemptCompletionSnapshot {
+  attemptId: string;
+  attemptIndex: number;
+  completedAt: string;
 }
 
 /** 描述「ModelRoundUsage」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -426,7 +460,6 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
         }
       }
       await observed.phase("model_streaming");
-      modelRequests += 1;
       const roundId = `${runId}:round:${round}`;
       const roundStartedAt = new Date().toISOString();
       observed.enterRound(roundId);
@@ -451,13 +484,12 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
       });
       let content = "";
       let thinking = "";
-      let contentBytes = 0;
-      let thinkingBytes = 0;
       let reason: "stop" | "length" | "cancelled" = "stop";
-      const calls = new Map<string, ModelToolCall>();
-      let firstTokenSeen = false;
+      let calls = new Map<string, ModelToolCall>();
+      let roundFirstTokenSeen = false;
       let roundUsage: ModelUsage | undefined;
       let providerOpaqueContinuation: ProviderOpaqueContinuation | undefined;
+      // 逻辑 Round 只组装一次输入；所有 Attempt 复用这份冻结快照，不重新读取 Session 或实验配置。
       const modelInput = { systemPrompt, messages, tools: toolDefinitions, reasoning: resolvedReasoning } satisfies import("../model/model-provider.js").ModelInput;
       await observed.modelRoundStarted({
         roundIndex: round,
@@ -471,127 +503,258 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
         startedAt: roundStartedAt,
         resolvedReasoning,
       });
-
-      const idleController = new AbortController();
-      const streamSignal = AbortSignal.any([signal, idleController.signal]);
-      let idleTimer: ReturnType<typeof setTimeout> | undefined;
-      let idleExpired = false;
-      const onActivity = /** 只由模型原始流活动重置看门狗，把连续静默判为流失活。 */
-() => {
-        if (idleTimer) clearTimeout(idleTimer);
-        idleTimer = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
-() => {
-          idleExpired = true;
-          idleController.abort();
-        }, this.executionBudget.modelStreamIdleTimeoutMs);
-        idleTimer.unref?.();
-      };
-      try {
-        onActivity();
-        for await (const event of model.stream(modelInput, streamSignal, onActivity)) {
-          if (
-            !firstTokenSeen &&
-            (event.type === "text_delta" ||
-              event.type === "thinking_delta" ||
-              (event.type === "tool_calls" && event.calls.length > 0))
-          ) {
-            firstTokenSeen = true;
-            this.observations.emit({
-              type: "model_round_first_token",
-              runId,
-              roundId,
-              at: Date.now(),
-            });
-          }
-          if (event.type === "text_delta") {
-            contentBytes += Buffer.byteLength(event.text);
-            if (contentBytes > this.executionBudget.maxTextBytesPerRound) {
-              throw new RunFailure(
-                `单轮模型正文超过 ${this.executionBudget.maxTextBytesPerRound} 字节`,
-                "MODEL_TEXT_BYTES_LIMIT",
-                false,
-              );
-            }
-            content += event.text;
-            await observed.text(round, event.text);
-          } else if (event.type === "thinking_delta") {
-            thinkingBytes += Buffer.byteLength(event.text);
-            if (thinkingBytes > this.executionBudget.maxThinkingBytesPerRound) {
-              throw new RunFailure(
-                `单轮模型 thinking 超过 ${this.executionBudget.maxThinkingBytesPerRound} 字节`,
-                "MODEL_THINKING_BYTES_LIMIT",
-                false,
-              );
-            }
-            thinking += event.text;
-            await observed.thought(round, event.text);
-          } else if (event.type === "tool_calls") {
-            for (const call of event.calls) {
-              const argumentBytes = jsonBytes(call.arguments, "模型工具参数无法序列化");
-              if (argumentBytes > this.executionBudget.maxToolArgumentBytesPerCall) {
-                throw new RunFailure(
-                  `工具 ${call.name} 的参数超过 ${this.executionBudget.maxToolArgumentBytesPerCall} 字节`,
-                  "TOOL_ARGUMENT_BYTES_LIMIT",
-                  false,
-                );
-              }
-              calls.set(toolCallKey(call), call);
-            }
-            if (calls.size > this.executionBudget.maxToolCallsPerRound) {
-              throw new RunFailure(
-                `单轮工具调用超过 ${this.executionBudget.maxToolCallsPerRound} 个`,
-                "TOOL_CALL_ROUND_LIMIT",
-                false,
-              );
-            }
-          } else if (event.type === "provider_continuation") {
-            providerOpaqueContinuation = structuredClone(event.continuation);
-          } else if (event.type === "usage") {
-            roundUsage = mergeUsage(roundUsage, event);
-            this.observations.emit({
-              type: "model_round_usage",
-              runId,
-              roundId,
-              ...(event.inputTokens !== undefined ? { inputTokens: event.inputTokens } : {}),
-              ...(event.outputTokens !== undefined ? { outputTokens: event.outputTokens } : {}),
-              ...(event.cachedInputTokens !== undefined ? { cachedInputTokens: event.cachedInputTokens } : {}),
-              ...(event.reasoningOutputTokens !== undefined ? { reasoningOutputTokens: event.reasoningOutputTokens } : {}),
-            });
-          } else if (event.type === "finish") {
-            reason = event.reason;
-          }
-        }
-      } catch (error) {
-        if (idleExpired) {
-          const failure = new RunFailure(
-            `模型流连续 ${this.executionBudget.modelStreamIdleTimeoutMs} 毫秒没有返回事件`,
-            "MODEL_STREAM_IDLE_TIMEOUT",
-            true,
-            { cause: error },
-          );
-          this.runtimeError(runId, "model", failure);
-          this.completeTurn(runId, "failed", "resource_limit");
-          throw failure;
-        }
-        if (isAbort(error) || signal.aborted) {
-          this.completeTurn(runId, "cancelled", "cancelled");
-          return {
-            runId,
-            reason: "cancelled",
-            usage: aggregateUsage(modelRequests, roundUsages),
-            fileRelativePaths: [...fileRelativePaths],
-          };
-        }
-        this.runtimeError(runId, "model", error);
-        this.completeTurn(
+      const maxAttempts = this.executionBudget.modelRequestMaxRetries + 1;
+      for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
+        modelRequests += 1;
+        content = "";
+        thinking = "";
+        let contentBytes = 0;
+        let thinkingBytes = 0;
+        const toolArgumentDeltaBytes = new Map<string, number>();
+        const lifecycle = new ModelOutputLifecycle();
+        reason = "stop";
+        calls = new Map<string, ModelToolCall>();
+        roundUsage = undefined;
+        providerOpaqueContinuation = undefined;
+        const attemptId = `${roundId}:attempt:${attemptIndex}`;
+        const attemptStartedAt = Date.now();
+        await observed.modelAttemptStarted(round, {
+          attemptId,
+          attemptIndex,
+          maxAttempts,
+          startedAt: new Date(attemptStartedAt).toISOString(),
+        });
+        this.observations.emit({
+          type: "model_attempt_started",
           runId,
-          "failed",
-          error instanceof RunFailure && error.code.endsWith("_LIMIT") ? "resource_limit" : undefined,
-        );
-        // 模型流无法继续时才提升为 Turn 级失败；具体错误文本保持不变。
-        throw toRunFailure(error);
-      } finally {
-        if (idleTimer) clearTimeout(idleTimer);
+          roundId,
+          attemptId,
+          index: attemptIndex,
+          startedAt: attemptStartedAt,
+        });
+
+        const idleController = new AbortController();
+        const streamSignal = AbortSignal.any([signal, idleController.signal]);
+        let idleTimer: ReturnType<typeof setTimeout> | undefined;
+        let idleExpired = false;
+        const onActivity = /** 只由模型原始流活动重置看门狗，把连续静默判为流失活。 */
+() => {
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(/** 执行受生命周期约束的定时任务，调用方负责在结束时取消句柄。 */
+() => {
+            idleExpired = true;
+            idleController.abort();
+          }, this.executionBudget.modelStreamIdleTimeoutMs);
+          idleTimer.unref?.();
+        };
+        try {
+          onActivity();
+          for await (const event of readModelStream(model, modelInput, streamSignal, onActivity)) {
+            if (
+              !roundFirstTokenSeen &&
+              (event.type === "output_item_delta" ||
+                event.type === "output_item_started" && event.item.kind === "tool_call")
+            ) {
+              roundFirstTokenSeen = true;
+              this.observations.emit({
+                type: "model_round_first_token",
+                runId,
+                roundId,
+                at: Date.now(),
+              });
+            }
+            if (event.type === "output_item_started") {
+              lifecycle.start(event.item);
+              await observed.modelOutputItemStarted(round, event.item);
+            } else if (event.type === "output_item_delta") {
+              const kind = lifecycle.delta(event.itemId, event.delta);
+              const bytes = Buffer.byteLength(event.delta.text);
+              if (kind === "message") {
+                contentBytes += bytes;
+                if (contentBytes > this.executionBudget.maxTextBytesPerRound) {
+                  throw new RunFailure(
+                    `单轮模型正文超过 ${this.executionBudget.maxTextBytesPerRound} 字节`,
+                    "MODEL_TEXT_BYTES_LIMIT",
+                    false,
+                  );
+                }
+                content += event.delta.text;
+              } else if (kind === "reasoning") {
+                thinkingBytes += bytes;
+                if (thinkingBytes > this.executionBudget.maxThinkingBytesPerRound) {
+                  throw new RunFailure(
+                    `单轮模型 thinking 超过 ${this.executionBudget.maxThinkingBytesPerRound} 字节`,
+                    "MODEL_THINKING_BYTES_LIMIT",
+                    false,
+                  );
+                }
+                thinking += event.delta.text;
+              } else if (event.delta.kind === "tool_arguments") {
+                const total = (toolArgumentDeltaBytes.get(event.itemId) ?? 0) + bytes;
+                toolArgumentDeltaBytes.set(event.itemId, total);
+                if (total > this.executionBudget.maxToolArgumentBytesPerCall) {
+                  throw new RunFailure(
+                    `模型工具参数超过 ${this.executionBudget.maxToolArgumentBytesPerCall} 字节`,
+                    "TOOL_ARGUMENT_BYTES_LIMIT",
+                    false,
+                  );
+                }
+              }
+              await observed.modelOutputItemDelta(round, event.itemId, event.delta);
+            } else if (event.type === "output_item_completed") {
+              lifecycle.complete(event.item);
+              if (event.item.kind === "tool_call") {
+                const argumentBytes = jsonBytes(event.item.call.arguments, "模型工具参数无法序列化");
+                if (argumentBytes > this.executionBudget.maxToolArgumentBytesPerCall) {
+                  throw new RunFailure(
+                    `工具 ${event.item.call.name} 的参数超过 ${this.executionBudget.maxToolArgumentBytesPerCall} 字节`,
+                    "TOOL_ARGUMENT_BYTES_LIMIT",
+                    false,
+                  );
+                }
+              } else if (event.item.kind === "message") {
+                const bytes = Buffer.byteLength(event.item.text);
+                if (bytes > this.executionBudget.maxTextBytesPerRound) {
+                  throw new RunFailure(
+                    `单轮模型正文超过 ${this.executionBudget.maxTextBytesPerRound} 字节`,
+                    "MODEL_TEXT_BYTES_LIMIT",
+                    false,
+                  );
+                }
+              } else if (event.item.kind === "reasoning") {
+                const bytes = Buffer.byteLength(event.item.text);
+                if (bytes > this.executionBudget.maxThinkingBytesPerRound) {
+                  throw new RunFailure(
+                    `单轮模型 thinking 超过 ${this.executionBudget.maxThinkingBytesPerRound} 字节`,
+                    "MODEL_THINKING_BYTES_LIMIT",
+                    false,
+                  );
+                }
+              }
+              await observed.modelOutputItemCompleted(round, event.item);
+            } else if (event.type === "provider_continuation") {
+              providerOpaqueContinuation = structuredClone(event.continuation);
+            } else if (event.type === "usage") {
+              roundUsage = mergeUsage(roundUsage, event);
+              this.observations.emit({
+                type: "model_round_usage",
+                runId,
+                roundId,
+                ...(event.inputTokens !== undefined ? { inputTokens: event.inputTokens } : {}),
+                ...(event.outputTokens !== undefined ? { outputTokens: event.outputTokens } : {}),
+                ...(event.cachedInputTokens !== undefined ? { cachedInputTokens: event.cachedInputTokens } : {}),
+                ...(event.reasoningOutputTokens !== undefined ? { reasoningOutputTokens: event.reasoningOutputTokens } : {}),
+              });
+            } else if (event.type === "finish") {
+              reason = event.reason;
+            }
+          }
+          if (reason === "cancelled") {
+            // Provider 终止可以发生在任意 item 边界；关闭 UI 流并丢弃工具请求，禁止取消后产生副作用。
+            await observed.modelOutputItemsAborted(round, "cancelled");
+            calls = new Map();
+          } else {
+            const snapshot = lifecycle.snapshot();
+            content = snapshot.content;
+            thinking = snapshot.thinking;
+            calls = new Map(snapshot.calls.map((call) => [toolCallKey(call), call]));
+          }
+          if (calls.size > this.executionBudget.maxToolCallsPerRound) {
+            throw new RunFailure(
+              `单轮工具调用超过 ${this.executionBudget.maxToolCallsPerRound} 个`,
+              "TOOL_CALL_ROUND_LIMIT",
+              false,
+            );
+          }
+        } catch (error) {
+          if ((isAbort(error) && !idleExpired) || signal.aborted) {
+            await observed.modelOutputItemsAborted(round, "cancelled");
+            this.completeTurn(runId, "cancelled", "cancelled");
+            return {
+              runId,
+              reason: "cancelled",
+              usage: aggregateUsage(modelRequests, roundUsages),
+              fileRelativePaths: [...fileRelativePaths],
+            };
+          }
+          const failure = idleExpired
+            ? new RunFailure(
+                `模型流连续 ${this.executionBudget.modelStreamIdleTimeoutMs} 毫秒没有返回事件`,
+                "MODEL_STREAM_IDLE_TIMEOUT",
+                true,
+                { cause: error },
+              )
+            : modelAttemptFailure(error);
+          const willRetry = attemptIndex < this.executionBudget.modelRequestMaxRetries
+            && isRetryableModelAttempt(error, failure, idleExpired);
+          const retryDelayMs = willRetry
+            ? modelRetryDelay(attemptIndex, error, this.executionBudget)
+            : undefined;
+          const attemptCompletedAt = Date.now();
+          const attemptError = { code: failure.code, message: failure.message, retryable: failure.retryable };
+          this.observations.emit({
+            type: "model_attempt_failed",
+            runId,
+            roundId,
+            attemptId,
+            completedAt: attemptCompletedAt,
+            error: attemptError,
+            output: {
+              text: payloadEvidence(content),
+              ...(thinking ? { thinking: payloadEvidence(thinking) } : {}),
+            },
+            ...(retryDelayMs !== undefined ? { retryDelayMs } : {}),
+          });
+          await observed.modelOutputItemsAborted(round, "failed");
+          await observed.modelAttemptFailed(round, {
+            attemptId,
+            attemptIndex,
+            completedAt: new Date(attemptCompletedAt).toISOString(),
+            error: attemptError,
+            ...(retryDelayMs === undefined ? {} : { retryDelayMs }),
+          });
+          if (!willRetry) {
+            this.runtimeError(runId, "model", failure);
+            this.completeTurn(
+              runId,
+              "failed",
+              failure.code.endsWith("_LIMIT") ? "resource_limit" : undefined,
+            );
+            throw failure;
+          }
+          try {
+            await waitForModelRetry(retryDelayMs ?? 0, signal);
+          } catch (waitError) {
+            if (isAbort(waitError) || signal.aborted) {
+              this.completeTurn(runId, "cancelled", "cancelled");
+              return {
+                runId,
+                reason: "cancelled",
+                usage: aggregateUsage(modelRequests, roundUsages),
+                fileRelativePaths: [...fileRelativePaths],
+              };
+            }
+            throw waitError;
+          }
+          continue;
+        } finally {
+          if (idleTimer) clearTimeout(idleTimer);
+        }
+
+        const attemptCompletedAt = Date.now();
+        this.observations.emit({
+          type: "model_attempt_completed",
+          runId,
+          roundId,
+          attemptId,
+          completedAt: attemptCompletedAt,
+        });
+        await observed.modelAttemptCompleted(round, {
+          attemptId,
+          attemptIndex,
+          completedAt: new Date(attemptCompletedAt).toISOString(),
+        });
+        break;
       }
 
       if (roundUsage) roundUsages.push({ round, ...roundUsage });
@@ -643,7 +806,6 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
         );
       }
       await observed.modelRoundCompleted(round, new Date().toISOString());
-      await observed.roundComplete(round);
       const outcome = resolveModelResponse({ content, thinking, calls: modelCalls, reason });
       if (outcome.kind === "cancelled") {
         this.completeTurn(runId, "cancelled", "cancelled");
@@ -687,6 +849,7 @@ async run(input: RunInput, observer: RunObserver, signal: AbortSignal): Promise<
 (call, index) =>
         ({ modelCall: call, call: prepareToolCall(currentTools.registry, call, `${randomUUID()}:${index}`) }),
       );
+      for (const item of prepared) await observed.toolPrepared(item.call);
       const assistantMessage = {
         role: "assistant",
         content,
@@ -852,6 +1015,119 @@ function aggregateUsage(
   };
 }
 
+/** 只把 Provider 明确分类的错误和流空闲超时纳入自动重试；Runtime/投影异常直接失败。 */
+function isRetryableModelAttempt(
+  original: unknown,
+  failure: RunFailure,
+  idleExpired: boolean,
+): boolean {
+  return failure.retryable && (idleExpired || original instanceof ModelProviderError);
+}
+
+/**
+ * 只包围 Provider iterator.next()，因此可以把中途断流与 Web 投影异常严格区分。
+ * Provider 已结构化的错误原样透传；已知网络错误统一转换为可重试传输错误。
+ */
+async function* readModelStream(
+  model: ModelProvider,
+  input: import("../model/model-provider.js").ModelInput,
+  signal: AbortSignal,
+  onActivity: () => void,
+): AsyncIterable<import("../model/model-provider.js").ModelEvent> {
+  const iterator = model.stream(input, signal, onActivity)[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      let item: IteratorResult<import("../model/model-provider.js").ModelEvent>;
+      try {
+        item = await iterator.next();
+      } catch (error) {
+        if (
+          error instanceof ModelProviderError ||
+          error instanceof RunFailure ||
+          isAbort(error) ||
+          !isModelTransportCause(error)
+        ) {
+          throw error;
+        }
+        throw new ModelProviderError(
+          "dependency_unavailable",
+          "模型流连接中断",
+          true,
+          { cause: error },
+        );
+      }
+      if (item.done) return;
+      yield item.value;
+    }
+  } finally {
+    await iterator.return?.().catch(() => undefined);
+  }
+}
+
+/** 识别 fetch/undici 与常见 socket 传输错误；未知 Adapter 异常不自动重试。 */
+function isModelTransportCause(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  if (error instanceof DOMException) return error.name === "NetworkError" || error.name === "TimeoutError";
+  if (!(error instanceof Error)) return false;
+  const code = (error as Error & { code?: unknown }).code;
+  if (typeof code === "string" && (
+    ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "ENOTFOUND"].includes(code) ||
+    code.startsWith("UND_ERR_")
+  )) return true;
+  return isModelTransportCause(error.cause);
+}
+
+/** 把 Provider 错误转换为稳定 Turn 错误码，同时保留重试判断与原始 cause。 */
+function modelAttemptFailure(error: unknown): RunFailure {
+  if (error instanceof RunFailure) return error;
+  if (error instanceof ModelProviderError) {
+    const code = error.code === "invalid_model_response"
+      ? "MODEL_INVALID_RESPONSE"
+      : error.code === "dependency_unavailable"
+        ? error.retryable ? "MODEL_TRANSPORT_ERROR" : "MODEL_DEPENDENCY_UNAVAILABLE"
+        : "MODEL_REQUEST_FAILED";
+    return new RunFailure(error.message, code, error.retryable, { cause: error });
+  }
+  return new RunFailure(errorText(error), "INTERNAL_ERROR", false, { cause: error });
+}
+
+/** Retry-After 优先于带抖动的指数退避；首次失败后的退避指数为 0。 */
+function modelRetryDelay(
+  attemptIndex: number,
+  error: unknown,
+  budget: RuntimeExecutionBudget,
+): number {
+  const base = Math.min(
+    budget.modelRequestRetryMaxDelayMs,
+    budget.modelRequestRetryInitialDelayMs * 2 ** attemptIndex,
+  );
+  const jittered = Math.round(base * (0.5 + Math.random() * 0.5));
+  return error instanceof ModelProviderError && error.retryAfterMs !== undefined
+    ? Math.max(jittered, error.retryAfterMs)
+    : jittered;
+}
+
+/** 退避等待响应 Turn 取消，不占用模型流的 idle controller。 */
+function waitForModelRetry(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("已取消", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
+    signal.addEventListener("abort", cancel, { once: true });
+    function done(): void {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }
+    function cancel(): void {
+      clearTimeout(timer);
+      reject(new DOMException("已取消", "AbortError"));
+    }
+  });
+}
+
 /** 汇总「sumUsageField」对应指标，保持缺失字段语义且不重复计算同一来源。 */
 function sumUsageField<K extends keyof ModelUsage>(
   rounds: ModelRoundUsage[],
@@ -889,14 +1165,22 @@ turnSnapshot(facts: RuntimeTurnSnapshot): Promise<void> { return this.delegate.t
 capabilitySnapshot(generation: number, hash: string, snapshot: RuntimeCapabilitySnapshot): Promise<void> { return this.delegate.capabilitySnapshot?.(generation, hash, snapshot) ?? Promise.resolve(); }
   /** 执行「modelRoundStarted」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 modelRoundStarted(facts: RuntimeModelRoundSnapshot): Promise<void> { return this.delegate.modelRoundStarted?.(facts) ?? Promise.resolve(); }
+  /** 通知投影开始新的模型 Attempt；失败 Attempt 的临时正文由投影整体替换。 */
+modelAttemptStarted(round: number, facts: RuntimeModelAttemptSnapshot): Promise<void> { return this.delegate.modelAttemptStarted?.(round, facts) ?? Promise.resolve(); }
+  /** 通知投影当前模型 Attempt 已失败，并携带是否将重试所需的等待事实。 */
+modelAttemptFailed(round: number, facts: RuntimeModelAttemptFailureSnapshot): Promise<void> { return this.delegate.modelAttemptFailed?.(round, facts) ?? Promise.resolve(); }
+  /** 通知投影当前模型 Attempt 已成功完成。 */
+modelAttemptCompleted(round: number, facts: RuntimeModelAttemptCompletionSnapshot): Promise<void> { return this.delegate.modelAttemptCompleted?.(round, facts) ?? Promise.resolve(); }
   /** 执行「modelRoundCompleted」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 modelRoundCompleted(round: number, completedAt: string): Promise<void> { return this.delegate.modelRoundCompleted?.(round, completedAt) ?? Promise.resolve(); }
-  /** 执行「text」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-text(round: number, value: string): Promise<void> { return this.delegate.text(round, value); }
-  /** 执行「thought」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-thought(round: number, value: string): Promise<void> { return this.delegate.thought(round, value); }
-  /** 执行「roundComplete」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-roundComplete(round: number): Promise<void> { return this.delegate.roundComplete(round); }
+  /** 把规范化 item 开始边界交给唯一投影所有者。 */
+modelOutputItemStarted(round: number, item: ModelOutputItemStarted): Promise<void> { return this.delegate.modelOutputItemStarted?.(round, item) ?? Promise.resolve(); }
+  /** 把规范化 item 增量交给唯一投影所有者。 */
+modelOutputItemDelta(round: number, itemId: string, delta: ModelOutputItemDelta): Promise<void> { return this.delegate.modelOutputItemDelta?.(round, itemId, delta) ?? Promise.resolve(); }
+  /** 把规范化 item 完成边界交给唯一投影所有者。 */
+modelOutputItemCompleted(round: number, item: ModelOutputItemCompleted): Promise<void> { return this.delegate.modelOutputItemCompleted?.(round, item) ?? Promise.resolve(); }
+  /** Attempt 异常终止时关闭所有活动投影，避免 UI 永久处于 streaming。 */
+modelOutputItemsAborted(round: number, reason: "failed" | "cancelled"): Promise<void> { return this.delegate.modelOutputItemsAborted?.(round, reason) ?? Promise.resolve(); }
   /** 执行「providerContinuation」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 providerContinuation(
     round: number,
@@ -906,8 +1190,11 @@ providerContinuation(
     return this.delegate.providerContinuation?.(round, continuation, calls) ?? Promise.resolve();
   }
 
-  /** 根据已校验输入构建「toolStart」结果，不额外持有调用方的大对象。 */
-async toolStart(call: PreparedToolCall): Promise<void> {
+  /** 模型工具请求已完整并完成规范化，但尚未进入 Handler。 */
+toolPrepared(call: PreparedToolCall): Promise<void> { return this.delegate.toolPrepared?.(call) ?? Promise.resolve(); }
+
+  /** 只有 ToolRuntime 即将进入真实 Handler 时才记录执行开始。 */
+async toolExecutionStarted(call: PreparedToolCall): Promise<void> {
     this.observations.emit({
       type: "tool_call_started",
       runId: this.runId,
@@ -919,7 +1206,7 @@ async toolStart(call: PreparedToolCall): Promise<void> {
       permission: call.permission,
       startedAt: Date.now(),
     });
-    await this.delegate.toolStart(call);
+    await this.delegate.toolExecutionStarted?.(call);
   }
 
   /** 根据已校验输入构建「toolFinish」结果，不额外持有调用方的大对象。 */
@@ -1189,8 +1476,9 @@ export function buildRuntimeSystemPrompt(systemPrompt: string): string {
 /** 在 Runtime 组合边界拒绝零值、负值和非整数预算，避免运行中出现失效上限。 */
 function validateExecutionBudget(budget: RuntimeExecutionBudget): void {
   for (const [name, value] of Object.entries(budget)) {
-    if (!Number.isFinite(value) || value <= 0) {
-      throw new Error(`Runtime 执行预算 ${name} 必须是正数`);
+    const allowsZero = name === "modelRequestMaxRetries";
+    if (!Number.isFinite(value) || value < 0 || (!allowsZero && value === 0)) {
+      throw new Error(`Runtime 执行预算 ${name} 必须是${allowsZero ? "非负数" : "正数"}`);
     }
   }
   for (const name of [
@@ -1202,11 +1490,17 @@ function validateExecutionBudget(budget: RuntimeExecutionBudget): void {
     "maxToolArgumentBytesPerCall",
     "maxToolArgumentBytesPerTurn",
     "modelStreamIdleTimeoutMs",
+    "modelRequestMaxRetries",
+    "modelRequestRetryInitialDelayMs",
+    "modelRequestRetryMaxDelayMs",
     "maxConcurrentTurns",
   ] as const) {
     if (!Number.isInteger(budget[name])) {
       throw new Error(`Runtime 执行预算 ${name} 必须是整数`);
     }
+  }
+  if (budget.modelRequestRetryMaxDelayMs < budget.modelRequestRetryInitialDelayMs) {
+    throw new Error("Runtime 模型重试等待上限不能小于初始等待时间");
   }
 }
 

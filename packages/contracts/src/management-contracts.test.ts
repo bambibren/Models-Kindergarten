@@ -139,7 +139,6 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
       promptText: "分析首屏性能",
       sourceRef: { kind: "turn", id: "turn-1" },
       toolUseWasExpected: false,
-      worksheetModelStudentId: "student-1",
       tests,
     });
     expect(value.tests.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
@@ -150,6 +149,8 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
 () => parseExperimentDraftV2({ ...value, mode: "history_turn" })).toThrow("未知字段");
     expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => parseExperimentDraftV2({ ...value, tests: [{ ...tests[0], mode: "reuse_snapshot" }, tests[1]] })).toThrow("未知字段");
+    expect(/** 浏览器不能再覆盖服务端配置的工作表模型。 */
+() => parseExperimentDraftV2({ ...value, worksheetModelStudentId: "student-1" })).toThrow("未知字段");
   });
 
   it("mk-file URI 只接受 opaque ID，不接受路径、host 或 query", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
@@ -244,7 +245,7 @@ describe("four-dimension score contracts", /** 组织这一组相关测试，统
   });
 
   it("三类人工标注完成后计算可解释分数", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
-() => {
+  () => {
     const scores = scoreManualDimensions({
       variantIds: ["a", "b"],
       understanding: {
@@ -261,11 +262,7 @@ describe("four-dimension score contracts", /** 组织这一组相关测试，统
         completedAt: "2026-08-12T00:00:00.000Z",
       },
       planning: {
-        marks: [
-          { variantId: "a", stepId: "a1", verdict: "effective" },
-          { variantId: "a", stepId: "a2", verdict: "partial" },
-          { variantId: "b", stepId: "b1", verdict: "none" },
-        ],
+        scores: [{ variantId: "a", score: 75 }, { variantId: "b", score: 0 }],
         completedAt: "2026-08-12T00:00:00.000Z",
       },
       output: {
@@ -284,13 +281,44 @@ describe("four-dimension score contracts", /** 组织这一组相关测试，统
     expect(scores.byVariant.a?.output).toBe(100);
   });
 
+  it("三类人工标注尚未开始时统一按 0 分计算", () => {
+    const scores = scoreManualDimensions({
+      variantIds: ["a"],
+      understanding: { requirements: [], marks: [] },
+      planning: { scores: [] },
+      output: { answers: [{ variantId: "a", text: "尚未标注的回答" }], marks: [] },
+    });
+
+    expect(scores.complete).toBe(false);
+    expect(scores.byVariant.a).toEqual({ understanding: 0, output: 0 });
+  });
+
+  it("有产物的 lane 使用单个 0 到 100 产物分并忽略回答文字覆盖率", () => {
+    const scores = scoreManualDimensions({
+      variantIds: ["a", "b"],
+      understanding: { requirements: [], marks: [] },
+      planning: { scores: [] },
+      output: {
+        answers: [{ variantId: "a", text: "即使回答文字未标注也不参与产物 lane 评分" }, { variantId: "b", text: "普通回答" }],
+        artifactVariantIds: ["a"],
+        artifactScores: [{ variantId: "a", score: 87 }],
+        marks: [{ variantId: "a", answerSectionId: "old", start: 0, end: 10, verdict: "effective", quotedTextHash: "old" }],
+        completedAt: "2026-09-02T00:00:00.000Z",
+      },
+    });
+
+    expect(scores.complete).toBe(false);
+    expect(scores.byVariant.a?.output).toBe(87);
+    expect(scores.byVariant.b?.output).toBe(0);
+  });
+
   it("输出覆盖评分不会按回答字符数分配权重数组，并正确处理重叠区间", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     const answer = `${"甲".repeat(200_000)} ${"乙".repeat(200_000)}`;
     const scores = scoreManualDimensions({
       variantIds: ["a"],
       understanding: { requirements: [], marks: [] },
-      planning: { marks: [] },
+      planning: { scores: [] },
       output: {
         answers: [{ variantId: "a", text: answer }],
         marks: [
@@ -300,6 +328,9 @@ describe("four-dimension score contracts", /** 组织这一组相关测试，统
       },
     });
 
+    expect(scores.complete).toBe(false);
+    expect(scores.byVariant.a?.understanding).toBe(0);
+    expect(scores.byVariant.a?.planning).toBeUndefined();
     expect(scores.byVariant.a?.output).toBe(50);
   });
 });

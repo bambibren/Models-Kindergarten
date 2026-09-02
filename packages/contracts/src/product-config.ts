@@ -26,6 +26,12 @@ export interface RuntimeExecutionBudget {
   maxToolArgumentBytesPerTurn: number;
   /** Provider 连续多久没有事件即判定流已失活。 */
   modelStreamIdleTimeoutMs: number;
+  /** 首次模型请求失败后，最多额外重试的次数。 */
+  modelRequestMaxRetries: number;
+  /** 模型请求指数退避的初始等待时间。 */
+  modelRequestRetryInitialDelayMs: number;
+  /** 没有 Retry-After 时，模型请求指数退避的等待上限。 */
+  modelRequestRetryMaxDelayMs: number;
   /** 一个 Remote 进程同时允许执行的 Prompt Turn 数。 */
   maxConcurrentTurns: number;
 }
@@ -40,6 +46,9 @@ export const PRODUCT_CONFIG = {
     maxToolArgumentBytesPerCall: 1024 * 1024,
     maxToolArgumentBytesPerTurn: 4 * 1024 * 1024,
     modelStreamIdleTimeoutMs: 60_000,
+    modelRequestMaxRetries: 5,
+    modelRequestRetryInitialDelayMs: 500,
+    modelRequestRetryMaxDelayMs: 8_000,
     maxConcurrentTurns: 8,
   } satisfies RuntimeExecutionBudget,
   server: {
@@ -114,9 +123,9 @@ export const PRODUCT_CONFIG = {
   },
   skill: {
     /** 单个 Skill 最多收集的文件数，防止安装过程失控。 */
-    maxFiles: 200,
+    maxFiles: 512,
     /** 单个 Skill 所有文件的总字节上限，防止安装和读取占用过多资源。 */
-    maxTotalBytes: 2 * 1024 * 1024,
+    maxTotalBytes: 64 * 1024 * 1024,
     /** 单次安装任务最多接收的用户提供 Skill URL 数量。 */
     maxSourceUrlsPerJob: 10,
   },

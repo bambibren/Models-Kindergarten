@@ -5,6 +5,21 @@ import type {
   RuntimeVariantSnapshot,
 } from "@kindergarten/runtime-observation";
 
+/** 一次逻辑 Model Round 内的单次 Provider 请求；失败 Attempt 只留在 Trace。 */
+export interface ModelAttemptTrace {
+  id: string;
+  index: number;
+  startedAt: number;
+  completedAt?: number;
+  status: "running" | "completed" | "failed";
+  error?: { code: string; message: string; retryable: boolean };
+  output?: {
+    text: RuntimePayloadEvidence;
+    thinking?: RuntimePayloadEvidence;
+  };
+  retryDelayMs?: number;
+}
+
 /** 描述「ModelRoundTrace」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ModelRoundTrace {
   id: string;
@@ -26,6 +41,8 @@ export interface ModelRoundTrace {
   outputTokens?: number;
   cachedInputTokens?: number;
   reasoningOutputTokens?: number;
+  /** 旧 Trace 可没有该字段；新 Trace 会记录首次请求和全部自动重试。 */
+  attempts?: ModelAttemptTrace[];
 }
 
 /** 描述「ToolCallTrace」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */

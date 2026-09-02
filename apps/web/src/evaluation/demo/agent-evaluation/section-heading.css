@@ -1,0 +1,5 @@
+.demo-section-heading { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; color: #4f514b; }
+.demo-section-heading > svg { color: #777973; }
+.demo-section-heading > div { display: grid; gap: 3px; min-width: 0; }
+.demo-section-heading h2 { margin: 0; color: #292a27; font-size: 12px; font-weight: 640; }
+.demo-section-heading p { margin: 0; color: #858780; font-size: 8px; line-height: 1.5; }

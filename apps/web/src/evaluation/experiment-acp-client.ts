@@ -1,6 +1,15 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { createWebSocketStream } from "@agentclientprotocol/sdk/experimental/ws-client";
-import { makeExperimentRunRefMeta, makePromptMeta } from "@kindergarten/contracts";
+import {
+  EXECUTION_TRACE_NOTIFICATION,
+  TURN_STATE_NOTIFICATION,
+  makeExperimentRunRefMeta,
+  makePromptMeta,
+  readLiveExecutionNotification,
+  readTurnStateNotification,
+  type LiveExecutionNotification,
+  type TurnStateNotification,
+} from "@kindergarten/contracts";
 
 const REMOTE_CWD = "/workspace";
 
@@ -52,6 +61,8 @@ private constructor(
 static async open(
     url: string,
     update: (value: acp.SessionNotification) => void,
+    onExecution: (value: LiveExecutionNotification) => void,
+    onTurnState: (value: TurnStateNotification) => void,
     onIntervention: (testId: string, intervention: ExperimentIntervention) => void,
     onInterventionResolved: (experimentId: string, testId: string, fact: { interactionId: string; kind: "permission" | "elicitation"; summary: string; decision: string }) => Promise<void>,
     onClose: () => void,
@@ -60,6 +71,16 @@ static async open(
     const app = acp.client({ name: "models-kindergarten-web-evaluation" })
       .onNotification(acp.methods.client.session.update, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
 ({ params }) => update(params))
+      .onNotification(
+        EXECUTION_TRACE_NOTIFICATION,
+        { parse: readLiveExecutionNotification },
+        ({ params }) => onExecution(params),
+      )
+      .onNotification(
+        TURN_STATE_NOTIFICATION,
+        { parse: readTurnStateNotification },
+        ({ params }) => onTurnState(params),
+      )
       .onRequest(acp.methods.client.session.requestPermission, /** 处理「onRequest」事件，校验归属后再推进状态且避免重复提交。 */
 async ({ params }) => {
         const ref = sessionTests.get(params.sessionId);
@@ -125,7 +146,7 @@ async run(
     experimentId: string,
     testId: string,
     prompt: string,
-    onSession: (sessionId: string) => void,
+    onSession: (sessionId: string, turnId: string) => void,
   ): Promise<{ sessionId: string; turnId: string; stopReason: acp.StopReason }> {
     const created = await this.connection.agent.request(acp.methods.agent.session.new, {
       cwd: REMOTE_CWD,
@@ -133,9 +154,9 @@ async run(
       _meta: makeExperimentRunRefMeta(experimentId, testId),
     });
     this.sessionTests.set(created.sessionId, { experimentId, testId });
-    onSession(created.sessionId);
-    this.activeSessions.add(created.sessionId);
     const turnId = crypto.randomUUID();
+    onSession(created.sessionId, turnId);
+    this.activeSessions.add(created.sessionId);
     try {
       const response = await this.connection.agent.request(acp.methods.agent.session.prompt, {
         sessionId: created.sessionId,

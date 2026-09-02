@@ -16,12 +16,14 @@ import {
 } from "@kindergarten/contracts";
 import type { AgentService } from "../agent/agent-service.js";
 import type { SessionRepository } from "../repository/session-repository.js";
+import type { SessionEntry } from "../repository/session-types.js";
 import { ApiProblemError } from "../server/api-problem.js";
 import type { ModelStudentCatalog } from "../model/model-student-catalog.js";
 import type { ExperimentRepository } from "./experiment-repository.js";
 import type { EvaluationAccess } from "../evaluation/evaluation-module.js";
-import type { AnnotationWorksheetGenerator } from "./annotation-worksheet-generator.js";
+import type { AnnotationWorksheetGenerator, WorksheetRunEvidence } from "./annotation-worksheet-generator.js";
 import type { ContextPreviewService } from "./context-preview-service.js";
+import { EXPERIMENT_CONFIG, type ExperimentConfig } from "./experiment-config.js";
 
 /** 描述「ExperimentService」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export class ExperimentService {
@@ -34,6 +36,7 @@ constructor(
     private readonly evaluation: EvaluationAccess,
     private readonly worksheetGenerator?: AnnotationWorksheetGenerator,
     private readonly previews?: ContextPreviewService,
+    private readonly config: ExperimentConfig = EXPERIMENT_CONFIG,
   ) {}
 
   /** 根据已校验输入构建「create」结果，不额外持有调用方的大对象。 */
@@ -41,6 +44,7 @@ async create(raw: unknown, ownerId = "local-admin"): Promise<ExperimentRecordV2>
     let input;
     try { input = parseExperimentDraftV2(raw); }
     catch (error) { throw new ApiProblemError(400, "VALIDATION_FAILED", publicMessage(error), false); }
+    const worksheetModelStudentId = this.configuredWorksheetModelStudentId(ownerId);
     await this.validateDraftDependencies(input, ownerId);
     const now = new Date().toISOString();
     const record: ExperimentRecordV2 = {
@@ -52,7 +56,7 @@ async create(raw: unknown, ownerId = "local-admin"): Promise<ExperimentRecordV2>
       promptText: input.promptText,
       ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
       toolUseWasExpected: input.toolUseWasExpected,
-      worksheetModelStudentId: input.worksheetModelStudentId,
+      worksheetModelStudentId,
       tests: input.tests,
       runs: [],
       createdAt: now,
@@ -69,6 +73,7 @@ async update(experimentId: string, raw: unknown, ownerId = "local-admin"): Promi
     let input;
     try { input = parseExperimentDraftV2(raw); }
     catch (error) { throw new ApiProblemError(400, "VALIDATION_FAILED", publicMessage(error), false); }
+    const worksheetModelStudentId = this.configuredWorksheetModelStudentId(ownerId);
     await this.validateDraftDependencies(input, ownerId);
     return this.repository.update(experimentId, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (record) => {
@@ -80,7 +85,7 @@ async update(experimentId: string, raw: unknown, ownerId = "local-admin"): Promi
         promptText: input.promptText,
         ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
         toolUseWasExpected: input.toolUseWasExpected,
-        worksheetModelStudentId: input.worksheetModelStudentId,
+        worksheetModelStudentId,
         tests: input.tests,
         updatedAt: new Date().toISOString(),
       };
@@ -320,8 +325,15 @@ async putAnnotations(
     if (!record(raw)) throw new ApiProblemError(400, "VALIDATION_FAILED", "人工注释必须是对象", false);
     const understanding = parseUnderstanding(raw.understanding);
     const planning = parsePlanning(raw.planning);
-    const output = parseOutput(raw.output);
-    validateAnnotationReferences(experiment, understanding, planning, output);
+    const parsedOutput = parseOutput(raw.output);
+    const artifactVariantIds = await this.outputArtifactVariantIds(experiment);
+    const artifactVariants = new Set(artifactVariantIds);
+    const output: OutputAnnotationFacts = {
+      ...parsedOutput,
+      // 旧评分可能保留了产物 lane 的文字标注；从现在起该 lane 只接受产物分。
+      marks: parsedOutput.marks.filter((mark) => !artifactVariants.has(mark.variantId)),
+    };
+    validateAnnotationReferences(experiment, understanding, planning, output, artifactVariants);
     const metrics = experiment.runs.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (run) => run.executionMetrics).filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item): item is ExecutionMetricsSnapshot => Boolean(item));
@@ -332,8 +344,12 @@ async putAnnotations(
 (item) => item.testId),
       understanding,
       planning,
-      output: { ...output, answers: experiment.runs.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(run) => ({ variantId: run.testId, text: run.answerTexts.join("\n") })) },
+      output: {
+        ...output,
+        artifactVariantIds,
+        answers: experiment.runs.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(run) => ({ variantId: run.testId, text: run.answerTexts.join("\n") })),
+      },
     });
     const variants = execution.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => {
@@ -368,6 +384,17 @@ async putAnnotations(
     return scorecard;
   }
 
+  /** 只把本次 Turn 成功发布或回滚后返回的 Artifact 链接视为该 lane 的产物。 */
+private async outputArtifactVariantIds(experiment: ExperimentRecordV2): Promise<string[]> {
+    const matches = await Promise.all(experiment.runs.map(async (run) => {
+      if (!run.acpSessionId || !run.turnId) return false;
+      const turnId = run.turnId;
+      const session = await this.sessions.get(run.acpSessionId);
+      return session.sessionEntries.some((entry) => isPublishedArtifactEntry(entry, turnId));
+    }));
+    return experiment.runs.flatMap((run, index) => matches[index] ? [run.testId] : []);
+  }
+
   /** 执行「scorecard」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async scorecard(experimentId: string, ownerId = "local-admin"): Promise<ExperimentScorecard | undefined> {
     await this.get(experimentId, ownerId);
@@ -375,9 +402,9 @@ async scorecard(experimentId: string, ownerId = "local-admin"): Promise<Experime
   }
 
   /** 执行「generateAnnotationWorksheet」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async generateAnnotationWorksheet(experimentId: string, force = false, ownerId = "local-admin", worksheetModelStudentId?: string) {
+async generateAnnotationWorksheet(experimentId: string, force = false, ownerId = "local-admin") {
     const experiment = await this.getV2(experimentId, ownerId);
-    const selectedModelStudentId = worksheetModelStudentId?.trim() || experiment.worksheetModelStudentId;
+    const selectedModelStudentId = this.configuredWorksheetModelStudentId(ownerId);
     const replacingModel = selectedModelStudentId !== experiment.worksheetModelStudentId;
     if (experiment.annotationWorksheet && !force && !replacingModel) return experiment.annotationWorksheet;
     if (!this.models.isReady(selectedModelStudentId, ownerId)) {
@@ -390,21 +417,29 @@ async generateAnnotationWorksheet(experimentId: string, force = false, ownerId =
     }
     const evidence = [];
     for (const run of experiment.runs) {
-      let toolEvents: Array<{ name: string; title: string; status: string }> = [];
+      let modelOutputs: WorksheetRunEvidence["modelOutputs"] = run.answerTexts.map((text) => ({ kind: "answer", text }));
+      let firstThought: string | undefined;
       if (run.acpSessionId && run.turnId) {
-        const session = await this.sessions.get(run.acpSessionId).catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+        const session = await this.sessions.get(run.acpSessionId).catch(/** 评测材料缺失时仍可使用 Experiment 中已保存的回答。 */
 () => undefined);
-        toolEvents = session?.sessionEntries.flatMap(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
-(entry) => entry.type === "tool_call" && entry.turnId === run.turnId
-          ? [{ name: entry.name, title: entry.title, status: entry.outcomeStatus ?? entry.status }]
-          : []) ?? [];
+        const firstThoughtEntry = session?.sessionEntries.find(/** 理解题目只取该实验 Turn 的第一条有效思考，不回退到正文或其他 Turn。 */
+(entry) => entry.turnId === run.turnId && entry.type === "thought" && Boolean(entry.text.trim()));
+        if (firstThoughtEntry?.type === "thought") firstThought = firstThoughtEntry.text;
+        const observed = session?.sessionEntries.flatMap<WorksheetRunEvidence["modelOutputs"][number]>((entry) => {
+          if (entry.turnId !== run.turnId) return [];
+          if (entry.type === "thought") return [{ kind: "thought" as const, text: entry.text }];
+          if (entry.type === "message" && entry.role === "assistant") return [{ kind: "answer" as const, text: entry.text }];
+          return [];
+        }) ?? [];
+        if (observed.length > 0) modelOutputs = observed;
       }
       evidence.push({
         variantId: run.testId,
         label: experiment.tests.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.testId === run.testId)?.label ?? run.testId,
         answer: run.answerTexts.join("\n"),
-        toolEvents,
+        ...(firstThought ? { firstThought } : {}),
+        modelOutputs,
       });
     }
     const generationExperiment = replacingModel ? { ...experiment, worksheetModelStudentId: selectedModelStudentId } : experiment;
@@ -520,7 +555,10 @@ private traceRuntimeFacts(sessionId: string, turnId: string): import("@kindergar
       usage: {
         schemaVersion: 1,
         turnId,
-        modelRequests: trace.modelRounds.length,
+        modelRequests: trace.modelRounds.reduce(
+          (total, round) => total + (round.attempts?.length ?? 1),
+          0,
+        ),
         components: [],
         inputTokens: trace.modelRounds.reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
 (total, item) => total + (item.context.inputTokens ?? 0), 0),
@@ -533,9 +571,6 @@ private traceRuntimeFacts(sessionId: string, turnId: string): import("@kindergar
 
   /** 校验并规范化「validateDraftDependencies」输入，非法数据直接返回明确错误。 */
 private async validateDraftDependencies(input: import("@kindergarten/contracts").ExperimentDraftV2, ownerId: string): Promise<void> {
-    if (!this.models.isReady(input.worksheetModelStudentId, ownerId)) {
-      throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "评测辅助 ModelStudent 不可用", false);
-    }
     for (const [index, test] of input.tests.entries()) {
       if (!this.models.isReady(test.modelStudentId, ownerId)) {
         throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", `Test ${test.label} 的 ModelStudent 不可用`, false, [
@@ -550,6 +585,30 @@ private async validateDraftDependencies(input: import("@kindergarten/contracts")
       }
     }
   }
+
+  /** 按服务端配置解析账号内唯一 Ready ModelStudent，避免浏览器覆盖工作表生成模型。 */
+  private configuredWorksheetModelStudentId(ownerId: string): string {
+    const matches = this.models.all(ownerId).filter((item) =>
+      item.status === "ready" && item.displayName === this.config.worksheetModelDisplayName);
+    if (matches.length !== 1) {
+      throw new ApiProblemError(
+        409,
+        "EXPERIMENT_NOT_RUNNABLE",
+        `评测辅助模型配置“${this.config.worksheetModelDisplayName}”必须对应当前账号下唯一 Ready ModelStudent`,
+        false,
+      );
+    }
+    return matches[0]!.modelStudentId;
+  }
+}
+
+const ARTIFACT_OUTPUT_TOOLS = new Set(["publish_artifact", "publish_artifact_version", "rollback_artifact"]);
+
+/** 工具完成且返回真实 artifact:// ResourceLink 时，才认定该 Turn 产生了可评分产物。 */
+function isPublishedArtifactEntry(entry: SessionEntry, turnId: string): boolean {
+  if (entry.type !== "tool_call" || entry.turnId !== turnId || entry.status !== "completed" ||
+    (entry.outcomeStatus !== undefined && entry.outcomeStatus !== "success") || !ARTIFACT_OUTPUT_TOOLS.has(entry.name)) return false;
+  return entry.content.some((item) => item.type === "content" && item.content.type === "resource_link" && item.content.uri.startsWith("artifact://"));
 }
 
 /** 校验并规范化「parseUnderstanding」输入，非法数据直接返回明确错误。 */
@@ -571,25 +630,47 @@ function parseUnderstanding(value: unknown): UnderstandingAnnotationFacts {
 }
 /** 校验并规范化「parsePlanning」输入，非法数据直接返回明确错误。 */
 function parsePlanning(value: unknown): PlanningAnnotationFacts {
-  if (!record(value) || !Array.isArray(value.marks)) throw validation("规划注释格式无效");
-    return { marks: value.marks.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+  if (!record(value) || !Array.isArray(value.scores)) throw validation("规划评分格式无效");
+  return { scores: value.scores.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => {
-    if (!record(item) || typeof item.variantId !== "string" || typeof item.stepId !== "string" || !["effective", "partial", "none"].includes(String(item.verdict))) throw validation("规划标记格式无效");
-    return { variantId: item.variantId, stepId: item.stepId, verdict: item.verdict as "effective" | "partial" | "none" };
+    if (!record(item) || typeof item.variantId !== "string" || typeof item.score !== "number" ||
+      !Number.isInteger(item.score) || item.score < 0 || item.score > 100) throw validation("规划评分必须是 0 到 100 的整数");
+    return { variantId: item.variantId, score: item.score };
   }), ...(typeof value.completedAt === "string" ? { completedAt: value.completedAt } : {}) };
 }
 /** 校验并规范化「parseOutput」输入，非法数据直接返回明确错误。 */
 function parseOutput(value: unknown): OutputAnnotationFacts {
   if (!record(value) || !Array.isArray(value.marks)) throw validation("输出注释格式无效");
+  if (value.artifactScores !== undefined && !Array.isArray(value.artifactScores)) throw validation("产物评分格式无效");
+  const artifactScores = (value.artifactScores ?? []).map((item) => {
+    if (!record(item) || typeof item.variantId !== "string" || typeof item.score !== "number" ||
+      !Number.isInteger(item.score) || item.score < 0 || item.score > 100) throw validation("产物评分必须是 0 到 100 的整数");
+    return { variantId: item.variantId, score: item.score };
+  });
   return { marks: value.marks.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => {
     if (!record(item) || typeof item.variantId !== "string" || typeof item.answerSectionId !== "string" || typeof item.start !== "number" || typeof item.end !== "number" ||
-      !["effective", "partial", "none"].includes(String(item.verdict)) || typeof item.quotedTextHash !== "string") throw validation("输出标记格式无效");
-    return { variantId: item.variantId, answerSectionId: item.answerSectionId, start: item.start, end: item.end, verdict: item.verdict as "effective" | "partial" | "none", quotedTextHash: item.quotedTextHash };
-  }), ...(typeof value.completedAt === "string" ? { completedAt: value.completedAt } : {}) };
+      !["effective", "partial", "none"].includes(String(item.verdict)) || typeof item.quotedTextHash !== "string" ||
+      (item.markId !== undefined && typeof item.markId !== "string")) throw validation("输出标记格式无效");
+    return {
+      ...(typeof item.markId === "string" ? { markId: item.markId } : {}),
+      variantId: item.variantId,
+      answerSectionId: item.answerSectionId,
+      start: item.start,
+      end: item.end,
+      verdict: item.verdict as "effective" | "partial" | "none",
+      quotedTextHash: item.quotedTextHash,
+    };
+  }), ...(value.artifactScores !== undefined ? { artifactScores } : {}), ...(typeof value.completedAt === "string" ? { completedAt: value.completedAt } : {}) };
 }
 /** 校验并规范化「validateAnnotationReferences」输入，非法数据直接返回明确错误。 */
-function validateAnnotationReferences(experiment: ExperimentRecordV2, understanding: UnderstandingAnnotationFacts, planning: PlanningAnnotationFacts, output: OutputAnnotationFacts): void {
+function validateAnnotationReferences(
+  experiment: ExperimentRecordV2,
+  understanding: UnderstandingAnnotationFacts,
+  planning: PlanningAnnotationFacts,
+  output: OutputAnnotationFacts,
+  artifactVariants = new Set<string>(),
+): void {
   const worksheet = experiment.annotationWorksheet;
   if (!worksheet) throw new ApiProblemError(409, "WORKSHEET_NOT_READY", "请先生成标注题目", true);
   const variants = new Set(experiment.tests.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
@@ -598,35 +679,52 @@ function validateAnnotationReferences(experiment: ExperimentRecordV2, understand
 (item) => [item.requirementId, item]));
   const requirements = new Set(understanding.requirements.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.requirementId));
-  if (understanding.requirements.length !== worksheet.requirements.length || understanding.requirements.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+  if (requirements.size !== understanding.requirements.length || understanding.requirements.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => {
     const expected = expectedRequirements.get(item.requirementId);
-    return !expected || expected.label !== item.label || expected.weight !== item.weight;
-  })) throw validation("理解题目与当前标注工作表不一致");
-  if ([...understanding.marks, ...planning.marks, ...output.marks].some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+    if (item.requirementId === "manual-other") return item.label !== "其他需求";
+    return !expected || expected.label !== item.label;
+  }) || (understanding.completedAt && understanding.requirements.length === 0)) throw validation("理解题目与当前标注工作表不一致");
+  if ([...understanding.marks, ...planning.scores, ...output.marks, ...(output.artifactScores ?? [])].some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => !variants.has(item.variantId))) throw validation("注释引用了未知 lane");
+  const planningScoreVariants = planning.scores.map((item) => item.variantId);
+  if (new Set(planningScoreVariants).size !== planningScoreVariants.length ||
+    (planning.completedAt && planningScoreVariants.length !== variants.size)) throw validation("规划评分与当前 lane 不一致");
+  const artifactScoreVariants = (output.artifactScores ?? []).map((item) => item.variantId);
+  if (new Set(artifactScoreVariants).size !== artifactScoreVariants.length || artifactScoreVariants.some((variantId) => !artifactVariants.has(variantId))) {
+    throw validation("产物评分与当前 lane 的发布事实不一致");
+  }
   if (understanding.marks.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => !requirements.has(item.requirementId))) throw validation("理解标记引用了未知需求");
-  const expectedPlanning = new Set(worksheet.workflows.flatMap(/** 执行「expectedPlanning」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-(item) => item.steps.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(step) => `${item.variantId}:${step.stepId}`)));
-  const actualPlanning = planning.marks.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(item) => `${item.variantId}:${item.stepId}`);
-  if (new Set(actualPlanning).size !== actualPlanning.length || actualPlanning.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(key) => !expectedPlanning.has(key)) || (planning.completedAt && actualPlanning.length !== expectedPlanning.size)) throw validation("工作流标记与当前标注工作表不一致");
+  const actualUnderstanding = understanding.marks.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => `${item.variantId}:${item.requirementId}`);
+  if (new Set(actualUnderstanding).size !== actualUnderstanding.length ||
+    (understanding.completedAt && actualUnderstanding.length !== variants.size * requirements.size)) throw validation("理解标记与当前候选需求不一致");
   const expectedOutput = new Map(worksheet.outputSections.flatMap(/** 执行「expectedOutput」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (item) => item.sections.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (section) => [`${item.variantId}:${section.answerSectionId}`, section])));
   const actualOutput = output.marks.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => `${item.variantId}:${item.answerSectionId}`);
-  if (new Set(actualOutput).size !== actualOutput.length || actualOutput.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(key) => !expectedOutput.has(key)) || (output.completedAt && actualOutput.length !== expectedOutput.size)) throw validation("输出标记与当前标注工作表不一致");
+  const markIds = output.marks.flatMap(/** 执行「markIds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
+(item) => item.markId ? [`${item.variantId}:${item.markId}`] : []);
+  const intervals = output.marks.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
+(item) => `${item.variantId}:${item.start}:${item.end}`);
+  if (actualOutput.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(key) => !expectedOutput.has(key)) || new Set(markIds).size !== markIds.length || new Set(intervals).size !== intervals.length) throw validation("输出标记与当前标注工作表不一致");
   for (const mark of output.marks) {
     const answer = experiment.runs.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (run) => run.testId === mark.variantId)?.answerTexts.join("\n") ?? "";
     const quoted = answer.slice(mark.start, mark.end);
     const expected = expectedOutput.get(`${mark.variantId}:${mark.answerSectionId}`);
-    if (!expected || mark.start !== expected.start || mark.end !== expected.end || mark.quotedTextHash !== expected.quotedTextHash || mark.start < 0 || mark.end <= mark.start || mark.end > answer.length || sha256(quoted) !== mark.quotedTextHash) throw validation("输出标记范围或 quotedTextHash 无效");
+    if (!expected || !Number.isInteger(mark.start) || !Number.isInteger(mark.end) || mark.start < expected.start || mark.end > expected.end ||
+      mark.start < 0 || mark.end <= mark.start || mark.end > answer.length || sha256(quoted) !== mark.quotedTextHash) throw validation("输出标记范围或 quotedTextHash 无效");
+  }
+  for (const variantId of variants) {
+    const ranges = output.marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.variantId === variantId).toSorted(/** 执行「ranges」主流程，传播取消与失败并在结束时清理临时资源。 */
+(left, right) => left.start - right.start || left.end - right.end);
+    if (ranges.some(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item, index) => index > 0 && item.start < ranges[index - 1]!.end)) throw validation("输出标记范围不能重叠");
   }
 }
 /** 执行「rubric」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

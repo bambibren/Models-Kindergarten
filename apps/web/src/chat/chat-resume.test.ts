@@ -44,4 +44,29 @@ describe("sessionResumeMeta", /** 组织这一组相关测试，统一建立场�
       thoughts: { "thought-1": { textLength: 2, nextChunkIndex: 5 } },
     });
   });
+
+  it("把当前模型 Attempt 写入恢复游标，避免新旧正文偏移混用", () => {
+    let chat = chatReducer(emptyChat, { type: "session/open", sessionId: "session-1" });
+    chat = chatReducer(chat, { type: "stream/start", operationId: "operation-1", source: "prompt", turnId: "turn-1" });
+    chat = chatReducer(chat, { type: "acp/update", value: {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "message-1",
+        content: { type: "text", text: "新 Attempt" },
+        _meta: makeAcpMeta({
+          schemaVersion: 1,
+          turnId: "turn-1",
+          chunkIndex: 0,
+          modelAttempt: { id: "attempt-2", index: 2 },
+        }),
+      },
+    } });
+
+    expect(sessionResumeMeta(chat, "turn-1").messages["message-1"]).toEqual({
+      textLength: 9,
+      nextChunkIndex: 1,
+      modelAttemptId: "attempt-2",
+    });
+  });
 });

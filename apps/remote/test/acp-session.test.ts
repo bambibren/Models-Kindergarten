@@ -5,17 +5,21 @@ import * as acp from "@agentclientprotocol/sdk";
 import {
   CONTEXT_SUMMARY_NOTIFICATION,
   CONTEXT_WINDOW_USAGE_NOTIFICATION,
+  EXECUTION_TRACE_NOTIFICATION,
   TOKEN_USAGE_NOTIFICATION,
   TURN_STATE_NOTIFICATION,
   makePromptMeta,
+  makeExperimentRunRefMeta,
   makeSessionResumeMeta,
   makeSessionBindingMeta,
   readContextSummaryNotification,
   readContextWindowUsageNotification,
+  readLiveExecutionNotification,
   readTokenUsageNotification,
   readTurnStateNotification,
   type ContextSummaryNotification,
   type ContextWindowUsageNotification,
+  type LiveExecutionNotification,
   type TokenUsageNotification,
   type TurnStateNotification,
 } from "@kindergarten/contracts";
@@ -49,6 +53,42 @@ async () => {
 
 describe("ACP 会话语义", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {
+  it("实验 Session 通过同一 ACP 连接实时发送模型失败与重试轨迹", async () => {
+    const events: LiveExecutionNotification[] = [];
+    const agent = await makeAgent(new RetryOnceProvider(), undefined, undefined, true);
+    const client = await openClient(agent, [], [], [], [], [], events);
+    const created = await client.agent.request(acp.methods.agent.session.new, {
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: makeExperimentRunRefMeta("experiment-live", "variant-a"),
+    });
+
+    await sendPrompt(client, created.sessionId, "测试实时重试", "turn-live");
+
+    expect(events.map((item) => item.event.type)).toEqual([
+      "model_round_started",
+      "model_attempt_started",
+      "model_attempt_failed",
+      "model_attempt_started",
+      "model_attempt_completed",
+    ]);
+    expect(events.map((item) => item.event.sequence)).toEqual([0, 1, 2, 3, 4]);
+    expect(events[2]?.event).toMatchObject({
+      type: "model_attempt_failed",
+      attemptIndex: 0,
+      error: { code: "MODEL_TRANSPORT_ERROR", retryable: true },
+    });
+    expect(events[3]?.event).toMatchObject({ type: "model_attempt_started", attemptIndex: 1 });
+
+    const chat = await client.agent.request(acp.methods.agent.session.new, {
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: testSessionMeta(),
+    });
+    await sendPrompt(client, chat.sessionId, "普通聊天", "turn-chat");
+    expect(events).toHaveLength(5);
+  });
+
   it("load 完整回放，resume 零回放，且连接之间不广播", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const provider = new StaticProvider();
@@ -448,8 +488,10 @@ serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
   /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async *stream(input: ModelInput): AsyncIterable<ModelEvent> {
     this.lastInput = structuredClone(input);
-    yield { type: "text_delta", text: "第一段" };
-    yield { type: "text_delta", text: "第二段" };
+    yield { type: "output_item_started", item: { id: "capture-message", kind: "message" } };
+    yield { type: "output_item_delta", itemId: "capture-message", delta: { kind: "text", text: "第一段" } };
+    yield { type: "output_item_delta", itemId: "capture-message", delta: { kind: "text", text: "第二段" } };
+    yield { type: "output_item_completed", item: { id: "capture-message", kind: "message", text: "第一段第二段" } };
     yield { type: "usage", inputTokens: 12, outputTokens: 5 };
     yield { type: "finish", reason: "stop" };
   }
@@ -514,10 +556,12 @@ continue(): void { this.release(); }
 async *stream(_input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
     signal.addEventListener("abort", /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => { this.aborted = true; }, { once: true });
-    yield { type: "text_delta", text: "第一段" };
+    yield { type: "output_item_started", item: { id: "disconnect-message", kind: "message" } };
+    yield { type: "output_item_delta", itemId: "disconnect-message", delta: { kind: "text", text: "第一段" } };
     this.first();
     await this.waiting;
-    yield { type: "text_delta", text: "第二段" };
+    yield { type: "output_item_delta", itemId: "disconnect-message", delta: { kind: "text", text: "第二段" } };
+    yield { type: "output_item_completed", item: { id: "disconnect-message", kind: "message", text: "第一段第二段" } };
     yield { type: "finish", reason: "stop" };
     this.done();
   }
@@ -531,7 +575,25 @@ serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
   }
   /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async *stream(): AsyncIterable<ModelEvent> {
-    throw new ModelProviderError("dependency_unavailable", "Ollama 不可用", true);
+    throw new ModelProviderError("dependency_unavailable", "Ollama 不可用", false);
+  }
+}
+
+class RetryOnceProvider implements ModelProvider {
+  readonly student = testStudent;
+  private attempts = 0;
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+  async *stream(): AsyncIterable<ModelEvent> {
+    this.attempts += 1;
+    if (this.attempts === 1) {
+      throw new ModelProviderError("dependency_unavailable", "Provider 连接中断", true, { retryAfterMs: 0 });
+    }
+    yield { type: "output_item_started", item: { id: "retry-message", kind: "message" } };
+    yield { type: "output_item_delta", itemId: "retry-message", delta: { kind: "text", text: "重试成功" } };
+    yield { type: "output_item_completed", item: { id: "retry-message", kind: "message", text: "重试成功" } };
+    yield { type: "finish", reason: "stop" };
   }
 }
 
@@ -581,8 +643,8 @@ function serializeTestContext(
 async function makeAgent(
   provider: ModelProvider,
   models?: ModelStudentCatalog,
-  agentExists: (id: string) => boolean | Promise<boolean> = /** 构造「agentExists」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(id) => id === "agent-1",
+  agentExists: ((id: string) => boolean | Promise<boolean>) | undefined = undefined,
+  experimentBinding = false,
 ): Promise<acp.AgentApp> {
   const dir = await mkdtemp(join(tmpdir(), "kindergarten-"));
   tempDirs.push(dir);
@@ -595,11 +657,11 @@ async function makeAgent(
     AgentRuntime.fromRegistry(provider, new ToolRegistry(sandbox)),
     new SessionBindingService({
       workspaceCwd: "/workspace",
-      agentExists,
+      agentExists: agentExists ?? ((id) => id === "agent-1"),
       modelStudentReady: /** 构造「modelStudentReady」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (id) => modelCatalog.isReady(id),
       experimentBinding: /** 构造「experimentBinding」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async () => undefined,
+async () => experimentBinding ? { modelStudentId: "student-1", agentId: "agent-1" } : undefined,
     }),
     undefined,
     modelCatalog,
@@ -619,6 +681,7 @@ async function openClient(
   usages: TokenUsageNotification[] = [],
   turns: TurnStateNotification[] = [],
   windows: ContextWindowUsageNotification[] = [],
+  executions: LiveExecutionNotification[] = [],
 ): Promise<acp.ClientConnection> {
   const app = acp
     .client({ name: "test-client" })
@@ -656,6 +719,13 @@ async function openClient(
       /** 构造「app」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 ({ params }) => {
         windows.push(params);
+      },
+    )
+    .onNotification(
+      EXECUTION_TRACE_NOTIFICATION,
+      readLiveExecutionNotification,
+      ({ params }) => {
+        executions.push(params);
       },
     );
   const connection = app.connect(agent);

@@ -34,6 +34,8 @@ export interface MessageEntry extends EntryBase {
   status: "streaming" | "done";
   tokenEstimate?: TokenUsageComponent;
   artifactMentions?: ArtifactMention[];
+  modelAttemptId?: string;
+  modelAttemptIndex?: number;
 }
 
 /** 描述「ThoughtEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -43,6 +45,8 @@ export interface ThoughtEntry extends EntryBase {
   content: ContentBlock[];
   status: "streaming" | "done";
   tokenEstimate?: TokenUsageComponent;
+  modelAttemptId?: string;
+  modelAttemptIndex?: number;
 }
 
 /** 描述「ContextSummaryEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -99,6 +103,7 @@ export interface StreamingContext {
   source: StreamSource;
   turnId: string;
   seenChunks: ReadonlySet<string>;
+  modelAttempts: Readonly<Record<string, { id: string; index: number }>>;
   optimisticUserEntryId?: EntryId;
 }
 

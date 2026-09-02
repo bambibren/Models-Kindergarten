@@ -1,0 +1,25 @@
+.marker-workspace { min-width: 0; }
+.marker-help { display: flex; align-items: center; gap: 6px; padding: 10px 15px; border-bottom: 1px solid #e8e8e4; color: #898b84; font-size: 8px; }
+.marker-text { display: grid; gap: 9px; min-height: 330px; padding: 12px; color: #444640; }
+.output-block { overflow: hidden; border: 1px solid #deded9; border-radius: 10px; background: #fafaf8; }
+.output-block > header { display: grid; gap: 4px; padding: 10px 11px; border-bottom: 1px solid rgb(30 32 28 / .07); }
+.output-block > header span { width: fit-content; padding: 3px 6px; border: 1px solid currentColor; border-radius: 999px; font-size: 7px; font-weight: 750; letter-spacing: .06em; }
+.output-block > header strong { color: #343531; font-size: 10px; font-weight: 620; line-height: 1.45; }
+.output-block-text { padding: 11px; color: #51534d; font-size: 9px; line-height: 1.75; white-space: pre-wrap; user-select: text; }
+.output-block.block-analysis { border-color: #b7cae4; background: #eef4fc; }
+.output-block.block-analysis > header span { color: #426da8; }
+.output-block.block-action { border-color: #bad1c2; background: #eef7f1; }
+.output-block.block-action > header span { color: #47795d; }
+.output-block.block-validation { border-color: #d9cba8; background: #fbf7ea; }
+.output-block.block-validation > header span { color: #846c34; }
+.output-block.block-risk { border-color: #dfbbb7; background: #fff1ef; }
+.output-block.block-risk > header span { color: #a5524b; }
+.marked-text { margin: 0 -1px; padding: 1px 2px; border-radius: 3px; color: inherit; cursor: pointer; }
+.marked-text.mark-blue { background: rgb(83 139 210 / .28); box-shadow: inset 0 -1px 0 #7dafff; }
+.marked-text.mark-red { background: rgb(213 102 93 / .32); box-shadow: inset 0 -1px 0 #f18b83; }
+.marker-toolbar { position: fixed; z-index: 30; display: flex; gap: 4px; padding: 5px; border: 1px solid #d4d4cf; border-radius: 9px; background: #fff; box-shadow: 0 10px 28px rgb(32 34 30 / .16); transform: translate(-50%, -100%); }
+.marker-toolbar::after { position: absolute; bottom: -5px; left: 50%; width: 8px; height: 8px; border-right: 1px solid #d4d4cf; border-bottom: 1px solid #d4d4cf; background: #fff; content: ""; transform: translateX(-50%) rotate(45deg); }
+.marker-toolbar button { position: relative; z-index: 1; display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 6px; color: #fff; }
+.marker-toolbar .marker-blue { background: #4778bf; }
+.marker-toolbar .marker-red { background: #b34f49; }
+.marker-toolbar .marker-delete { color: #777973; background: #edede9; }

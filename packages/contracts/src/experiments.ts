@@ -144,7 +144,6 @@ export interface ExperimentDraftV2 {
   promptText: string;
   sourceRef?: { kind: "turn"; id: string };
   toolUseWasExpected: boolean;
-  worksheetModelStudentId: string;
   tests: ExperimentTestDraftV2[];
 }
 
@@ -285,7 +284,15 @@ export interface ExperimentAnnotationWorksheet {
   schemaVersion: 1;
   worksheetId: string;
   experimentId: string;
-  requirements: Array<{ requirementId: string; label: string; weight: number }>;
+  requirements: Array<{
+    requirementId: string;
+    label: string;
+    weight: number;
+    /** 只记录需求在用户 Prompt 或各 lane 首次思考中的事实来源，不代表人工 verdict。旧工作表可缺失。 */
+    sourceVariantIds?: string[];
+    /** 只记录各 lane 首次思考是否明确识别该需求，最终是否理解到仍由人工判断。旧工作表可缺失。 */
+    matchedVariantIds?: string[];
+  }>;
   workflows: Array<{
     variantId: string;
     steps: Array<{ stepId: string; label: string }>;
@@ -305,7 +312,7 @@ export interface ExperimentAnnotationWorksheet {
     modelStudentId: string;
     providerKind: string;
     model: string;
-    promptVersion: "annotation_worksheet_v1";
+    promptVersion: "annotation_worksheet_v1" | "annotation_worksheet_v2" | "annotation_worksheet_v3" | "annotation_worksheet_v4" | "annotation_worksheet_v5";
     inputHash: string;
     outputHash: string;
     generatedAt: string;
@@ -321,19 +328,27 @@ export interface UnderstandingAnnotationFacts {
 
 /** 描述「PlanningAnnotationFacts」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PlanningAnnotationFacts {
-  marks: Array<{ variantId: string; stepId: string; verdict: AnnotationVerdict }>;
+  /** Workflow 只提供观察材料；规划分完全来自人工滑块，不由提取器推导。 */
+  scores: Array<{ variantId: string; score: number }>;
   completedAt?: string;
 }
 
 /** 描述「OutputAnnotationFacts」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface OutputAnnotationFacts {
   marks: Array<{
+    /** 任意文字选区允许同一语义段内存在多条标注；旧整段标注可缺失。 */
+    markId?: string;
     variantId: string;
     answerSectionId: string;
     start: number;
     end: number;
     verdict: AnnotationVerdict;
     quotedTextHash: string;
+  }>;
+  /** 同一 lane 的全部已发布产物共用一个人工分，避免多产物把输出维度抬高到 100 以上。 */
+  artifactScores?: Array<{
+    variantId: string;
+    score: number;
   }>;
   completedAt?: string;
 }
@@ -455,7 +470,7 @@ export function parseExperimentDraftInput(value: unknown): ExperimentDraftInput 
 /** 校验并规范化「parseExperimentDraftV2」输入，非法数据直接返回明确错误。 */
 export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
   if (!isRecord(value)) throw new Error("Experiment V2 draft 必须是对象");
-  assertOnlyKeys(value, ["schemaVersion", "name", "promptText", "sourceRef", "toolUseWasExpected", "worksheetModelStudentId", "tests"], "Experiment V2 draft");
+  assertOnlyKeys(value, ["schemaVersion", "name", "promptText", "sourceRef", "toolUseWasExpected", "tests"], "Experiment V2 draft");
   if (value.schemaVersion !== 2) throw new Error("Experiment V2 schemaVersion 必须为 2");
   if (!Array.isArray(value.tests) || value.tests.length < 2 || value.tests.length > 3) {
     throw new Error("Experiment V2 必须有 2 到 3 个 Test");
@@ -481,7 +496,6 @@ export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
     promptText: requiredString(value, "promptText", { max: 100_000 }),
     ...(sourceRef ? { sourceRef } : {}),
     toolUseWasExpected: value.toolUseWasExpected === true,
-    worksheetModelStudentId: requiredString(value, "worksheetModelStudentId", { max: 160 }),
     tests,
   };
 }
@@ -567,7 +581,10 @@ export function scoreManualDimensions(input: {
   variantIds: string[];
   understanding: UnderstandingAnnotationFacts;
   planning: PlanningAnnotationFacts;
-  output: OutputAnnotationFacts & { answers: Array<{ variantId: string; text: string }> };
+  output: OutputAnnotationFacts & {
+    answers: Array<{ variantId: string; text: string }>;
+    artifactVariantIds?: string[];
+  };
 }): ManualDimensionScores {
   const byVariant = Object.fromEntries(input.variantIds.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (id) => [id, {}])) as ManualDimensionScores["byVariant"];
@@ -587,14 +604,20 @@ export function scoreManualDimensions(input: {
     if (totalWeight <= 0 || marksByRequirement.size !== input.understanding.requirements.length) complete = false;
     byVariant[variantId]!.understanding = totalWeight <= 0 ? 0 : Math.round(100 * understoodWeight / totalWeight);
 
-    const planMarks = input.planning.marks.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(mark) => mark.variantId === variantId);
-    if (planMarks.length === 0) complete = false;
-    byVariant[variantId]!.planning = planMarks.length === 0 ? 0 : Math.round(
-      100 * planMarks.reduce(/** 把当前元素归并到有限累加状态，避免额外复制完整集合。 */
-(sum, mark) => sum + verdictWeight(mark.verdict), 0) / planMarks.length,
-    );
+    const planningScore = input.planning.scores.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.variantId === variantId);
+    if (!planningScore) complete = false;
+    else byVariant[variantId]!.planning = planningScore.score;
 
+    const artifactScore = input.output.artifactVariantIds?.includes(variantId)
+      ? input.output.artifactScores?.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
+(item) => item.variantId === variantId)
+      : undefined;
+    if (input.output.artifactVariantIds?.includes(variantId)) {
+      if (!artifactScore) complete = false;
+      byVariant[variantId]!.output = artifactScore?.score ?? 0;
+      continue;
+    }
     const answer = input.output.answers.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.variantId === variantId)?.text;
     if (answer === undefined || answer.replace(/\s/gu, "").length === 0) {

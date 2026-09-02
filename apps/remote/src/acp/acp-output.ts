@@ -2,11 +2,13 @@ import * as acp from "@agentclientprotocol/sdk";
 import {
   CONTEXT_SUMMARY_NOTIFICATION,
   CONTEXT_WINDOW_USAGE_NOTIFICATION,
+  EXECUTION_TRACE_NOTIFICATION,
   TOKEN_USAGE_NOTIFICATION,
   TURN_STATE_NOTIFICATION,
   makeAcpMeta,
   type ContextSummary,
   type ContextWindowUsageState,
+  type LiveExecutionEvent,
   type MessageMeta,
   type TurnTokenUsage,
   type TurnState,
@@ -99,12 +101,23 @@ async contextWindowUsage(state: ContextWindowUsageState): Promise<void> {
   }
 
   /** 执行「turnState」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async turnState(turn: TurnState): Promise<void> {
+  async turnState(turn: TurnState): Promise<void> {
     await this.channel.project(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (client) => client.notify(TURN_STATE_NOTIFICATION, {
         sessionId: this.sessionId,
         turn,
       }), `turn_state/${turn.turnId}/${turn.status}`);
+  }
+
+  /** 通过既有 ACP connection owner 投影实验所需的实时执行事实。 */
+  async executionTrace(event: LiveExecutionEvent): Promise<void> {
+    await this.channel.project(
+      (client) => client.notify(EXECUTION_TRACE_NOTIFICATION, {
+        sessionId: this.sessionId,
+        event,
+      }),
+      `execution_trace/${event.turnId}/${event.sequence}`,
+    );
   }
 
   /** 执行「content」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

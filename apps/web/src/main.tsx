@@ -13,6 +13,7 @@ import { ModelAdmissionPage } from "./product/ModelAdmissionPage.js";
 import { ModelDetailPage } from "./product/ModelDetailPage.js";
 import { AuthGate } from "./product/AuthGate.js";
 import { LoginPage } from "./product/LoginPage.js";
+import { SkillMarketPage } from "./product/SkillMarketPage.js";
 import "./product/product.css";
 import "./styles.css";
 
@@ -60,6 +61,7 @@ function productRoute(path: string) {
   if (path === "/session") return <App />;
   if (/^\/sessions\/[^/]+$/.test(path)) return <App />;
   if (path === "/context-lab") return <ContextLabPage />;
+  if (path === "/skill-market") return <SkillMarketPage />;
   if (path === "/me") return <MePage />;
   const artifact = path.match(/^\/artifacts\/([^/]+)$/)?.[1];
   if (artifact) return <ArtifactDetailPage artifactId={decodeURIComponent(artifact)} />;

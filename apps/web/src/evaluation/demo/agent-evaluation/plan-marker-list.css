@@ -1,0 +1,14 @@
+.plan-flow { display: grid; gap: 0; padding: 15px; }
+.plan-step { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr) 38px; align-items: center; gap: 9px; min-height: 61px; padding: 9px 10px; border: 1px solid #deded9; border-radius: 9px; background: #fafaf8; }
+.plan-step + .plan-step { margin-top: 12px; }
+.plan-step + .plan-step::before { position: absolute; top: -13px; left: 22px; width: 1px; height: 12px; background: #d7d7d2; content: ""; }
+.plan-step.marked-blue { border-color: #a9c2e3; background: #edf4fc; }
+.plan-step.marked-red { border-color: #deb8b4; background: #fff0ee; }
+.plan-number { color: #898b84; font: 8px ui-monospace, monospace; }
+.plan-step > div:nth-child(2) { display: grid; gap: 4px; }
+.plan-step strong { color: #444640; font-size: 9px; font-weight: 620; }
+.plan-step p { margin: 0; color: #898b84; font-size: 8px; line-height: 1.45; }
+.plan-marker-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.plan-marker-actions button { width: 13px; height: 13px; padding: 0; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #c8c9c3; }
+.plan-marker-actions .blue { background: #78a9ff; }
+.plan-marker-actions .red { background: #ef7e76; }

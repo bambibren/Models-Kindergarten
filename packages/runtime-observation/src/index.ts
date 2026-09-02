@@ -106,6 +106,34 @@ export type RuntimeObservationEvent =
       };
     }
   | {
+      type: "model_attempt_started";
+      runId: string;
+      roundId: string;
+      attemptId: string;
+      index: number;
+      startedAt: number;
+    }
+  | {
+      type: "model_attempt_failed";
+      runId: string;
+      roundId: string;
+      attemptId: string;
+      completedAt: number;
+      error: { code: string; message: string; retryable: boolean };
+      output: {
+        text: RuntimePayloadEvidence;
+        thinking?: RuntimePayloadEvidence;
+      };
+      retryDelayMs?: number;
+    }
+  | {
+      type: "model_attempt_completed";
+      runId: string;
+      roundId: string;
+      attemptId: string;
+      completedAt: number;
+    }
+  | {
       type: "model_round_first_token";
       runId: string;
       roundId: string;

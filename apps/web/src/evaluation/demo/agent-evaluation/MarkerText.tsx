@@ -2,6 +2,7 @@ import { Check, Highlighter, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import type { AgentId, DemoAnswerSection, MarkColor, TextMark } from "./types.js";
+import "./marker-text.css";
 
 type ToolbarState =
   | { kind: "selection"; sectionId: string; start: number; end: number; x: number; y: number }
@@ -14,7 +15,7 @@ export function MarkerText({
   marks,
   onChange,
 }: {
-  agentId: AgentId;
+  agentId: AgentId | string;
   sections: DemoAnswerSection[];
   marks: TextMark[];
   onChange: (marks: TextMark[]) => void;

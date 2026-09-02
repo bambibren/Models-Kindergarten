@@ -142,10 +142,26 @@ function safeRelativePath(value: string): string {
 
 /** 校验并规范化「decodeBase64」输入，非法数据直接返回明确错误。 */
 function decodeBase64(value: string, path: string): Buffer {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+  if (!validBase64(value)) {
     throw new Error(`SKILL_RESOURCE_INVALID: ${path} 不是规范 Base64`);
   }
   return Buffer.from(value, "base64");
+}
+
+/** 大型二进制资源不能交给回溯正则；逐字符校验可保持固定调用栈和同等格式约束。 */
+function validBase64(value: string): boolean {
+  if (value.length % 4 !== 0) return false;
+  let contentEnd = value.length;
+  while (contentEnd > 0 && value.charCodeAt(contentEnd - 1) === 61) contentEnd -= 1;
+  const padding = value.length - contentEnd;
+  if (padding > 2 || (padding === 1 && contentEnd % 4 !== 3) || (padding === 2 && contentEnd % 4 !== 2)) return false;
+  for (let index = 0; index < contentEnd; index += 1) {
+    const code = value.charCodeAt(index);
+    const alphabet = (code >= 65 && code <= 90) || (code >= 97 && code <= 122) ||
+      (code >= 48 && code <= 57) || code === 43 || code === 47;
+    if (!alphabet) return false;
+  }
+  return true;
 }
 
 /** 执行「sha256」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

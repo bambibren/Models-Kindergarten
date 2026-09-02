@@ -69,6 +69,7 @@ export const demoAgents: DemoAgent[] = [
       score: 78,
       duration: "18.4 s",
       modelRounds: 2,
+      retryCount: 0,
       toolCalls: 1,
       outputTokens: 684,
       trace: [
@@ -116,6 +117,7 @@ export const demoAgents: DemoAgent[] = [
       score: 91,
       duration: "24.7 s",
       modelRounds: 3,
+      retryCount: 0,
       toolCalls: 4,
       outputTokens: 1_126,
       trace: [
@@ -169,6 +171,7 @@ export const demoAgents: DemoAgent[] = [
       score: 95,
       duration: "31.2 s",
       modelRounds: 4,
+      retryCount: 0,
       toolCalls: 6,
       outputTokens: 1_438,
       trace: [

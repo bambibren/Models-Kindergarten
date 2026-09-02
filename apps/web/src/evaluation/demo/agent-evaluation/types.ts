@@ -15,10 +15,10 @@ export type DemoRunPolicy = "run" | "reuse_snapshot";
 
 /** 描述「DemoAgentStreamItem」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type DemoAgentStreamItem =
-  | { id: string; type: "context"; title: string; detail: string; tokens: number; raw: string }
-  | { id: string; type: "thought"; title: string; text: string; tokens: number }
-  | { id: string; type: "tool"; name: string; status: "completed" | "failed"; input: string; output: string; tokens: number }
-  | { id: string; type: "answer"; text: string; tokens: number; artifactIds?: string[] };
+  | { id: string; type: "context"; title: string; detail: string; tokens?: number | undefined; raw: string }
+  | { id: string; type: "thought"; title: string; text: string; tokens?: number | undefined }
+  | { id: string; type: "tool"; name: string; status: "pending" | "completed" | "failed"; input: string; output: string; tokens?: number | undefined }
+  | { id: string; type: "answer"; text: string; tokens?: number | undefined; artifactIds?: string[] | undefined };
 
 /** 描述 Demo 原始回答中可跳转查看的产物。 */
 export interface DemoEvaluationArtifact {
@@ -37,7 +37,11 @@ export interface DemoExecutionTraceItem {
   title: string;
   detail: string;
   duration: string;
-  status: "completed" | "failed";
+  status: "running" | "completed" | "failed" | "cancelled";
+  /** 模型 Attempt 为 0 表示首次调用，大于 0 表示第几次自动重试。 */
+  attemptIndex?: number;
+  /** 失败 Attempt 在下一次重试前等待的时间。 */
+  retryDelay?: string;
 }
 
 /** 描述「DemoRequirement」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -75,6 +79,7 @@ export interface DemoExecution {
   score: number;
   duration: string;
   modelRounds: number;
+  retryCount: number;
   toolCalls: number;
   outputTokens: number;
   trace: DemoExecutionTraceItem[];
@@ -112,7 +117,7 @@ export interface DemoTask {
 /** 描述「TextMark」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface TextMark {
   id: string;
-  agentId: AgentId;
+  agentId: string;
   sectionId: string;
   start: number;
   end: number;

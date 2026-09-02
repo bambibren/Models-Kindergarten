@@ -93,6 +93,8 @@ export interface SessionMessageEntry {
   messageId: string;
   createdAt: string;
   artifactMentions?: ArtifactMention[];
+  modelAttemptId?: string;
+  modelAttemptIndex?: number;
 }
 
 /** 描述「SessionThoughtEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -102,6 +104,8 @@ export interface SessionThoughtEntry {
   turnId: string;
   messageId: string;
   createdAt: string;
+  modelAttemptId?: string;
+  modelAttemptIndex?: number;
 }
 
 /** 描述「SessionContextSummaryEntry」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */

@@ -327,7 +327,8 @@ Tool 结果可能激活 Skill 正文或加载 MCP Resource，因此结果页按�
 - 创建页“评测辅助”区域显示并可选择一个 Ready ModelStudent，默认使用系统推荐模型。
 - 工作表调用固定 `reasoning=disabled`、`tools=[]`。
 - `generator.modelStudentId / providerKind / model` 必须来自同一个实际 Provider 对象。
-- 生成器只整理公共需求、工作流和原文分段，不产生 verdict、分数、排名或 winner。
+- 理解候选项只从用户原始 Prompt 与每个实验 Turn 的第一条非空思考中合并去重；不读取最终回答、后续思考、Tool、Runtime 结果或其他 Turn。该输入必须与工作流/原文分段调用物理隔离，不能只依赖提示词禁止引用。
+- 工作流和原文分段可使用各自所需的完整模型输出与回答；生成器不产生 verdict、分数、排名或 winner。
 - 若工作表模型不可用，回答事实仍可查看；用户更换工作表模型后重新生成，并记录新的 generator。
 
 ### 10.2 Runtime 指标

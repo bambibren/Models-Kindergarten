@@ -59,10 +59,14 @@ async *stream(
     signal: AbortSignal,
     onActivity?: () => void,
   ): AsyncIterable<ModelEvent> {
-    if (input.systemPrompt?.includes("人工评测题目整理器")) {
+    if (input.systemPrompt?.includes("人工评测材料整理器")) {
       const payload = fixtureWorksheet(input.messages.at(-1)?.content ?? "");
+      const itemId = "fixture:message:0";
       onActivity?.();
-      yield { type: "text_delta", text: JSON.stringify(payload) };
+      yield { type: "output_item_started", item: { id: itemId, kind: "message" } };
+      const text = JSON.stringify(payload);
+      yield { type: "output_item_delta", itemId, delta: { kind: "text", text } };
+      yield { type: "output_item_completed", item: { id: itemId, kind: "message", text } };
       onActivity?.();
       yield { type: "finish", reason: "stop" };
       return;
@@ -75,11 +79,17 @@ async *stream(
       "Web、ACP、Agent 和模型正在走同一条真实链路。",
     ];
 
+    const itemId = "fixture:message:0";
+    let text = "";
+    yield { type: "output_item_started", item: { id: itemId, kind: "message" } };
     for (const part of reply) {
       await wait(5, signal);
       onActivity?.();
-      yield { type: "text_delta", text: `${part}\n` };
+      const delta = `${part}\n`;
+      text += delta;
+      yield { type: "output_item_delta", itemId, delta: { kind: "text", text: delta } };
     }
+    yield { type: "output_item_completed", item: { id: itemId, kind: "message", text } };
     onActivity?.();
     yield { type: "finish", reason: "stop" };
   }
@@ -89,17 +99,27 @@ async *stream(
 function fixtureWorksheet(prompt: string) {
   const marker = "输入：\n";
   const value = JSON.parse(prompt.slice(prompt.lastIndexOf(marker) + marker.length)) as {
-    task: string;
-    lanes: Array<{ variantId: string; answerUnits: unknown[] }>;
+    task?: string;
+    lanes: Array<{ variantId: string; firstThought?: string; answerUnits?: unknown[] }>;
   };
+  if (value.task !== undefined) {
+    return {
+      requirements: [{
+        label: value.task.slice(0, 120),
+        weight: 1,
+        sourceVariantIds: ["task"],
+        matchedVariantIds: value.lanes.flatMap(/** Fixture 只把存在首次思考的 lane 视为已显式识别需求。 */
+(lane) => lane.firstThought?.trim() ? [lane.variantId] : []),
+      }],
+    };
+  }
   return {
-    requirements: [{ label: value.task.slice(0, 120), weight: 1 }],
-    workflows: value.lanes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(lane) => ({ variantId: lane.variantId, steps: ["理解任务并形成回答"] })),
+    workflows: value.lanes.map(/** Fixture 回答没有显式规划，整理器必须如实返回空步骤。 */
+(lane) => ({ variantId: lane.variantId, steps: [] })),
     outputSections: value.lanes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (lane) => ({
       variantId: lane.variantId,
-      sections: [{ label: "完整回答", startUnit: 0, endUnit: lane.answerUnits.length }],
+      sections: [{ label: "完整回答", startUnit: 0, endUnit: lane.answerUnits?.length ?? 0 }],
     })),
   };
 }

@@ -69,7 +69,35 @@ export class TraceCollector implements RuntimeObservationSink {
         startedAt: event.startedAt,
         resolvedReasoning: structuredClone(event.resolvedReasoning),
         context: structuredClone(event.context),
+        attempts: [],
       });
+      return;
+    }
+    if (event.type === "model_attempt_started") {
+      const round = findRound(trace, event.roundId);
+      round?.attempts?.push({
+        id: event.attemptId,
+        index: event.index,
+        startedAt: event.startedAt,
+        status: "running",
+      });
+      return;
+    }
+    if (event.type === "model_attempt_failed") {
+      const attempt = findAttempt(trace, event.roundId, event.attemptId);
+      if (!attempt) return;
+      attempt.status = "failed";
+      attempt.completedAt = event.completedAt;
+      attempt.error = structuredClone(event.error);
+      attempt.output = structuredClone(event.output);
+      if (event.retryDelayMs !== undefined) attempt.retryDelayMs = event.retryDelayMs;
+      return;
+    }
+    if (event.type === "model_attempt_completed") {
+      const attempt = findAttempt(trace, event.roundId, event.attemptId);
+      if (!attempt) return;
+      attempt.status = "completed";
+      attempt.completedAt = event.completedAt;
       return;
     }
     if (event.type === "model_round_first_token") {
@@ -196,6 +224,11 @@ function turnKey(sessionId: string, turnId: string): string {
 
 function findRound(trace: PendingTrace, roundId: string): ModelRoundTrace | undefined {
   return trace.modelRounds.find((item) => item.id === roundId);
+}
+
+/** 按 Round 与 Attempt 稳定 ID 查找单次 Provider 请求记录。 */
+function findAttempt(trace: PendingTrace, roundId: string, attemptId: string) {
+  return findRound(trace, roundId)?.attempts?.find((item) => item.id === attemptId);
 }
 
 function errorText(value: unknown): string {

@@ -426,10 +426,12 @@ continue(): void { this.release(); }
 async *stream(_input: ModelInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
     signal.addEventListener("abort", /** 构造「stream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => { this.aborted = true; }, { once: true });
-    yield { type: "text_delta", text: "第一段" };
+    yield { type: "output_item_started", item: { id: "ws-message", kind: "message" } };
+    yield { type: "output_item_delta", itemId: "ws-message", delta: { kind: "text", text: "第一段" } };
     this.first();
     await this.waiting;
-    yield { type: "text_delta", text: "第二段" };
+    yield { type: "output_item_delta", itemId: "ws-message", delta: { kind: "text", text: "第二段" } };
+    yield { type: "output_item_completed", item: { id: "ws-message", kind: "message", text: "第一段第二段" } };
     yield { type: "finish", reason: "stop" };
     this.done();
   }

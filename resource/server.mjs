@@ -6,18 +6,20 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 const defaultSkillsRoot = resolve(projectRoot, "skills");
-const maxFiles = 200;
-const maxTotalBytes = 2 * 1024 * 1024;
+const defaultCatalogFile = resolve(projectRoot, "skill-catalog.zh-CN.json");
+const maxFiles = 512;
+const maxTotalBytes = 64 * 1024 * 1024;
 
 export function createResourceServer(options = {}) {
   const skillsRoot = resolve(options.skillsRoot ?? defaultSkillsRoot);
+  const catalogFile = options.catalogFile ?? catalogFileFor(skillsRoot);
   return createServer(async (request, response) => {
     try {
       if (request.method !== "GET") return send(response, 405, { error: "METHOD_NOT_ALLOWED" });
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (url.pathname === "/health") return send(response, 200, { ok: true });
       if (url.pathname === "/skills") {
-        const skills = await listSkills(skillsRoot);
+        const skills = await listSkills(skillsRoot, catalogFile);
         return send(response, 200, { schemaVersion: 1, skills });
       }
       const match = url.pathname.match(/^\/skills\/([a-z0-9-]+)$/);
@@ -77,10 +79,10 @@ export async function buildSkillBundle(skillsRoot, name) {
 }
 
 /** 把运行时资源协议预生成成静态 JSON，使 Caddy 无需额外 Node 进程即可提供同一组 URL。 */
-export async function exportStaticResourceSite(skillsRoot, outputRoot) {
+export async function exportStaticResourceSite(skillsRoot, outputRoot, options = {}) {
   const root = resolve(skillsRoot);
   const target = resolve(outputRoot, "skills");
-  const skills = await listSkills(root);
+  const skills = await listSkills(root, options.catalogFile ?? catalogFileFor(root));
   await mkdir(target, { recursive: true });
   await writeJson(resolve(target, "index.json"), { schemaVersion: 1, skills });
   for (const skill of skills) {
@@ -89,12 +91,47 @@ export async function exportStaticResourceSite(skillsRoot, outputRoot) {
   return skills.map((skill) => skill.name);
 }
 
-async function listSkills(skillsRoot) {
+async function listSkills(skillsRoot, catalogFile) {
   const entries = await readdir(skillsRoot, { withFileTypes: true });
-  return entries
+  const skills = entries
     .filter((entry) => entry.isDirectory() && /^[a-z0-9-]+$/.test(entry.name))
     .map((entry) => ({ name: entry.name, url: `/skills/${entry.name}` }))
     .toSorted((left, right) => left.name.localeCompare(right.name));
+  if (!catalogFile) return skills;
+  const catalog = await readCatalog(catalogFile);
+  const names = skills.map((skill) => skill.name);
+  const catalogNames = [...catalog.keys()].toSorted((left, right) => left.localeCompare(right));
+  if (JSON.stringify(names) !== JSON.stringify(catalogNames)) {
+    throw new Error(`Skill 中文目录与资源集合不匹配：资源 ${names.join(", ")}；目录 ${catalogNames.join(", ")}`);
+  }
+  return skills.map((skill) => ({ ...skill, ...catalog.get(skill.name) }));
+}
+
+async function readCatalog(file) {
+  const value = JSON.parse(await readFile(file, "utf8"));
+  if (!value || value.schemaVersion !== 1 || !Array.isArray(value.skills)) {
+    throw new Error("Skill 中文目录结构无效");
+  }
+  const result = new Map();
+  for (const item of value.skills) {
+    if (!item || typeof item.name !== "string" || !/^[a-z0-9-]+$/.test(item.name) ||
+      typeof item.displayName !== "string" || item.displayName.trim().length < 1 || item.displayName.length > 80 ||
+      typeof item.description !== "string" || item.description.trim().length < 1 || item.description.length > 500 ||
+      typeof item.category !== "string" || item.category.trim().length < 1 || item.category.length > 40) {
+      throw new Error("Skill 中文目录条目无效");
+    }
+    if (result.has(item.name)) throw new Error(`Skill 中文目录包含重复名称: ${item.name}`);
+    result.set(item.name, {
+      displayName: item.displayName.trim(),
+      description: item.description.trim(),
+      category: item.category.trim(),
+    });
+  }
+  return result;
+}
+
+function catalogFileFor(skillsRoot) {
+  return resolve(skillsRoot) === defaultSkillsRoot ? defaultCatalogFile : undefined;
 }
 
 async function collectFiles(root) {

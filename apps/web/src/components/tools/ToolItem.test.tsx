@@ -5,6 +5,15 @@ import { ToolItem } from "./ToolItem.js";
 
 describe("ToolItem", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {
+  it("区分工具准备与真实执行状态", () => {
+    const pending = renderToStaticMarkup(<ToolItem entry={toolEntry("pending")} />);
+    const running = renderToStaticMarkup(<ToolItem entry={toolEntry("in_progress")} />);
+
+    expect(pending).toContain("准备中");
+    expect(pending).not.toContain("执行中");
+    expect(running).toContain("执行中");
+  });
+
   it("不为 Workspace 文件引用显示预览入口", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     const entry: ToolCallEntry = {
@@ -63,4 +72,51 @@ describe("ToolItem", /** 组织这一组相关测试，统一建立场景边界�
     expect(html).toContain("预览 index.html");
     expect(html.indexOf("预览 index.html")).toBeLessThan(html.indexOf("tool-detail"));
   });
+
+  it("由外层消息流环境把 Artifact 切换为新页面链接", () => {
+    const entry: ToolCallEntry = {
+      id: "tool:publish-2",
+      type: "tool_call",
+      turnId: "turn-1",
+      toolCallId: "publish-2",
+      title: "发布页面",
+      name: "publish_artifact",
+      kind: "other",
+      status: "completed",
+      content: [{
+        type: "content",
+        content: {
+          type: "resource_link",
+          name: "页面",
+          uri: "artifact://artifact_12345678",
+        },
+      }],
+      locations: [],
+    };
+
+    const html = renderToStaticMarkup(<ToolItem
+      artifactNavigation={{ href: (artifactId) => `/artifacts/${artifactId}` }}
+      entry={entry}
+    />);
+
+    expect(html).toContain("href=\"/artifacts/artifact_12345678\"");
+    expect(html).toContain("target=\"_blank\"");
+    expect(html).toContain("打开 页面");
+    expect(html).not.toContain("预览 页面");
+  });
 });
+
+function toolEntry(status: ToolCallEntry["status"]): ToolCallEntry {
+  return {
+    id: "tool:status",
+    type: "tool_call",
+    turnId: "turn-status",
+    toolCallId: "status",
+    title: "写入 index.html",
+    name: "write_file",
+    kind: "edit",
+    status,
+    content: [],
+    locations: [],
+  };
+}

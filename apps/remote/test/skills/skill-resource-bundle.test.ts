@@ -88,13 +88,31 @@ async () => new Response(JSON.stringify(bundle), {
     await expect(installer.install({ approved: true, source: { kind: "resource", url: resourceUrl } }))
       .rejects.toThrow("SHA-256 不匹配");
   });
+
+  it("使用固定调用栈校验大型二进制资源", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mk-resource-large-binary-"));
+    dirs.push(root);
+    const payload = Buffer.alloc(20 * 1024 * 1024, 0xab);
+    const bundle = makeBundle({
+      "SKILL.md": "---\nname: demo-skill\ndescription: demo\n---\nbody",
+      "examples/demo.mp4": payload,
+    });
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(bundle), {
+      headers: { "content-type": "application/vnd.mk.skill+json" },
+    }));
+    const installer = new SkillInstaller(join(root, "skills"), new SkillLockStore(join(root, "lock.json")), fetchImpl);
+
+    await installer.install({ approved: true, source: { kind: "resource", url: resourceUrl } });
+
+    expect((await readFile(join(root, "skills", "demo-skill", "examples", "demo.mp4"))).byteLength).toBe(payload.byteLength);
+  });
 });
 
 /** 构造「makeBundle」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-function makeBundle(files: Record<string, string>) {
+function makeBundle(files: Record<string, string | Buffer>) {
   const items = Object.entries(files).map(/** 构造「toSorted」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-([path, text]) => {
-    const content = Buffer.from(text);
+([path, value]) => {
+    const content = Buffer.from(value);
     return {
       path,
       encoding: "base64" as const,

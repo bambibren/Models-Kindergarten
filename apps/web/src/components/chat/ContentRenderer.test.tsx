@@ -36,4 +36,15 @@ describe("ContentRenderer internal links", /** 组织这一组相关测试，统
     expect(html).not.toContain("href=");
     expect(messageUrlTransform("mk-file://file_12345678", "href", {} as never)).not.toContain("#mk-file=");
   });
+
+  it("允许上下文实验把裸 Artifact 引用改为新页面链接", () => {
+    const html = renderToStaticMarkup(<ContentRenderer
+      artifactNavigation={{ href: (artifactId) => `/artifacts/${artifactId}` }}
+      content={[{ type: "text", text: "产物：artifact://artifact_12345678" }]}
+    />);
+
+    expect(html).toContain("href=\"/artifacts/artifact_12345678\"");
+    expect(html).toContain("target=\"_blank\"");
+    expect(html).toContain("打开产物");
+  });
 });

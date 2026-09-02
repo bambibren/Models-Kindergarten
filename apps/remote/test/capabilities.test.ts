@@ -390,8 +390,8 @@ function serverConfig(id: string) {
 class AllowObserver implements ToolObserver {
   started: string[] = [];
   outcomes: ToolOutcome[] = [];
-  /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async toolStart(call: PreparedToolCall): Promise<void> { this.started.push(call.name); }
+  /** 记录真实 Handler 的执行开始。 */
+async toolExecutionStarted(call: PreparedToolCall): Promise<void> { this.started.push(call.name); }
   /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async toolFinish(_call: PreparedToolCall, _status: ToolCallStatus, outcome: ToolOutcome): Promise<void> {
     this.outcomes.push(outcome);

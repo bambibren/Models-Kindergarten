@@ -139,8 +139,9 @@ async () => {
         include: ["reasoning.encrypted_content"],
       });
       expect(mock.requests[0]?.body).not.toHaveProperty("temperature");
-      expect(events.filter(/** 构造「not」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-(event) => event.type === "thinking_delta")).not.toHaveLength(0);
+      expect(events.filter((event) =>
+        event.type === "output_item_completed" && event.item.kind === "reasoning",
+      )).not.toHaveLength(0);
       expect(events).toContainEqual({
         type: "usage",
         inputTokens: 80,
@@ -422,6 +423,54 @@ async () => {
         && !message.includes(requestToken)
         && !message.includes(reflectedApiKey)
         && !message.includes(reflectedPassword);
+    });
+  });
+
+  it("429 保留 HTTP 状态和 Retry-After，交给 Runtime 决定 Attempt 等待", async () => {
+    const provider = new ResponsesApiProvider(student, {
+      readBearerToken: () => "test-token",
+      allowLegacyOfficialPreset: true,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("busy", {
+      status: 429,
+      headers: { "retry-after": "2" },
+    })));
+
+    const consume = async () => {
+      for await (const _event of provider.stream(input, new AbortController().signal)) {}
+    };
+    await expect(consume()).rejects.toMatchObject({
+      retryable: true,
+      httpStatus: 429,
+      retryAfterMs: 2_000,
+    });
+  });
+
+  it("嵌套 error 事件透传 Provider code 和原因", async () => {
+    const provider = new ResponsesApiProvider(student, {
+      readBearerToken: () => "test-token",
+      allowLegacyOfficialPreset: true,
+    });
+    const body = [
+      `event: error`,
+      `data: ${JSON.stringify({
+        type: "error",
+        error: { code: "service_unavailable", message: "nested provider failure" },
+      })}`,
+      "",
+    ].join("\n");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    })));
+
+    const consume = async () => {
+      for await (const _event of provider.stream(input, new AbortController().signal)) {}
+    };
+    await expect(consume()).rejects.toMatchObject({
+      retryable: true,
+      providerCode: "service_unavailable",
+      message: expect.stringContaining("nested provider failure"),
     });
   });
 
@@ -873,14 +922,7 @@ async context(summary: ContextSummary): Promise<void> { this.disclosures.push(JS
 async modelRoundStarted(facts: import("../src/runtime/agent-runtime.js").RuntimeModelRoundSnapshot): Promise<void> {
     this.disclosures.push(facts.providerInput.value);
   }
-  /** 构造「text」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async text(): Promise<void> {}
-  /** 构造「thought」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async thought(): Promise<void> {}
-  /** 构造「roundComplete」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async roundComplete(): Promise<void> {}
-  /** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async toolStart(call: PreparedToolCall): Promise<void> {
+  async toolExecutionStarted(call: PreparedToolCall): Promise<void> {
     this.started.push(String(call.arguments.path));
   }
   /** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */

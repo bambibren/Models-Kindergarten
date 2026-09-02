@@ -54,6 +54,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         source: action.source,
         turnId: action.turnId,
         seenChunks: new Set(),
+        modelAttempts: {},
         ...(optimistic ? { optimisticUserEntryId: optimistic.id } : {}),
       },
     };
@@ -75,6 +76,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         source: "load",
         turnId: action.activeTurn.turnId,
         seenChunks: new Set(),
+        modelAttempts: attemptsFromEntries(split.matching),
       } : null,
     };
   }
@@ -183,12 +185,25 @@ function reduceMessage(state: ChatState, role: MessageEntry["role"], messageId: 
   if (!messageId || !state.streaming) return state;
   const meta = readMessageMeta(rawMeta);
   if (!meta) return state;
-  const chunk = `${messageId}:${meta.chunkIndex}`;
+  const activeAttempt = state.streaming.modelAttempts[messageId];
+  if (meta.modelAttempt && activeAttempt && meta.modelAttempt.index < activeAttempt.index) return state;
+  const chunk = chunkKey(messageId, meta.chunkIndex, meta.modelAttempt?.id);
   if (state.streaming.seenChunks.has(chunk)) return state;
   let collection = state.streamingChatEntries;
-  let streaming = addSeen(state.streaming, chunk);
+  let streaming = withModelAttempt(state.streaming, messageId, meta.modelAttempt);
   const id = `message:${messageId}`;
+  const shouldReset = meta.modelAttempt !== undefined && (
+    meta.modelAttempt.reset === true ||
+    activeAttempt === undefined ||
+    meta.modelAttempt.index > activeAttempt.index
+  );
+  if (shouldReset) collection = removeId(collection, id);
   const current = collection.byId[id];
+
+  if (shouldReset && isEmptyText(content) && !meta.final) {
+    return { ...state, streamingChatEntries: collection, streaming };
+  }
+  streaming = addSeen(streaming, chunk);
 
   if (!current && role === "user" && streaming.source === "prompt" && streaming.optimisticUserEntryId) {
     const optimistic = collection.byId[streaming.optimisticUserEntryId];
@@ -198,6 +213,7 @@ function reduceMessage(state: ChatState, role: MessageEntry["role"], messageId: 
         content: textOf([content]) === textOf(optimistic.content) ? optimistic.content : [content],
         status: meta.final ? "done" : "streaming",
         ...(meta.artifactMentions ? { artifactMentions: meta.artifactMentions } : {}),
+        ...(meta.modelAttempt ? { modelAttemptId: meta.modelAttempt.id, modelAttemptIndex: meta.modelAttempt.index } : {}),
       });
       streaming = { ...streaming, optimisticUserEntryId: id };
       return { ...state, streamingChatEntries: collection, streaming };
@@ -210,6 +226,7 @@ function reduceMessage(state: ChatState, role: MessageEntry["role"], messageId: 
       type: "message", id, messageId, turnId: meta.turnId, role,
       content: [content], status: meta.final ? "done" : "streaming",
       ...(meta.artifactMentions ? { artifactMentions: meta.artifactMentions } : {}),
+      ...(meta.modelAttempt ? { modelAttemptId: meta.modelAttempt.id, modelAttemptIndex: meta.modelAttempt.index } : {}),
     });
   } else if (current.type === "message") {
     collection = upsert(collection, {
@@ -217,6 +234,7 @@ function reduceMessage(state: ChatState, role: MessageEntry["role"], messageId: 
       content: appendContent(current.content, content),
       status: meta.final ? "done" : current.status,
       ...(meta.artifactMentions ? { artifactMentions: meta.artifactMentions } : {}),
+      ...(meta.modelAttempt ? { modelAttemptId: meta.modelAttempt.id, modelAttemptIndex: meta.modelAttempt.index } : {}),
     });
   }
   return { ...state, streamingChatEntries: collection, streaming };
@@ -227,22 +245,36 @@ function reduceThought(state: ChatState, messageId: string | null | undefined, c
   if (!messageId || !state.streaming) return state;
   const meta = readMessageMeta(rawMeta);
   if (!meta) return state;
-  const chunk = `${messageId}:${meta.chunkIndex}`;
+  const activeAttempt = state.streaming.modelAttempts[messageId];
+  if (meta.modelAttempt && activeAttempt && meta.modelAttempt.index < activeAttempt.index) return state;
+  const chunk = chunkKey(messageId, meta.chunkIndex, meta.modelAttempt?.id);
   if (state.streaming.seenChunks.has(chunk)) return state;
-  const streaming = addSeen(state.streaming, chunk);
+  let streaming = withModelAttempt(state.streaming, messageId, meta.modelAttempt);
   const id = `thought:${messageId}`;
-  const current = state.streamingChatEntries.byId[id];
   let collection = state.streamingChatEntries;
+  const shouldReset = meta.modelAttempt !== undefined && (
+    meta.modelAttempt.reset === true ||
+    activeAttempt === undefined ||
+    meta.modelAttempt.index > activeAttempt.index
+  );
+  if (shouldReset) collection = removeId(collection, id);
+  const current = collection.byId[id];
+  if (shouldReset && isEmptyText(content) && !meta.final) {
+    return { ...state, streamingChatEntries: collection, streaming };
+  }
+  streaming = addSeen(streaming, chunk);
   if (!current) {
     if (isEmptyText(content) && meta.final) return { ...state, streaming };
     collection = upsert(collection, {
       type: "thought", id, messageId, turnId: meta.turnId,
       content: [content], status: meta.final ? "done" : "streaming",
+      ...(meta.modelAttempt ? { modelAttemptId: meta.modelAttempt.id, modelAttemptIndex: meta.modelAttempt.index } : {}),
     });
   } else if (current.type === "thought") {
     collection = upsert(collection, {
       ...current, content: appendContent(current.content, content),
       status: meta.final ? "done" : current.status,
+      ...(meta.modelAttempt ? { modelAttemptId: meta.modelAttempt.id, modelAttemptIndex: meta.modelAttempt.index } : {}),
     });
   }
   return { ...state, streamingChatEntries: collection, streaming };
@@ -289,6 +321,51 @@ function collectionOf(entry: ChatEntry): EntryCollection { return { order: [entr
 function upsert(collection: EntryCollection, entry: ChatEntry): EntryCollection {
   const exists = collection.byId[entry.id] !== undefined;
   return { order: exists ? collection.order : [...collection.order, entry.id], byId: { ...collection.byId, [entry.id]: entry } };
+}
+
+/** 整体移除一个失败 Attempt 的临时条目；不会触碰其它 Round 或 Tool 投影。 */
+function removeId(collection: EntryCollection, id: string): EntryCollection {
+  if (collection.byId[id] === undefined) return collection;
+  const byId = { ...collection.byId };
+  delete byId[id];
+  return { order: collection.order.filter((current) => current !== id), byId };
+}
+
+/** 记录每个稳定 ACP messageId 当前接收的 Attempt，供乱序旧 chunk 直接丢弃。 */
+function withModelAttempt(
+  streaming: ChatState["streaming"] & {},
+  messageId: string,
+  attempt: { id: string; index: number } | undefined,
+) {
+  if (!attempt) return streaming;
+  return {
+    ...streaming,
+    modelAttempts: {
+      ...streaming.modelAttempts,
+      [messageId]: { id: attempt.id, index: attempt.index },
+    },
+  };
+}
+
+/** Chunk 幂等键带 Attempt 命名空间，新 Attempt 从 chunkIndex=0 开始不会撞到旧记录。 */
+function chunkKey(messageId: string, chunkIndex: number, attemptId?: string): string {
+  return `${messageId}:${attemptId ?? "legacy"}:${chunkIndex}`;
+}
+
+/** load 转入活动 Turn 时，从现有投影恢复 Attempt 代次。 */
+function attemptsFromEntries(collection: EntryCollection): Record<string, { id: string; index: number }> {
+  const attempts: Record<string, { id: string; index: number }> = {};
+  for (const entry of Object.values(collection.byId)) {
+    if (
+      (entry.type === "message" || entry.type === "thought") &&
+      entry.messageId &&
+      entry.modelAttemptId !== undefined &&
+      entry.modelAttemptIndex !== undefined
+    ) {
+      attempts[entry.messageId] = { id: entry.modelAttemptId, index: entry.modelAttemptIndex };
+    }
+  }
+  return attempts;
 }
 
 /** 由规范字段生成稳定的「replaceId」标识，供索引精确定位且不保留原始大对象。 */

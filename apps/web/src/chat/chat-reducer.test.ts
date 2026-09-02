@@ -192,6 +192,63 @@ describe("chatReducer", /** 组织这一组相关测试，统一建立场景边�
     ]);
   });
 
+  it("新模型 Attempt 整体替换失败 Attempt 的部分正文，并忽略迟到旧 Chunk", () => {
+    let state = openStream("load");
+    state = update(state, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "message-round-0",
+      content: { type: "text", text: "失败的半段" },
+      _meta: makeAcpMeta({
+        schemaVersion: 1,
+        turnId: "turn-1",
+        chunkIndex: 0,
+        modelAttempt: { id: "attempt-0", index: 0 },
+      }),
+    });
+    state = update(state, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "message-round-0",
+      content: { type: "text", text: "" },
+      _meta: makeAcpMeta({
+        schemaVersion: 1,
+        turnId: "turn-1",
+        chunkIndex: 0,
+        modelAttempt: { id: "attempt-1", index: 1, reset: true },
+      }),
+    });
+    expect(values(state.streamingChatEntries)).toEqual([]);
+
+    state = update(state, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "message-round-0",
+      content: { type: "text", text: "完整回答" },
+      _meta: makeAcpMeta({
+        schemaVersion: 1,
+        turnId: "turn-1",
+        chunkIndex: 0,
+        modelAttempt: { id: "attempt-1", index: 1 },
+      }),
+    });
+    state = update(state, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "message-round-0",
+      content: { type: "text", text: "迟到旧数据" },
+      _meta: makeAcpMeta({
+        schemaVersion: 1,
+        turnId: "turn-1",
+        chunkIndex: 1,
+        modelAttempt: { id: "attempt-0", index: 0 },
+      }),
+    });
+
+    expect(values(state.streamingChatEntries)).toMatchObject([{
+      type: "message",
+      content: [{ type: "text", text: "完整回答" }],
+      modelAttemptId: "attempt-1",
+      modelAttemptIndex: 1,
+    }]);
+  });
+
   it("允许 tool_call_update 先到并在原位置补全", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     let state = openStream("load");

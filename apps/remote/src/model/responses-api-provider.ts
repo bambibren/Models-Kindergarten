@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ModelProviderError } from "./model-error.js";
+import { isRetryableModelHttpStatus, ModelProviderError, retryAfterMilliseconds } from "./model-error.js";
 import type {
   ConcreteReasoningProfile,
   ModelReasoningCapability,
@@ -71,7 +71,16 @@ interface FunctionCallState {
   callId?: string;
   name?: string;
   argumentsText: string;
+  started: boolean;
   emitted: boolean;
+}
+
+interface TextItemState {
+  id: string;
+  kind: "reasoning" | "message";
+  text: string;
+  started: boolean;
+  completed: boolean;
 }
 
 interface SseEvent {
@@ -221,10 +230,15 @@ private async *streamRequest(
 
     if (!response.ok) {
       const detail = redact(await readErrorBody(response), token);
+      const retryAfterMs = retryAfterMilliseconds(response.headers.get("retry-after"));
       throw new ModelProviderError(
         "model_request_failed",
         `Responses API 请求失败 (${response.status})${detail ? `: ${detail}` : ""}`,
-        response.status === 429 || response.status >= 500,
+        isRetryableModelHttpStatus(response.status),
+        {
+          httpStatus: response.status,
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+        },
       );
     }
     if (!response.body) {
@@ -237,6 +251,8 @@ private async *streamRequest(
 
     const calls = new Map<number, FunctionCallState>();
     const itemIndexes = new Map<string, number>();
+    const textItems = new Map<string, TextItemState>();
+    const textItemIndexes = new Map<string, string>();
     let terminal = false;
     const diagnostics = createResponsesStreamDiagnostics();
 
@@ -255,38 +271,109 @@ private async *streamRequest(
       diagnostics?.record(message, type, event, responsesStreamDisposition(type));
 
       if (type === "response.output_text.delta") {
+        const itemId = textItemId(event, "message", textItemIndexes);
+        const state = ensureTextItem(textItems, itemId, "message");
+        if (!state.started) {
+          state.started = true;
+          yield { type: "output_item_started", item: { id: itemId, kind: "message" } };
+        }
         const delta = stringValue(event.delta);
-        if (delta) yield { type: "text_delta", text: delta };
+        if (delta) {
+          state.text += delta;
+          yield { type: "output_item_delta", itemId, delta: { kind: "text", text: delta } };
+        }
         continue;
       }
       if (
         type === "response.reasoning_summary_text.delta" ||
         type === "response.reasoning_text.delta"
       ) {
+        const itemId = textItemId(event, "reasoning", textItemIndexes);
+        const state = ensureTextItem(textItems, itemId, "reasoning");
+        if (!state.started) {
+          state.started = true;
+          yield { type: "output_item_started", item: { id: itemId, kind: "reasoning" } };
+        }
         const delta = stringValue(event.delta);
-        if (delta) yield { type: "thinking_delta", text: delta };
+        if (delta) {
+          state.text += delta;
+          yield { type: "output_item_delta", itemId, delta: { kind: "text", text: delta } };
+        }
         continue;
       }
 
       if (type === "response.output_item.added") {
         const item = recordValue(event.item);
         if (item?.type === "function_call") {
-          seedFunctionCall(calls, itemIndexes, event, item);
+          const state = seedFunctionCall(calls, itemIndexes, event, item);
+          if (!state.itemId || !state.callId) {
+            throw new ModelProviderError(
+              "invalid_model_response",
+              "Responses function_call item 缺少稳定 id 或 call_id",
+              false,
+            );
+          }
+          state.started = true;
+          yield {
+            type: "output_item_started",
+            item: {
+              id: state.itemId,
+              kind: "tool_call",
+              callId: state.callId,
+              ...(state.name ? { name: state.name } : {}),
+            },
+          };
+        } else if (item?.type === "reasoning" || item?.type === "message") {
+          const itemId = textItemId(event, item.type === "reasoning" ? "reasoning" : "message", textItemIndexes, item);
+          if (!itemId) {
+            throw new ModelProviderError("invalid_model_response", "Responses output item 缺少稳定 id", false);
+          }
+          const kind = item.type === "reasoning" ? "reasoning" : "message";
+          const state = ensureTextItem(textItems, itemId, kind);
+          if (!state.started) {
+            state.started = true;
+            yield { type: "output_item_started", item: { id: itemId, kind } };
+          }
         }
         continue;
       }
       if (type === "response.function_call_arguments.delta") {
         const state = functionCallForEvent(calls, itemIndexes, event);
         const delta = stringValue(event.delta);
-        if (delta) state.argumentsText += delta;
+        if (!state.itemId) throw new ModelProviderError("invalid_model_response", "Responses Tool Call delta 缺少 item_id", false);
+        if (!state.started) {
+          if (!state.callId) {
+            throw new ModelProviderError(
+              "invalid_model_response",
+              "Responses Tool Call delta 在 added 前到达且缺少 call_id",
+              false,
+            );
+          }
+          state.started = true;
+          yield {
+            type: "output_item_started",
+            item: {
+              id: state.itemId,
+              kind: "tool_call",
+              callId: state.callId,
+              ...(state.name ? { name: state.name } : {}),
+            },
+          };
+        }
+        if (delta) {
+          state.argumentsText += delta;
+          yield {
+            type: "output_item_delta",
+            itemId: state.itemId,
+            delta: { kind: "tool_arguments", text: delta },
+          };
+        }
         continue;
       }
       if (type === "response.function_call_arguments.done") {
         const state = functionCallForEvent(calls, itemIndexes, event);
         const args = stringValue(event.arguments);
         if (args !== undefined) state.argumentsText = args;
-        const call = completeFunctionCall(state);
-        if (call) yield { type: "tool_calls", calls: [call] };
         continue;
       }
       if (type === "response.output_item.done") {
@@ -294,7 +381,40 @@ private async *streamRequest(
         if (item?.type === "function_call") {
           const state = seedFunctionCall(calls, itemIndexes, event, item);
           const call = completeFunctionCall(state);
-          if (call) yield { type: "tool_calls", calls: [call] };
+          if (!state.itemId || !call) {
+            throw new ModelProviderError("invalid_model_response", "Responses function_call item 无法完成", false);
+          }
+          if (!state.started) {
+            state.started = true;
+            yield {
+              type: "output_item_started",
+              item: {
+                id: state.itemId,
+                kind: "tool_call",
+                callId: call.id ?? state.callId ?? state.itemId,
+                name: call.name,
+              },
+            };
+          }
+          yield {
+            type: "output_item_completed",
+            item: { id: state.itemId, kind: "tool_call", call },
+          };
+        } else if (item?.type === "reasoning" || item?.type === "message") {
+          const kind = item.type === "reasoning" ? "reasoning" : "message";
+          const itemId = textItemId(event, kind, textItemIndexes, item);
+          const state = ensureTextItem(textItems, itemId, kind);
+          if (!state.started) {
+            state.started = true;
+            yield { type: "output_item_started", item: { id: itemId, kind } };
+          }
+          if (state.completed) {
+            throw new ModelProviderError("invalid_model_response", `Responses output item ${itemId} 重复完成`, false);
+          }
+          state.completed = true;
+          const text = completedItemText(item, kind) ?? state.text;
+          state.text = text;
+          yield { type: "output_item_completed", item: { id: itemId, kind, text } };
         }
         continue;
       }
@@ -304,7 +424,43 @@ private async *streamRequest(
         if (responseValue) {
           options.onTerminalResponse?.(responseValue);
           for (const call of callsFromResponse(responseValue, calls, itemIndexes)) {
-            yield { type: "tool_calls", calls: [call] };
+            const state = [...calls.values()].find((candidate) => candidate.callId === call.id);
+            if (!state?.itemId || !state.callId) {
+              throw new ModelProviderError("invalid_model_response", "Responses 终态 Tool Call 缺少 item 身份", false);
+            }
+            if (!state.started) {
+              state.started = true;
+              yield {
+                type: "output_item_started",
+                item: {
+                  id: state.itemId,
+                  kind: "tool_call",
+                  callId: state.callId,
+                  ...(state.name ? { name: state.name } : {}),
+                },
+              };
+            }
+            yield { type: "output_item_completed", item: { id: state.itemId, kind: "tool_call", call } };
+          }
+          if (Array.isArray(responseValue.output)) {
+            for (let index = 0; index < responseValue.output.length; index += 1) {
+              const item = recordValue(responseValue.output[index]);
+              if (item?.type !== "reasoning" && item?.type !== "message") continue;
+              const kind = item.type === "reasoning" ? "reasoning" : "message";
+              const implicit = [...textItems.values()].find((state) => state.kind === kind && !state.completed);
+              const itemId = textItemIndexes.get(`${index}:${kind}`) ?? implicit?.id ?? stringValue(item.id) ?? `responses:${index}:${kind}`;
+              const existing = textItems.get(itemId);
+              if (existing?.completed) continue;
+              const state = existing ?? ensureTextItem(textItems, itemId, kind);
+              if (!state.started) {
+                state.started = true;
+                yield { type: "output_item_started", item: { id: itemId, kind } };
+              }
+              state.completed = true;
+              const text = completedItemText(item, kind) ?? state.text;
+              state.text = text;
+              yield { type: "output_item_completed", item: { id: itemId, kind, text } };
+            }
           }
           const usage = readUsage(responseValue.usage);
           if (usage) yield { type: "usage", ...usage };
@@ -808,6 +964,7 @@ function seedFunctionCall(
   const current = calls.get(index) ?? {
     index,
     argumentsText: "",
+    started: false,
     emitted: false,
   };
   const itemId = stringValue(item.id) ?? stringValue(event.item_id);
@@ -834,6 +991,7 @@ function functionCallForEvent(
   const current = calls.get(index) ?? {
     index,
     argumentsText: "",
+    started: false,
     emitted: false,
   };
   const itemId = stringValue(event.item_id);
@@ -866,6 +1024,66 @@ function outputIndex(
     "Responses Tool Call 事件缺少稳定的 output_index",
     false,
   );
+}
+
+/**
+ * 标准 Responses 使用 item_id；少数兼容端点只返回 output_index，此时在单次流内
+ * 合成稳定身份，并在终态 response.output 到达时仍完成同一个 item。
+ */
+function textItemId(
+  event: Record<string, unknown>,
+  kind: TextItemState["kind"],
+  indexes: Map<string, string>,
+  item?: Record<string, unknown>,
+): string {
+  const index = typeof event.output_index === "number" && Number.isInteger(event.output_index)
+    ? event.output_index
+    : undefined;
+  const explicit = stringValue(event.item_id) ?? (item ? stringValue(item.id) : undefined);
+  const key = index === undefined ? undefined : `${index}:${kind}`;
+  const known = key === undefined ? undefined : indexes.get(key);
+  const id = known ?? explicit ?? (index === undefined ? `responses:implicit:${kind}` : `responses:${index}:${kind}`);
+  if (key !== undefined) indexes.set(key, id);
+  return id;
+}
+
+/** 建立或读取文本 item，并拒绝同一 id 在 reasoning/message 之间漂移。 */
+function ensureTextItem(
+  items: Map<string, TextItemState>,
+  id: string,
+  kind: TextItemState["kind"],
+): TextItemState {
+  const current = items.get(id);
+  if (current) {
+    if (current.kind !== kind) {
+      throw new ModelProviderError(
+        "invalid_model_response",
+        `Responses output item ${id} 类型从 ${current.kind} 变为 ${kind}`,
+        false,
+      );
+    }
+    if (current.completed) {
+      throw new ModelProviderError("invalid_model_response", `Responses output item ${id} 完成后仍返回增量`, false);
+    }
+    return current;
+  }
+  const state: TextItemState = { id, kind, text: "", started: false, completed: false };
+  items.set(id, state);
+  return state;
+}
+
+/** 从 output_item.done 的完整快照读取终态文本；未知形状交给已累计 delta。 */
+function completedItemText(
+  item: Record<string, unknown>,
+  kind: TextItemState["kind"],
+): string | undefined {
+  const parts = kind === "reasoning" ? item.summary : item.content;
+  if (!Array.isArray(parts)) return undefined;
+  const text = parts.flatMap((part) => {
+    const value = recordValue(part);
+    return typeof value?.text === "string" ? [value.text] : [];
+  }).join("");
+  return text || undefined;
 }
 
 /** 执行「completeFunctionCall」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -948,18 +1166,21 @@ function responseFailure(event: Record<string, unknown>, token: string): ModelPr
     "model_request_failed",
     `Responses API${safeCode ? ` (${safeCode})` : ""}: ${redact(message, token)}`,
     retryableCode(code),
+    safeCode ? { providerCode: safeCode } : undefined,
   );
 }
 
 /** 执行「eventFailure」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function eventFailure(event: Record<string, unknown>, token: string): ModelProviderError {
-  const code = stringValue(event.code);
-  const message = stringValue(event.message) ?? "Responses API 返回错误事件";
+  const nested = recordValue(event.error);
+  const code = stringValue(event.code) ?? stringValue(nested?.code) ?? stringValue(nested?.type);
+  const message = stringValue(event.message) ?? stringValue(nested?.message) ?? "Responses API 返回错误事件";
   const safeCode = code ? redact(code, token) : undefined;
   return new ModelProviderError(
     "model_request_failed",
     `Responses API${safeCode ? ` (${safeCode})` : ""}: ${redact(message, token)}`,
     retryableCode(code),
+    safeCode ? { providerCode: safeCode } : undefined,
   );
 }
 

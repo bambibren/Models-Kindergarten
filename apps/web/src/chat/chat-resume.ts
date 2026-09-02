@@ -22,23 +22,27 @@ function collect(
     const entry = entries.byId[id];
     if (!entry || entry.turnId !== turnId) continue;
     if (entry.type === "message" && entry.messageId) {
-      messages[entry.messageId] = cursor(entry.messageId, textLength(entry.content), chat);
+      messages[entry.messageId] = cursor(entry.messageId, textLength(entry.content), chat, entry.modelAttemptId);
     } else if (entry.type === "thought") {
-      thoughts[entry.messageId] = cursor(entry.messageId, textLength(entry.content), chat);
+      thoughts[entry.messageId] = cursor(entry.messageId, textLength(entry.content), chat, entry.modelAttemptId);
     }
   }
 }
 
 /** 执行「cursor」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function cursor(messageId: string, length: number, chat: ChatState): SessionResumeTextCursor {
+function cursor(messageId: string, length: number, chat: ChatState, modelAttemptId?: string): SessionResumeTextCursor {
   let nextChunkIndex = 0;
   for (const chunk of chat.streaming?.seenChunks ?? []) {
-    const prefix = `${messageId}:`;
+    const prefix = `${messageId}:${modelAttemptId ?? "legacy"}:`;
     if (!chunk.startsWith(prefix)) continue;
     const index = Number(chunk.slice(prefix.length));
     if (Number.isInteger(index)) nextChunkIndex = Math.max(nextChunkIndex, index + 1);
   }
-  return { textLength: length, nextChunkIndex };
+  return {
+    textLength: length,
+    nextChunkIndex,
+    ...(modelAttemptId ? { modelAttemptId } : {}),
+  };
 }
 
 /** 执行「textLength」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "name": "app-spec-designer",
+      "displayName": "应用规格设计",
+      "description": "把 PRD 或原始需求整理成可直接开发的页面结构、交互流程、组件与状态规格。",
+      "category": "产品方法"
+    },
+    {
+      "name": "brainstorming",
+      "displayName": "创意头脑风暴",
+      "description": "通过连续对话澄清想法、比较方向并收敛方案，不强制生成正式文档。",
+      "category": "产品方法"
+    },
+    {
+      "name": "code-to-design",
+      "displayName": "代码转设计规范",
+      "description": "从现有前端代码中提取颜色、字体、间距和组件模式，沉淀为设计系统规范。",
+      "category": "设计与前端"
+    },
+    {
+      "name": "customer-journey-map",
+      "displayName": "客户旅程地图",
+      "description": "梳理用户阶段、触点、行动、情绪与指标，用于发现体验断点和协作机会。",
+      "category": "产品方法"
+    },
+    {
+      "name": "design-clone-skill",
+      "displayName": "设计风格提取",
+      "description": "从网站、截图、Figma 或现有页面提取可复用的设计规则与目标约束。",
+      "category": "设计与前端"
+    },
+    {
+      "name": "docx",
+      "displayName": "Word 文档处理",
+      "description": "创建、读取、编辑和校验 Word 文档，支持专业排版、批注与修订等工作流。",
+      "category": "文档与数据"
+    },
+    {
+      "name": "epic-breakdown-advisor",
+      "displayName": "Epic 拆分顾问",
+      "description": "使用用户价值切分模式，把过大的 Epic 拆成可估算、可交付的用户故事。",
+      "category": "产品方法"
+    },
+    {
+      "name": "epic-hypothesis",
+      "displayName": "Epic 假设",
+      "description": "把大型产品计划表达为可验证的目标用户、预期结果、成功指标与实验。",
+      "category": "产品方法"
+    },
+    {
+      "name": "general-video",
+      "displayName": "通用视频创作",
+      "description": "使用 HyperFrames 编排多场景宣传片、品牌片、蒙太奇和其他定制视频。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "gsap",
+      "displayName": "GSAP 动画工具箱",
+      "description": "统一路由 GSAP 核心、时间线、滚动触发、插件、性能与静态网页动画能力。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "hallmark",
+      "displayName": "反 AI 味设计",
+      "description": "审计、重设计或提取设计 DNA，减少模板化的 AI 视觉痕迹并提升结构差异。",
+      "category": "设计与前端"
+    },
+    {
+      "name": "hyperframes",
+      "displayName": "HyperFrames 视频入口",
+      "description": "为视频、动画和动效任务选择正确的 HyperFrames 工作流与领域 Skill。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "hyperframes-animation",
+      "displayName": "HyperFrames 动画知识库",
+      "description": "提供原子动效、场景蓝图、转场和多种动画运行时的确定性编排规则。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "hyperframes-core",
+      "displayName": "HyperFrames 核心规范",
+      "description": "定义可渲染视频项目的结构、时间属性、轨道、变量和确定性运行合同。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "hyperframes-creative",
+      "displayName": "HyperFrames 创意指导",
+      "description": "负责视频的配色、字体、叙事节拍、品牌风格、声音与画面构图方向。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "hyperframes-registry",
+      "displayName": "HyperFrames 组件仓库",
+      "description": "发现、安装并接入 HyperFrames 区块和组件，也支持新增组件的贡献流程。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "jobs-to-be-done",
+      "displayName": "待办任务洞察",
+      "description": "结构化分析客户要完成的功能、社会与情感任务，以及痛点和收益。",
+      "category": "产品方法"
+    },
+    {
+      "name": "lean-ux-canvas",
+      "displayName": "精益 UX 画布",
+      "description": "围绕业务问题、用户、假设和学习目标，引导完成 Lean UX Canvas v2。",
+      "category": "产品方法"
+    },
+    {
+      "name": "motion-graphics",
+      "displayName": "动态图形设计",
+      "description": "制作短时、设计驱动的文字动效、数据动画、Logo 片头和品牌锁定画面。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "opportunity-solution-tree",
+      "displayName": "机会解决方案树",
+      "description": "从目标结果逐层连接机会、解决方案和验证实验，辅助产品发现与取舍。",
+      "category": "产品方法"
+    },
+    {
+      "name": "pdf",
+      "displayName": "PDF 处理",
+      "description": "读取、生成、拆分、合并、填写并渲染校验 PDF，兼顾内容和页面布局。",
+      "category": "文档与数据"
+    },
+    {
+      "name": "positioning-statement",
+      "displayName": "产品定位陈述",
+      "description": "用清晰结构说明服务对象、核心问题、产品类别与相对替代方案的差异。",
+      "category": "产品方法"
+    },
+    {
+      "name": "pptx",
+      "displayName": "PPT 演示文稿",
+      "description": "创建、读取、编辑和校验 PowerPoint，支持模板、版式、备注与演示内容。",
+      "category": "文档与数据"
+    },
+    {
+      "name": "prd",
+      "displayName": "产品需求文档",
+      "description": "诊断需求场景并引导生成合适深度的 PRD、功能方案或产品规格。",
+      "category": "产品方法"
+    },
+    {
+      "name": "prd-diagnose",
+      "displayName": "PRD 场景诊断",
+      "description": "识别 PRD 请求所属场景并推荐对应的需求分析与文档工作链。",
+      "category": "基础编排"
+    },
+    {
+      "name": "prd-reverse",
+      "displayName": "设计稿反推 PRD",
+      "description": "从 HTML 设计稿提取页面与交互事实，并标注推导边界后生成 PRD 和应用规格。",
+      "category": "产品方法"
+    },
+    {
+      "name": "prd-templates",
+      "displayName": "PRD 模板库",
+      "description": "提供轻量、完整、增量和迁移型 PRD 的统一输出结构与检查基线。",
+      "category": "基础编排"
+    },
+    {
+      "name": "problem-statement",
+      "displayName": "用户问题陈述",
+      "description": "从用户视角说明谁受阻、想完成什么、为何重要以及当前体验感受。",
+      "category": "产品方法"
+    },
+    {
+      "name": "product-context-detect",
+      "displayName": "产品上下文识别",
+      "description": "从输入中识别具体产品与领域上下文，为后续 PRD 和设计流程定位知识来源。",
+      "category": "基础编排"
+    },
+    {
+      "name": "product-launch-video",
+      "displayName": "产品发布视频",
+      "description": "把产品链接、脚本或简报制作成 SaaS 宣传、功能揭晓和产品营销视频。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "proto-persona",
+      "displayName": "原型用户画像",
+      "description": "综合现有研究和团队认知，形成可验证的早期目标用户画像假设。",
+      "category": "产品方法"
+    },
+    {
+      "name": "research-decision-room",
+      "displayName": "研究决策室",
+      "description": "把访谈、工单和调研信号转成证据台账、主题、机会与实验决策面板。",
+      "category": "设计与前端"
+    },
+    {
+      "name": "roadmap-planning",
+      "displayName": "路线图规划",
+      "description": "依据依赖和验证优先级，把功能列表组织成可实施的迭代路线图。",
+      "category": "产品方法"
+    },
+    {
+      "name": "shaping",
+      "displayName": "方案塑形",
+      "description": "在开发前澄清问题、比较解决路径、选定方案边界并定义完成标准。",
+      "category": "产品方法"
+    },
+    {
+      "name": "slideshow",
+      "displayName": "交互式幻灯片",
+      "description": "用 HyperFrames 制作带分步呈现、分支顺序和热点导航的交互式演示。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "trd",
+      "displayName": "技术需求文档",
+      "description": "分析代码与产品需求，产出可评审、可实施的系统设计和技术规格。",
+      "category": "产品方法"
+    },
+    {
+      "name": "ui-design",
+      "displayName": "UI 设计与实现",
+      "description": "设计并实现可运行的网页、仪表盘、原型和交互界面，遵循既有设计系统。",
+      "category": "设计与前端"
+    },
+    {
+      "name": "ui-mark",
+      "displayName": "UI 需求标注",
+      "description": "把 PRD 需求以可追溯角标挂载到 HTML 设计稿，并支持后续增量更新。",
+      "category": "设计与前端"
+    },
+    {
+      "name": "user-story",
+      "displayName": "用户故事",
+      "description": "用用户故事格式和 Gherkin 验收标准，把需求转为可开发、可测试的工作项。",
+      "category": "产品方法"
+    },
+    {
+      "name": "user-story-mapping",
+      "displayName": "用户故事地图",
+      "description": "按用户活动、步骤和任务建立叙事地图，并划分 MVP 与后续发布切片。",
+      "category": "产品方法"
+    },
+    {
+      "name": "website-design-fast",
+      "displayName": "网站快速设计",
+      "description": "快速生成完整、可运行的静态网站，并遵循 MK 的网页设计与发布约束。",
+      "category": "设计与前端"
+    },
+    {
+      "name": "website-to-video",
+      "displayName": "网站转视频",
+      "description": "捕获网站页面和品牌素材，制作站点导览、作品展示或社交媒体短片。",
+      "category": "视频与动效"
+    },
+    {
+      "name": "workshop-facilitation",
+      "displayName": "工作坊主持",
+      "description": "用单步、多轮的节奏主持协作工作坊，保持进度、选择和中断处理一致。",
+      "category": "基础编排"
+    },
+    {
+      "name": "writing-plans",
+      "displayName": "实施计划编写",
+      "description": "在编码前把明确规格整理成分步、可验证的实施计划。",
+      "category": "基础编排"
+    },
+    {
+      "name": "xlsx",
+      "displayName": "电子表格处理",
+      "description": "创建、读取、编辑和校验 Excel、CSV 与 TSV，支持公式、格式、图表和清洗。",
+      "category": "文档与数据"
+    }
+  ]
+}

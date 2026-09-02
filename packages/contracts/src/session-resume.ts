@@ -4,6 +4,8 @@ import { META_KEY, isRecord } from "./common.js";
 export interface SessionResumeTextCursor {
   textLength: number;
   nextChunkIndex: number;
+  /** 当前浏览器已经投影的模型 Attempt；代次变化时 Remote 从新正文起点回放。 */
+  modelAttemptId?: string;
 }
 
 /**
@@ -45,7 +47,13 @@ function readCursors(value: unknown): Record<string, SessionResumeTextCursor> | 
     if (!id || !isRecord(raw) || !nonNegativeInteger(raw.textLength) || !nonNegativeInteger(raw.nextChunkIndex)) {
       return undefined;
     }
-    cursors[id] = { textLength: raw.textLength, nextChunkIndex: raw.nextChunkIndex };
+    cursors[id] = {
+      textLength: raw.textLength,
+      nextChunkIndex: raw.nextChunkIndex,
+      ...(typeof raw.modelAttemptId === "string" && raw.modelAttemptId.length > 0
+        ? { modelAttemptId: raw.modelAttemptId }
+        : {}),
+    };
   }
   return cursors;
 }

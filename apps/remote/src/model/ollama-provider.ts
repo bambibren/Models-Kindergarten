@@ -13,7 +13,7 @@ import type {
 } from "./model-provider.js";
 import { CircuitBreaker } from "../resilience/circuit-breaker.js";
 import { withRetry } from "../resilience/retry.js";
-import { ModelProviderError } from "./model-error.js";
+import { isRetryableModelHttpStatus, ModelProviderError } from "./model-error.js";
 import {
   assertContinuationTargetsStudent,
   readProviderOpaqueContinuation,
@@ -65,7 +65,7 @@ async verify(): Promise<void> {
       throw new ModelProviderError(
         "dependency_unavailable",
         `Ollama 健康检查失败 (${response.status})`,
-        response.status === 429 || response.status >= 500,
+        isRetryableModelHttpStatus(response.status),
       );
     }
     const value = await readJsonAtMost(response, MAX_OLLAMA_JSON_BODY_BYTES, "模型目录");
@@ -131,6 +131,7 @@ async *stream(
         body: JSON.stringify(toOllamaRequest(this.student, input)),
         signal,
         },
+        false,
       );
     } catch (error) {
       if (isAbort(error) || signal.aborted) throw error;
@@ -142,13 +143,15 @@ async *stream(
       throw new ModelProviderError(
         "model_request_failed",
         `Ollama 请求失败 (${response.status}): ${detail || response.statusText}`,
-        response.status === 429 || response.status >= 500,
+        isRetryableModelHttpStatus(response.status),
       );
     }
     if (!response.body) {
       throw new ModelProviderError("invalid_model_response", "Ollama 响应没有流式 Body", false);
     }
 
+    let itemSequence = 0;
+    let activeTextItem: { id: string; kind: "reasoning" | "message"; text: string } | undefined;
     for await (const line of readLines(response.body)) {
       onActivity?.();
       const chunk = parseChunk(line);
@@ -156,13 +159,55 @@ async *stream(
         throw new ModelProviderError("model_request_failed", `Ollama: ${chunk.error}`, false);
       }
       if (chunk.thinking) {
-        yield { type: "thinking_delta", text: chunk.thinking };
+        if (activeTextItem?.kind !== "reasoning") {
+          if (activeTextItem) {
+            yield { type: "output_item_completed", item: { ...activeTextItem } };
+          }
+          activeTextItem = { id: `ollama:${itemSequence++}:reasoning`, kind: "reasoning", text: "" };
+          yield { type: "output_item_started", item: { id: activeTextItem.id, kind: activeTextItem.kind } };
+        }
+        activeTextItem.text += chunk.thinking;
+        yield {
+          type: "output_item_delta",
+          itemId: activeTextItem.id,
+          delta: { kind: "text", text: chunk.thinking },
+        };
       }
-      if (chunk.text) yield { type: "text_delta", text: chunk.text };
+      if (chunk.text) {
+        if (activeTextItem?.kind !== "message") {
+          if (activeTextItem) {
+            yield { type: "output_item_completed", item: { ...activeTextItem } };
+          }
+          activeTextItem = { id: `ollama:${itemSequence++}:message`, kind: "message", text: "" };
+          yield { type: "output_item_started", item: { id: activeTextItem.id, kind: activeTextItem.kind } };
+        }
+        activeTextItem.text += chunk.text;
+        yield {
+          type: "output_item_delta",
+          itemId: activeTextItem.id,
+          delta: { kind: "text", text: chunk.text },
+        };
+      }
       if (chunk.toolCalls.length > 0) {
-        yield { type: "tool_calls", calls: chunk.toolCalls };
+        if (activeTextItem) {
+          yield { type: "output_item_completed", item: { ...activeTextItem } };
+          activeTextItem = undefined;
+        }
+        for (const [index, rawCall] of chunk.toolCalls.entries()) {
+          const itemId = `ollama:${itemSequence++}:tool:${index}`;
+          const call = { ...rawCall, id: rawCall.id ?? itemId };
+          yield {
+            type: "output_item_started",
+            item: { id: itemId, kind: "tool_call", callId: call.id, name: call.name },
+          };
+          yield { type: "output_item_completed", item: { id: itemId, kind: "tool_call", call } };
+        }
       }
       if (chunk.done) {
+        if (activeTextItem) {
+          yield { type: "output_item_completed", item: { ...activeTextItem } };
+          activeTextItem = undefined;
+        }
         if (chunk.inputTokens !== undefined || chunk.outputTokens !== undefined) {
           yield {
             type: "usage",
@@ -186,12 +231,17 @@ async *stream(
 private fetchWithResilience(
     url: URL,
     init?: RequestInit,
+    retry = true,
   ): Promise<Response> {
+    if (!retry) {
+      // Runtime 已按 Model Attempt 统一重试；单次 Attempt 内不能再嵌套三次 HTTP 请求。
+      return this.circuit.execute(() => fetch(url, init));
+    }
     return this.circuit.execute(/** 读取「fetchWithResilience」所需数据，并遵守作用域、分页与容量边界。 */
 () => withRetry(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 async () => {
       const response = await fetch(url, init);
-      if (response.status === 429 || response.status >= 500) {
+      if (isRetryableModelHttpStatus(response.status)) {
         await response.body?.cancel();
         throw new RetryableHttpError(response.status);
       }

@@ -18,12 +18,17 @@ import {
   type TurnState,
   type ArtifactMention,
   type ContextWindowUsageState,
+  type LiveExecutionEvent,
+  type LiveExecutionEventData,
   PRODUCT_CONFIG,
 } from "@kindergarten/contracts";
 import { AcpOutput } from "./acp-output.js";
 import type {
   AgentRuntime,
   RunObserver,
+  RuntimeModelAttemptSnapshot,
+  RuntimeModelAttemptFailureSnapshot,
+  RuntimeModelAttemptCompletionSnapshot,
   RuntimeModelRoundSnapshot,
   RuntimeTurnSnapshot,
   TurnModelUsage,
@@ -44,6 +49,11 @@ import type {
   SessionToolCallEntry,
 } from "../repository/session-types.js";
 import type { PreparedToolCall, ToolOutcome } from "../tools/tool-registry.js";
+import type {
+  ModelOutputItemCompleted,
+  ModelOutputItemDelta,
+  ModelOutputItemStarted,
+} from "../model/model-provider.js";
 import { RunFailure } from "../runtime/run-failure.js";
 import type { SessionBindingService } from "../session/session-binding-service.js";
 import { turnScope } from "../runtime/turn-scope.js";
@@ -346,6 +356,7 @@ async () => {
       channel,
       this.sessions,
       controller.signal,
+      Boolean(session.experimentRef),
     );
     this.projections.set(session.id, projection);
     let failure: unknown = null;
@@ -567,11 +578,20 @@ class TurnProjection implements RunObserver {
   private readonly thoughts = new Map<number, SessionThoughtEntry>();
   private readonly messageChunks = new Map<number, number>();
   private readonly thoughtChunks = new Map<number, number>();
-  private readonly closedRounds = new Set<number>();
+  private readonly modelItems = new Map<string, {
+    round: number;
+    kind: ModelOutputItemStarted["kind"];
+    callId?: string;
+    completed: boolean;
+  }>();
+  private readonly attempts = new Map<number, RuntimeModelAttemptSnapshot>();
   private runtimeFacts: RuntimeTurnSnapshot | undefined;
   private readonly capabilityFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["capabilitySnapshots"]> = [];
   private readonly roundFacts: NonNullable<import("../repository/session-types.js").TurnExecutionRecord["modelRounds"]> = [];
   private usageFacts: TurnTokenUsage | undefined;
+  private executionSequence = 0;
+  private activeRound = 0;
+  private readonly toolRounds = new Map<string, number>();
 
   /** 初始化「TurnProjection」所需依赖，不在构造阶段启动不可回收的后台任务。 */
 constructor(
@@ -582,6 +602,7 @@ constructor(
     private readonly channel: SessionAcpChannel,
     private readonly sessions: SessionRepository,
     private readonly signal: AbortSignal,
+    private readonly streamExecution: boolean,
   ) {}
 
   /** 判断「matchesTurn」对应条件，只返回判定结果且不修改输入状态。 */
@@ -632,13 +653,89 @@ async capabilitySnapshot(generation: number, hash: string, snapshot: RuntimeCapa
   }
 
   /** 执行「modelRoundStarted」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async modelRoundStarted(facts: RuntimeModelRoundSnapshot): Promise<void> {
+  async modelRoundStarted(facts: RuntimeModelRoundSnapshot): Promise<void> {
+    this.activeRound = facts.roundIndex;
+    await this.executionEvent({
+      type: "model_round_started",
+      roundIndex: facts.roundIndex,
+      startedAt: Date.parse(facts.startedAt),
+    });
     this.roundFacts.push(structuredClone(facts));
     const persisted = await this.sessions.checkpointTurn(this.sessionId, this.turnId, {
       modelRounds: structuredClone(this.roundFacts),
     });
     // Repository 已把完整 Provider Input 转移到 evidence sidecar；投影内存也立即改持轻量引用。
     this.roundFacts.splice(0, this.roundFacts.length, ...structuredClone(persisted.modelRounds ?? []));
+  }
+
+  /** 新 Attempt 复用稳定 messageId，但先整体清空上一 Attempt 的正文与思考投影。 */
+  async modelAttemptStarted(round: number, facts: RuntimeModelAttemptSnapshot): Promise<void> {
+    const previous = this.attempts.get(round);
+    this.attempts.set(round, structuredClone(facts));
+    await this.executionEvent({
+      type: "model_attempt_started",
+      roundIndex: round,
+      attemptId: facts.attemptId,
+      attemptIndex: facts.attemptIndex,
+      maxAttempts: facts.maxAttempts,
+      startedAt: Date.parse(facts.startedAt),
+    });
+    if (!previous) return;
+
+    for (const [itemId, item] of this.modelItems) {
+      if (item.round === round) this.modelItems.delete(itemId);
+    }
+
+    const message = this.messages.get(round);
+    if (message) {
+      message.text = "";
+      message.modelAttemptId = facts.attemptId;
+      message.modelAttemptIndex = facts.attemptIndex;
+      this.messageChunks.set(round, 0);
+      await this.output.message("assistant", message.messageId, "", {
+        schemaVersion: 1,
+        turnId: this.turnId,
+        chunkIndex: 0,
+        modelAttempt: { id: facts.attemptId, index: facts.attemptIndex, reset: true },
+      });
+    }
+    const thought = this.thoughts.get(round);
+    if (thought) {
+      thought.text = "";
+      thought.modelAttemptId = facts.attemptId;
+      thought.modelAttemptIndex = facts.attemptIndex;
+      this.thoughtChunks.set(round, 0);
+      await this.output.thought(thought.messageId, "", {
+        schemaVersion: 1,
+        turnId: this.turnId,
+        chunkIndex: 0,
+        modelAttempt: { id: facts.attemptId, index: facts.attemptIndex, reset: true },
+      });
+    }
+  }
+
+  /** 把模型失败事实实时投影给实验页；失败正文仍由 Attempt reset 机制整体替换。 */
+  async modelAttemptFailed(round: number, facts: RuntimeModelAttemptFailureSnapshot): Promise<void> {
+    await this.executionEvent({
+      type: "model_attempt_failed",
+      roundIndex: round,
+      attemptId: facts.attemptId,
+      attemptIndex: facts.attemptIndex,
+      completedAt: Date.parse(facts.completedAt),
+      error: facts.error,
+      ...(facts.retryDelayMs === undefined ? {} : { retryDelayMs: facts.retryDelayMs }),
+    });
+  }
+
+  /** 把模型成功事实实时投影给实验页。 */
+  async modelAttemptCompleted(round: number, facts: RuntimeModelAttemptCompletionSnapshot): Promise<void> {
+    await this.executionEvent({
+      type: "model_attempt_completed",
+      roundIndex: round,
+      attemptId: facts.attemptId,
+      attemptIndex: facts.attemptIndex,
+      completedAt: Date.parse(facts.completedAt),
+    });
   }
 
   /** 执行「modelRoundCompleted」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -707,55 +804,95 @@ executionFacts(): Partial<import("../repository/session-types.js").TurnExecution
     };
   }
 
-  /** 执行「text」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async text(round: number, value: string): Promise<void> {
-    const entry = this.ensureMessage(round);
-    entry.text += value;
-    const index = this.messageChunks.get(round) ?? 0;
-    this.messageChunks.set(round, index + 1);
-    await this.output.message("assistant", entry.messageId, value, {
-      schemaVersion: 1,
+  /** 记录模型 item 的显式开始；工具请求一旦可稳定关联就立即投影为 pending。 */
+async modelOutputItemStarted(round: number, item: ModelOutputItemStarted): Promise<void> {
+    if (this.modelItems.has(item.id)) throw new Error(`模型输出 item 重复开始: ${item.id}`);
+    this.modelItems.set(item.id, {
+      round,
+      kind: item.kind,
+      ...(item.kind === "tool_call" ? { callId: item.callId } : {}),
+      completed: false,
+    });
+    if (item.kind !== "tool_call") return;
+
+    const existing = this.streamingSessionEntries.find(
+      (entry): entry is SessionToolCallEntry => entry.type === "tool_call" && entry.toolCallId === item.callId,
+    );
+    const entry: SessionToolCallEntry = existing ?? {
+      type: "tool_call",
       turnId: this.turnId,
-      chunkIndex: index,
+      toolCallId: item.callId,
+      title: "准备工具调用",
+      name: "tool",
+      kind: "other",
+      status: "pending",
+      rawInput: {},
+      content: [],
+      locations: [],
+      createdAt: new Date().toISOString(),
+    };
+    entry.title = item.name ? `准备 ${item.name}` : "准备工具调用";
+    entry.name = item.name ?? "tool";
+    entry.kind = "other";
+    entry.status = "pending";
+    entry.rawInput = {};
+    delete entry.rawOutput;
+    delete entry.modelContent;
+    delete entry.outcomeStatus;
+    entry.content = [];
+    entry.locations = [];
+    this.toolRounds.set(item.callId, round);
+    if (!existing) this.streamingSessionEntries.push(entry);
+    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
+    await this.output.toolCall({
+      toolCallId: item.callId,
+      title: entry.title,
+      name: entry.name,
+      kind: entry.kind,
+      status: "pending",
+      rawInput: {},
+      locations: [],
     });
   }
 
-  /** 执行「thought」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async thought(round: number, value: string): Promise<void> {
-    const entry = this.ensureThought(round);
-    entry.text += value;
-    const index = this.thoughtChunks.get(round) ?? 0;
-    this.thoughtChunks.set(round, index + 1);
-    await this.output.thought(entry.messageId, value, {
-      schemaVersion: 1,
-      turnId: this.turnId,
-      chunkIndex: index,
-    });
-  }
-
-  /** 执行「roundComplete」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async roundComplete(round: number): Promise<void> {
-    if (this.closedRounds.has(round)) return;
-    this.closedRounds.add(round);
-    // 最终 chunk 只是投影；先保存本轮完整内容，断线或进程中断后仍可回放。
-    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, this.streamingSessionEntries);
-    const message = this.messages.get(round);
-    if (message) {
-      await this.output.message("assistant", message.messageId, "", {
-        schemaVersion: 1,
-        turnId: this.turnId,
-        chunkIndex: this.messageChunks.get(round) ?? 0,
-        final: true,
-      });
+  /** 文本增量沿用 ACP chunk；工具参数只在 Remote 聚合，避免把大参数逐片复制到 Browser。 */
+async modelOutputItemDelta(round: number, itemId: string, delta: ModelOutputItemDelta): Promise<void> {
+    const state = this.modelItems.get(itemId);
+    if (!state || state.round !== round || state.completed) throw new Error(`模型输出 item 增量无有效活动项: ${itemId}`);
+    if (state.kind === "message") {
+      if (delta.kind !== "text") throw new Error(`消息 item 收到非文本增量: ${itemId}`);
+      await this.appendMessage(round, delta.text);
+    } else if (state.kind === "reasoning") {
+      if (delta.kind !== "text") throw new Error(`思考 item 收到非文本增量: ${itemId}`);
+      await this.appendThought(round, delta.text);
     }
-    const thought = this.thoughts.get(round);
-    if (thought) {
-      await this.output.thought(thought.messageId, "", {
-        schemaVersion: 1,
-        turnId: this.turnId,
-        chunkIndex: this.thoughtChunks.get(round) ?? 0,
-        final: true,
-      });
+  }
+
+  /** item 完成时立刻关闭对应消息，而不是等待整个模型 Round 结束。 */
+async modelOutputItemCompleted(round: number, item: ModelOutputItemCompleted): Promise<void> {
+    const state = this.modelItems.get(item.id);
+    if (!state || state.round !== round || state.kind !== item.kind || state.completed) {
+      throw new Error(`模型输出 item 完成边界无效: ${item.id}`);
+    }
+    state.completed = true;
+    if (item.kind === "message") await this.finalizeMessage(round);
+    else if (item.kind === "reasoning") await this.finalizeThought(round);
+  }
+
+  /** Provider/Attempt 异常时关闭活动文本并把尚未执行的工具请求置为失败。 */
+async modelOutputItemsAborted(round: number, _reason: "failed" | "cancelled"): Promise<void> {
+    for (const state of this.modelItems.values()) {
+      if (state.round !== round || state.completed) continue;
+      state.completed = true;
+      if (state.kind === "message") await this.finalizeMessage(round);
+      else if (state.kind === "reasoning") await this.finalizeThought(round);
+    }
+    for (const entry of this.streamingSessionEntries) {
+      if (entry.type !== "tool_call" || this.toolRounds.get(entry.toolCallId) !== round) continue;
+      if (entry.status !== "pending") continue;
+      entry.status = "failed";
+      await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
+      await this.output.toolUpdate({ toolCallId: entry.toolCallId, status: "failed" });
     }
   }
 
@@ -783,29 +920,28 @@ async providerContinuation(
 
   /** 执行「finalizeOpenRounds」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async finalizeOpenRounds(): Promise<void> {
-    const rounds = new Set([...this.messages.keys(), ...this.thoughts.keys()]);
-    for (const round of rounds) await this.roundComplete(round);
+    const open = [...this.modelItems.values()].filter((item) => !item.completed);
+    for (const round of new Set(open.map((item) => item.round))) {
+      await this.modelOutputItemsAborted(round, this.signal.aborted ? "cancelled" : "failed");
+    }
+    for (const entry of this.streamingSessionEntries) {
+      if (entry.type !== "tool_call" || entry.status !== "pending") continue;
+      entry.status = "failed";
+      await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
+      await this.output.toolUpdate({ toolCallId: entry.toolCallId, status: "failed" });
+    }
   }
 
-  /** 根据已校验输入构建「toolStart」结果，不额外持有调用方的大对象。 */
-async toolStart(call: PreparedToolCall): Promise<void> {
-    console.warn("[tool] start", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, permission: call.permission }));
-    const entry: SessionToolCallEntry = {
-      type: "tool_call",
-      turnId: this.turnId,
-      toolCallId: call.id,
-      title: call.title,
-      name: call.name,
-      kind: call.kind,
-      status: "pending",
-      rawInput: call.arguments,
-      content: [],
-      locations: call.locations,
-      createdAt: new Date().toISOString(),
-    };
-    this.streamingSessionEntries.push(entry);
+  /** 工具请求已经生成并通过 Registry 规范化，但仍未进入真实 Handler。 */
+  async toolPrepared(call: PreparedToolCall): Promise<void> {
+    const entry = this.findToolEntry(call.id);
+    entry.title = call.title;
+    entry.name = call.name;
+    entry.kind = call.kind;
+    entry.rawInput = call.arguments;
+    entry.locations = call.locations;
     await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
-    await this.output.toolCall({
+    await this.output.toolUpdate({
       toolCallId: call.id,
       title: call.title,
       name: call.name,
@@ -816,29 +952,53 @@ async toolStart(call: PreparedToolCall): Promise<void> {
     });
   }
 
+  /** 只有即将调用 Registry Handler 时才进入 in_progress 并记录执行起点。 */
+  async toolExecutionStarted(call: PreparedToolCall): Promise<void> {
+    console.warn("[tool] start", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, permission: call.permission }));
+    const startedAt = Date.now();
+    this.toolRounds.set(call.id, this.activeRound);
+    await this.executionEvent({
+      type: "tool_call_started",
+      roundIndex: this.activeRound,
+      toolCallId: call.id,
+      name: call.name,
+      title: call.title,
+      startedAt,
+    });
+    const entry = this.findToolEntry(call.id);
+    entry.status = "in_progress";
+    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
+    await this.output.toolUpdate({
+      toolCallId: call.id,
+      status: "in_progress",
+    });
+  }
+
   /** 根据已校验输入构建「toolFinish」结果，不额外持有调用方的大对象。 */
-async toolFinish(
+  async toolFinish(
     call: PreparedToolCall,
     status: acp.ToolCallStatus,
     result: ToolOutcome,
   ): Promise<void> {
     console.warn("[tool] finish", JSON.stringify({ sessionId: this.sessionId, turnId: this.turnId, toolCallId: call.id, name: call.name, status, outcomeStatus: result.status }));
-    const entry = this.streamingSessionEntries.find(
-      /** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item): item is SessionToolCallEntry =>
-        item.type === "tool_call" && item.toolCallId === call.id,
-    );
+    await this.executionEvent({
+      type: "tool_call_completed",
+      roundIndex: this.toolRounds.get(call.id) ?? this.activeRound,
+      toolCallId: call.id,
+      completedAt: Date.now(),
+      status: result.status,
+      ...(result.error ? { error: { code: result.error.code, message: result.error.message } } : {}),
+    });
+    const entry = this.findToolEntry(call.id);
     const content = "content" in result ? result.content : [];
     const locations = "locations" in result ? result.locations : call.locations;
-    if (entry) {
-      entry.status = status;
-      entry.rawOutput = result.rawOutput;
-      entry.modelContent = result.modelContent;
-      entry.outcomeStatus = result.status;
-      entry.content = content;
-      entry.locations = locations;
-      await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
-    }
+    entry.status = status;
+    entry.rawOutput = result.rawOutput;
+    entry.modelContent = result.modelContent;
+    entry.outcomeStatus = result.status;
+    entry.content = content;
+    entry.locations = locations;
+    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
     await this.output.toolUpdate({
       toolCallId: call.id,
       status,
@@ -846,6 +1006,19 @@ async toolFinish(
       content,
       locations,
     });
+  }
+
+  /** 实验专用的临时投影不写 Session；sequence 只用于同一 Turn 内去重和保序。 */
+  private async executionEvent(data: LiveExecutionEventData): Promise<void> {
+    if (!this.streamExecution) return;
+    const event: LiveExecutionEvent = {
+      schemaVersion: 1,
+      turnId: this.turnId,
+      sequence: this.executionSequence,
+      ...data,
+    };
+    this.executionSequence += 1;
+    await this.output.executionTrace(event);
   }
 
   /** 执行「requestPermission」主流程，传播取消与失败并在结束时清理临时资源。 */
@@ -984,11 +1157,81 @@ private async finishInteraction(interactionId: string): Promise<void> {
     await this.output.turnState(turn.state);
   }
 
+  /** 追加 assistant 正文 chunk；messageId 仍按 round 稳定，保证 Attempt reset 兼容。 */
+private async appendMessage(round: number, value: string): Promise<void> {
+    const entry = this.ensureMessage(round);
+    entry.text += value;
+    const index = this.messageChunks.get(round) ?? 0;
+    this.messageChunks.set(round, index + 1);
+    await this.output.message("assistant", entry.messageId, value, {
+      schemaVersion: 1,
+      turnId: this.turnId,
+      chunkIndex: index,
+      ...attemptMessageMeta(this.attempts.get(round)),
+    });
+  }
+
+  /** 追加 reasoning chunk；终态只由显式 item completed/aborted 产生。 */
+private async appendThought(round: number, value: string): Promise<void> {
+    const entry = this.ensureThought(round);
+    entry.text += value;
+    const index = this.thoughtChunks.get(round) ?? 0;
+    this.thoughtChunks.set(round, index + 1);
+    await this.output.thought(entry.messageId, value, {
+      schemaVersion: 1,
+      turnId: this.turnId,
+      chunkIndex: index,
+      ...attemptMessageMeta(this.attempts.get(round)),
+    });
+  }
+
+  /** 先 checkpoint 完整正文，再发送 ACP final 边界。 */
+private async finalizeMessage(round: number): Promise<void> {
+    const entry = this.messages.get(round);
+    if (!entry) return;
+    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
+    await this.output.message("assistant", entry.messageId, "", {
+      schemaVersion: 1,
+      turnId: this.turnId,
+      chunkIndex: this.messageChunks.get(round) ?? 0,
+      final: true,
+      ...attemptMessageMeta(this.attempts.get(round)),
+    });
+  }
+
+  /** 先 checkpoint 完整思考，再发送 ACP final 边界。 */
+private async finalizeThought(round: number): Promise<void> {
+    const entry = this.thoughts.get(round);
+    if (!entry) return;
+    await this.sessions.checkpointTurnEntries(this.sessionId, this.turnId, [entry]);
+    await this.output.thought(entry.messageId, "", {
+      schemaVersion: 1,
+      turnId: this.turnId,
+      chunkIndex: this.thoughtChunks.get(round) ?? 0,
+      final: true,
+      ...attemptMessageMeta(this.attempts.get(round)),
+    });
+  }
+
+  /** 工具必须先由模型 item 创建 pending entry，后续阶段只能更新同一身份。 */
+private findToolEntry(toolCallId: string): SessionToolCallEntry {
+    const entry = this.streamingSessionEntries.find(
+      (item): item is SessionToolCallEntry => item.type === "tool_call" && item.toolCallId === toolCallId,
+    );
+    if (!entry) throw new Error(`工具调用缺少 pending 投影: ${toolCallId}`);
+    return entry;
+  }
+
   /** 校验并取得「ensureMessage」所需对象；缺失或归属不符时立即抛出明确错误。 */
 private ensureMessage(round: number): SessionMessageEntry {
     const existing = this.messages.get(round);
     if (existing) return existing;
     const entry = makeMessage("assistant", "", this.turnId, randomUUID());
+    const attempt = this.attempts.get(round);
+    if (attempt) {
+      entry.modelAttemptId = attempt.attemptId;
+      entry.modelAttemptIndex = attempt.attemptIndex;
+    }
     this.messages.set(round, entry);
     this.streamingSessionEntries.push(entry);
     return entry;
@@ -1004,11 +1247,26 @@ private ensureThought(round: number): SessionThoughtEntry {
       turnId: this.turnId,
       messageId: randomUUID(),
       createdAt: new Date().toISOString(),
+      ...sessionAttemptFields(this.attempts.get(round)),
     };
     this.thoughts.set(round, entry);
     this.streamingSessionEntries.push(entry);
     return entry;
   }
+}
+
+/** 把 Runtime Attempt 快照限制为 ACP 消息所需的最小代次信息。 */
+function attemptMessageMeta(attempt: RuntimeModelAttemptSnapshot | undefined) {
+  return attempt
+    ? { modelAttempt: { id: attempt.attemptId, index: attempt.attemptIndex } }
+    : {};
+}
+
+/** 把当前 Attempt 关联到活动 Session 投影，供断线增量回放识别代次。 */
+function sessionAttemptFields(attempt: RuntimeModelAttemptSnapshot | undefined) {
+  return attempt
+    ? { modelAttemptId: attempt.attemptId, modelAttemptIndex: attempt.attemptIndex }
+    : {};
 }
 
 /** 执行「runtimeTurnFacts」主流程，传播取消与失败并在结束时清理临时资源。 */
@@ -1043,6 +1301,7 @@ async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void
       chunkIndex: 0,
       final: true,
       ...(entry.artifactMentions?.length ? { artifactMentions: entry.artifactMentions } : {}),
+      ...entryAttemptMessageMeta(entry),
     });
   } else if (entry.type === "context_summary") {
     await output.contextSummary(entry.summary);
@@ -1056,6 +1315,7 @@ async function replayEntry(output: AcpOutput, entry: SessionEntry): Promise<void
       turnId: entry.turnId,
       chunkIndex: 0,
       final: true,
+      ...entryAttemptMessageMeta(entry),
     });
   } else {
     await output.toolCall({
@@ -1103,35 +1363,61 @@ async function replayEntryDelta(
 ): Promise<void> {
   if (entry.type === "message") {
     const current = cursor.messages[entry.messageId];
-    const textLength = current?.textLength ?? 0;
+    const attemptChanged = entry.modelAttemptId !== undefined && (
+      current === undefined ||
+      current.modelAttemptId !== undefined && current.modelAttemptId !== entry.modelAttemptId
+    );
+    const textLength = attemptChanged ? 0 : current?.textLength ?? 0;
     if (textLength > entry.text.length) throw new acp.RequestError(-32602, `消息恢复游标越界: ${entry.messageId}`);
     const text = entry.text.slice(textLength);
     const final = entry.role === "user" || turnCompleted;
-    if (text.length === 0) return;
+    if (text.length === 0 && !attemptChanged) return;
     await output.message(entry.role, entry.messageId, text, {
       schemaVersion: 1,
       turnId: entry.turnId,
-      chunkIndex: current?.nextChunkIndex ?? 0,
+      chunkIndex: attemptChanged ? 0 : current?.nextChunkIndex ?? 0,
       ...(final ? { final: true } : {}),
       ...(entry.artifactMentions?.length ? { artifactMentions: entry.artifactMentions } : {}),
+      ...entryAttemptMessageMeta(entry, attemptChanged),
     });
     return;
   }
   if (entry.type === "thought") {
     const current = cursor.thoughts[entry.messageId];
-    const textLength = current?.textLength ?? 0;
+    const attemptChanged = entry.modelAttemptId !== undefined && (
+      current === undefined ||
+      current.modelAttemptId !== undefined && current.modelAttemptId !== entry.modelAttemptId
+    );
+    const textLength = attemptChanged ? 0 : current?.textLength ?? 0;
     if (textLength > entry.text.length) throw new acp.RequestError(-32602, `思考恢复游标越界: ${entry.messageId}`);
     const text = entry.text.slice(textLength);
-    if (text.length === 0) return;
+    if (text.length === 0 && !attemptChanged) return;
     await output.thought(entry.messageId, text, {
       schemaVersion: 1,
       turnId: entry.turnId,
-      chunkIndex: current?.nextChunkIndex ?? 0,
+      chunkIndex: attemptChanged ? 0 : current?.nextChunkIndex ?? 0,
       ...(turnCompleted ? { final: true } : {}),
+      ...entryAttemptMessageMeta(entry, attemptChanged),
     });
     return;
   }
   await replayEntry(output, entry);
+}
+
+/** 从活动 Session 条目恢复 Attempt 代次；reset 只用于浏览器仍持有上一代投影时。 */
+function entryAttemptMessageMeta(
+  entry: SessionMessageEntry | SessionThoughtEntry,
+  reset = false,
+) {
+  return entry.modelAttemptId !== undefined && entry.modelAttemptIndex !== undefined
+    ? {
+        modelAttempt: {
+          id: entry.modelAttemptId,
+          index: entry.modelAttemptIndex,
+          ...(reset ? { reset: true } : {}),
+        },
+      }
+    : {};
 }
 
 /** 根据已校验输入构建「tokenComponents」结果，不额外持有调用方的大对象。 */

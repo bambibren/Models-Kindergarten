@@ -2,7 +2,6 @@ import type {
   AnyExperimentRecord,
   ExperimentAnnotationWorksheet,
   ExperimentScorecard,
-  ModelStudentSummary,
   OutputAnnotationFacts,
   PlanningAnnotationFacts,
   UnderstandingAnnotationFacts,
@@ -14,8 +13,6 @@ const CONTROL_URL = CONTROL_API_URL;
 export const experimentApi = {
   get: /** 读取「get」所需数据，并遵守作用域、分页与容量边界。 */
 (id: string) => request<AnyExperimentRecord>(`/experiments/${encodeURIComponent(id)}`),
-  models: /** 执行「models」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-() => request<{ items: ModelStudentSummary[] }>("/model-students"),
   save: /** 更新「save」对应状态，并保持写入顺序、原子性与容量约束。 */
 (id: string) => request<AnyExperimentRecord>(`/experiments/${encodeURIComponent(id)}/save`, "POST", {}),
   failRun: /** 执行「failRun」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -26,7 +23,7 @@ export const experimentApi = {
 (id: string, testId: string, fact: { interactionId: string; kind: "permission" | "elicitation"; summary: string; decision: string }) =>
     request<AnyExperimentRecord>(`/experiments/${encodeURIComponent(id)}/tests/${encodeURIComponent(testId)}/interventions`, "POST", fact),
   worksheet: /** 执行「worksheet」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-(id: string, force = false, worksheetModelStudentId?: string) => request<ExperimentAnnotationWorksheet>(`/experiments/${encodeURIComponent(id)}/annotation-worksheet`, "POST", { force, worksheetModelStudentId }),
+(id: string, force = false) => request<ExperimentAnnotationWorksheet>(`/experiments/${encodeURIComponent(id)}/annotation-worksheet`, "POST", { force }),
   scorecard: /** 执行「scorecard」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (id: string) => request<ExperimentScorecard>(`/experiments/${encodeURIComponent(id)}/scorecard`),
   annotations: /** 执行「annotations」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

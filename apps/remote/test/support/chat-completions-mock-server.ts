@@ -21,6 +21,7 @@ export interface ChatCompletionsMockOptions {
   thinking?: "toggle" | "ignored" | "rejected";
   tools?: boolean;
   omitDone?: boolean;
+  longToolContentBytes?: number;
 }
 
 /** 构造「startChatCompletionsMockServer」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
@@ -130,7 +131,9 @@ async function handleRequest(
       const fn = isRecord(tool) ? recordValue(tool.function) : undefined;
       return typeof fn?.name === "string" ? [fn.name] : [];
     });
-    if (names.includes("mk_capability_probe")) {
+    if (options.longToolContentBytes) {
+      writeLongToolStream(response, body, options.longToolContentBytes);
+    } else if (names.includes("mk_capability_probe")) {
       writeProbeToolStream(response, body);
     } else {
       writeInterleavedToolStream(response, body);
@@ -140,6 +143,24 @@ async function handleRequest(
   }
   if (!options.omitDone) response.write("data: [DONE]\n\n");
   response.end();
+}
+
+/** 模拟 reasoning/说明文字之后长时间生成 write_file 参数的真实故障形态。 */
+function writeLongToolStream(response: ServerResponse, body: Record<string, unknown>, bytes: number): void {
+  writeEvent(response, chatChunk({ reasoning_content: "先规划页面。" }));
+  writeEvent(response, chatChunk({ content: "开始编写网站。" }));
+  const args = JSON.stringify({ path: "index.html", content: "x".repeat(bytes) });
+  const parts = args.match(/.{1,1024}/gs) ?? [];
+  for (const [index, part] of parts.entries()) {
+    writeEvent(response, chatChunk({
+      tool_calls: [{
+        index: 0,
+        ...(index === 0 ? { id: "call_long_html", type: "function" } : {}),
+        function: { ...(index === 0 ? { name: "write_file" } : {}), arguments: part },
+      }],
+    }));
+  }
+  writeFinishAndUsage(response, body, "tool_calls");
 }
 
 /** 构造「writeTextStream」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */

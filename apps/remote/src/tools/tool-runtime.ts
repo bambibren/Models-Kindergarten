@@ -12,7 +12,7 @@ import { PRODUCT_CONFIG } from "@kindergarten/contracts";
 
 /** 描述「ToolObserver」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ToolObserver {
-  toolStart(call: PreparedToolCall): Promise<void>;
+  toolExecutionStarted?(call: PreparedToolCall): Promise<void>;
   toolFinish(call: PreparedToolCall, status: ToolCallStatus, result: ToolOutcome): Promise<void>;
   requestPermission(call: PreparedToolCall): Promise<boolean>;
   askUser(question: string, toolCallId: string): Promise<string>;
@@ -44,8 +44,6 @@ async executeBatch(
     _ledger: ToolCallLedger,
     signal: AbortSignal,
   ): Promise<ToolBatchResult> {
-    for (const call of calls) await observer.toolStart(call);
-
     const outcomes = await mapWithConcurrency(
       calls,
       PRODUCT_CONFIG.tools.maxBatchConcurrency,
@@ -115,6 +113,7 @@ private async executeOne(
         );
       }
 
+      await observer.toolExecutionStarted?.(call);
       const execute = /** 执行「execute」主流程，传播取消与失败并在结束时清理临时资源。 */
 () => this.registry.execute(call, {
         askUser: /** 执行「askUser」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

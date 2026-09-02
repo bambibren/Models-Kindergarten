@@ -28,6 +28,39 @@ describe("TraceCollector", () => {
       context: { messages: [], truncatedSourceIds: [] },
     });
     collector.emit({
+      type: "model_attempt_started",
+      runId: "run-1",
+      roundId: "round-1",
+      attemptId: "attempt-0",
+      index: 0,
+      startedAt: 12,
+    });
+    collector.emit({
+      type: "model_attempt_failed",
+      runId: "run-1",
+      roundId: "round-1",
+      attemptId: "attempt-0",
+      completedAt: 13,
+      error: { code: "MODEL_TRANSPORT_ERROR", message: "连接中断", retryable: true },
+      output: { text: { sha256: "partial", bytes: 6 } },
+      retryDelayMs: 500,
+    });
+    collector.emit({
+      type: "model_attempt_started",
+      runId: "run-1",
+      roundId: "round-1",
+      attemptId: "attempt-1",
+      index: 1,
+      startedAt: 14,
+    });
+    collector.emit({
+      type: "model_attempt_completed",
+      runId: "run-1",
+      roundId: "round-1",
+      attemptId: "attempt-1",
+      completedAt: 15,
+    });
+    collector.emit({
       type: "model_round_usage",
       runId: "run-1",
       roundId: "round-1",
@@ -54,6 +87,10 @@ describe("TraceCollector", () => {
         outputTokens: 30,
         cachedInputTokens: 40,
         reasoningOutputTokens: 12,
+        attempts: [
+          { id: "attempt-0", status: "failed", retryDelayMs: 500 },
+          { id: "attempt-1", status: "completed" },
+        ],
       }],
     });
     expect(collector.takeTrace("session-1", "turn-1")).toMatchObject({ turnId: "turn-1" });

@@ -3,7 +3,7 @@ import {
   type ConcreteReasoningProfile,
   type ModelReasoningCapability,
 } from "@kindergarten/contracts";
-import { ModelProviderError } from "./model-error.js";
+import { isRetryableModelHttpStatus, ModelProviderError, retryAfterMilliseconds } from "./model-error.js";
 import type {
   ModelContextFragment,
   ModelContextSerialization,
@@ -72,9 +72,19 @@ interface SseEvent {
 interface ToolCallState {
   index: number;
   firstSeen: number;
+  itemId: string;
   id?: string;
   nameText: string;
   argumentsText: string;
+  started: boolean;
+  emittedNameLength: number;
+  emittedArgumentsLength: number;
+}
+
+interface ChatTextItemState {
+  id: string;
+  kind: "reasoning" | "message";
+  text: string;
 }
 
 const ALLOWED_REASONING_PARAMETERS = new Set([
@@ -225,10 +235,15 @@ private async *streamRequest(
 
     if (!response.ok) {
       const detail = redact(await readErrorBody(response), token);
+      const retryAfterMs = retryAfterMilliseconds(response.headers.get("retry-after"));
       throw new ModelProviderError(
         "model_request_failed",
         `Chat Completions API 请求失败 (${response.status})${detail ? `: ${detail}` : ""}`,
-        response.status === 429 || response.status >= 500,
+        isRetryableModelHttpStatus(response.status),
+        {
+          httpStatus: response.status,
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+        },
       );
     }
     if (!response.body) {
@@ -241,6 +256,8 @@ private async *streamRequest(
 
     const calls = new Map<number, ToolCallState>();
     let firstSeen = 0;
+    let itemSequence = 0;
+    let activeTextItem: ChatTextItemState | undefined;
     let finishReason: "stop" | "length" | "cancelled" | undefined;
     let terminal = false;
 
@@ -254,9 +271,29 @@ private async *streamRequest(
             false,
           );
         }
-        const completedCalls = completeToolCalls(calls);
-        if (completedCalls.length > 0) {
-          yield { type: "tool_calls", calls: completedCalls };
+        if (activeTextItem) {
+          yield {
+            type: "output_item_completed",
+            item: { id: activeTextItem.id, kind: activeTextItem.kind, text: activeTextItem.text },
+          };
+          activeTextItem = undefined;
+        }
+        for (const state of orderedToolCallStates(calls)) {
+          const call = completeToolCall(state);
+          if (!state.id) throw new ModelProviderError("invalid_model_response", `Chat Tool Call ${state.index} 缺少 id`, false);
+          if (!state.started) {
+            state.started = true;
+            yield {
+              type: "output_item_started",
+              item: {
+                id: state.itemId,
+                kind: "tool_call",
+                callId: state.id,
+                ...(state.nameText ? { name: state.nameText } : {}),
+              },
+            };
+          }
+          yield { type: "output_item_completed", item: { id: state.itemId, kind: "tool_call", call } };
         }
         terminal = true;
         yield { type: "finish", reason: finishReason };
@@ -279,10 +316,43 @@ private async *streamRequest(
         const delta = recordValue(choice.delta);
         const text = stringValue(delta?.content);
         const thought = stringValue(delta?.reasoning_content);
-        if (thought) yield { type: "thinking_delta", text: thought };
-        if (text) yield { type: "text_delta", text };
+        if (thought) {
+          if (activeTextItem?.kind !== "reasoning") {
+            if (activeTextItem) {
+              yield {
+                type: "output_item_completed",
+                item: { id: activeTextItem.id, kind: activeTextItem.kind, text: activeTextItem.text },
+              };
+            }
+            activeTextItem = { id: `chat:${itemSequence++}:reasoning`, kind: "reasoning", text: "" };
+            yield { type: "output_item_started", item: { id: activeTextItem.id, kind: "reasoning" } };
+          }
+          activeTextItem.text += thought;
+          yield { type: "output_item_delta", itemId: activeTextItem.id, delta: { kind: "text", text: thought } };
+        }
+        if (text) {
+          if (activeTextItem?.kind !== "message") {
+            if (activeTextItem) {
+              yield {
+                type: "output_item_completed",
+                item: { id: activeTextItem.id, kind: activeTextItem.kind, text: activeTextItem.text },
+              };
+            }
+            activeTextItem = { id: `chat:${itemSequence++}:message`, kind: "message", text: "" };
+            yield { type: "output_item_started", item: { id: activeTextItem.id, kind: "message" } };
+          }
+          activeTextItem.text += text;
+          yield { type: "output_item_delta", itemId: activeTextItem.id, delta: { kind: "text", text } };
+        }
 
         if (Array.isArray(delta?.tool_calls)) {
+          if (activeTextItem) {
+            yield {
+              type: "output_item_completed",
+              item: { id: activeTextItem.id, kind: activeTextItem.kind, text: activeTextItem.text },
+            };
+            activeTextItem = undefined;
+          }
           for (const item of delta.tool_calls) {
             const call = recordValue(item);
             if (!call) continue;
@@ -297,11 +367,46 @@ private async *streamRequest(
             const state = calls.get(index) ?? {
               index,
               firstSeen: firstSeen++,
+              itemId: `chat:${itemSequence++}:tool:${index}`,
               nameText: "",
               argumentsText: "",
+              started: false,
+              emittedNameLength: 0,
+              emittedArgumentsLength: 0,
             };
             mergeToolCallDelta(state, call);
             calls.set(index, state);
+            if (!state.started && state.id) {
+              state.started = true;
+              state.emittedNameLength = state.nameText.length;
+              yield {
+                type: "output_item_started",
+                item: {
+                  id: state.itemId,
+                  kind: "tool_call",
+                  callId: state.id,
+                  ...(state.nameText ? { name: state.nameText } : {}),
+                },
+              };
+            }
+            if (state.started && state.nameText.length > state.emittedNameLength) {
+              const nameDelta = state.nameText.slice(state.emittedNameLength);
+              state.emittedNameLength = state.nameText.length;
+              yield {
+                type: "output_item_delta",
+                itemId: state.itemId,
+                delta: { kind: "tool_name", text: nameDelta },
+              };
+            }
+            if (state.started && state.argumentsText.length > state.emittedArgumentsLength) {
+              const argumentsDelta = state.argumentsText.slice(state.emittedArgumentsLength);
+              state.emittedArgumentsLength = state.argumentsText.length;
+              yield {
+                type: "output_item_delta",
+                itemId: state.itemId,
+                delta: { kind: "tool_arguments", text: argumentsDelta },
+              };
+            }
           }
         }
 
@@ -616,45 +721,46 @@ function mergeToolCallDelta(state: ToolCallState, call: Record<string, unknown>)
   if (argumentsDelta) state.argumentsText += argumentsDelta;
 }
 
-/** 执行「completeToolCalls」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function completeToolCalls(calls: Map<number, ToolCallState>): ModelToolCall[] {
-  return [...calls.values()]
-    .toSorted(/** 执行「map」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-(left, right) => left.index - right.index || left.firstSeen - right.firstSeen)
-    .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(state) => {
-      if (!state.id || !state.nameText) {
-        throw new ModelProviderError(
-          "invalid_model_response",
-          `Chat Completions Tool Call index ${state.index} 缺少 id 或 name`,
-          false,
-        );
-      }
-      let args: unknown;
-      try {
-        args = JSON.parse(state.argumentsText || "{}") as unknown;
-      } catch (error) {
-        throw new ModelProviderError(
-          "invalid_model_response",
-          `Chat Completions Tool Call ${state.id} 返回了无效 arguments JSON`,
-          false,
-          { cause: error },
-        );
-      }
-      if (!isRecord(args)) {
-        throw new ModelProviderError(
-          "invalid_model_response",
-          `Chat Completions Tool Call ${state.id} 的 arguments 必须是对象`,
-          false,
-        );
-      }
-      return {
-        id: state.id,
-        index: state.index,
-        name: state.nameText,
-        arguments: args,
-      };
-    });
+/** 工具完成顺序必须与 Provider index 一致，不能按网络分片先后重排。 */
+function orderedToolCallStates(calls: Map<number, ToolCallState>): ToolCallState[] {
+  return [...calls.values()].toSorted(
+    (left, right) => left.index - right.index || left.firstSeen - right.firstSeen,
+  );
+}
+
+/** 把完整工具参数收敛为终态调用；无效 JSON 在执行前直接失败。 */
+function completeToolCall(state: ToolCallState): ModelToolCall {
+  if (!state.id || !state.nameText) {
+    throw new ModelProviderError(
+      "invalid_model_response",
+      `Chat Completions Tool Call index ${state.index} 缺少 id 或 name`,
+      false,
+    );
+  }
+  let args: unknown;
+  try {
+    args = JSON.parse(state.argumentsText || "{}") as unknown;
+  } catch (error) {
+    throw new ModelProviderError(
+      "invalid_model_response",
+      `Chat Completions Tool Call ${state.id} 返回了无效 arguments JSON`,
+      false,
+      { cause: error },
+    );
+  }
+  if (!isRecord(args)) {
+    throw new ModelProviderError(
+      "invalid_model_response",
+      `Chat Completions Tool Call ${state.id} 的 arguments 必须是对象`,
+      false,
+    );
+  }
+  return {
+    id: state.id,
+    index: state.index,
+    name: state.nameText,
+    arguments: args,
+  };
 }
 
 /** 校验并规范化「normalizeFinishReason」输入，非法数据直接返回明确错误。 */
@@ -759,6 +865,7 @@ function chatError(error: Record<string, unknown>, token: string): ModelProvider
     "model_request_failed",
     `Chat Completions API${code ? ` (${redact(code, token)})` : ""}: ${redact(message, token)}`,
     code !== undefined && ["rate_limit_exceeded", "server_error", "service_unavailable", "timeout"].includes(code),
+    code ? { providerCode: redact(code, token) } : undefined,
   );
 }
 

@@ -8,6 +8,7 @@ export * from "./reasoning.js";
 export * from "./model-admission.js";
 export * from "./product-config.js";
 export * from "./session-resume.js";
+export * from "./execution-trace-stream.js";
 
 export { META_KEY } from "./common.js";
 export const CONTEXT_SUMMARY_NOTIFICATION =
@@ -125,8 +126,8 @@ export interface ContextWindowUsageNotification {
 }
 
 /**
- * ACP v1 已原生提供 messageId，这个扩展只补足轮次和 Chunk 边界。
- * Runtime 状态、UI 状态和持久化结构都不能塞进 `_meta`。
+ * ACP v1 已原生提供 messageId，这个扩展只补足轮次、Chunk 边界和重试投影代次。
+ * modelAttempt 是 ACP 缺少 replace 语义时的传输标记，不承载完整 Runtime/UI 状态。
  */
 export interface MessageMeta {
   schemaVersion: 1;
@@ -134,6 +135,12 @@ export interface MessageMeta {
   chunkIndex: number;
   final?: boolean;
   artifactMentions?: ArtifactMention[];
+  /** 同一逻辑 Round 内的 Provider 请求代次；reset 表示整体替换上一代临时投影。 */
+  modelAttempt?: {
+    id: string;
+    index: number;
+    reset?: boolean;
+  };
 }
 
 /** 描述「PromptMeta」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
@@ -189,6 +196,7 @@ export function readMessageMeta(value: unknown): MessageMeta | undefined {
     return undefined;
   }
 
+  const modelAttempt = readModelAttemptMeta(meta.modelAttempt);
   return {
     schemaVersion: 1,
     turnId: meta.turnId,
@@ -197,6 +205,18 @@ export function readMessageMeta(value: unknown): MessageMeta | undefined {
     ...(Array.isArray(meta.artifactMentions)
       ? { artifactMentions: meta.artifactMentions.map(readArtifactMention) }
       : {}),
+    ...(modelAttempt ? { modelAttempt } : {}),
+  };
+}
+
+/** 读取模型 Attempt 投影代次；未知扩展按旧消息处理。 */
+function readModelAttemptMeta(value: unknown): MessageMeta["modelAttempt"] | undefined {
+  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0) return undefined;
+  if (!Number.isInteger(value.index) || Number(value.index) < 0) return undefined;
+  return {
+    id: value.id,
+    index: Number(value.index),
+    ...(typeof value.reset === "boolean" ? { reset: value.reset } : {}),
   };
 }
 

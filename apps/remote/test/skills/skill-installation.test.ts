@@ -816,7 +816,7 @@ function installedResource(name: string) {
 /** 构造「observer」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 function observer(): ToolObserver {
   return {
-    toolStart: vi.fn(/** 构造「toolStart」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+    toolExecutionStarted: vi.fn(/** 构造工具实际执行开始的测试观察器。 */
 async () => undefined),
     toolFinish: vi.fn(/** 构造「toolFinish」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => undefined),
