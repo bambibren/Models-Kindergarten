@@ -103,7 +103,7 @@ async function verifyStagedExport(source, temp, expected) {
 }
 
 async function verifyPublishedImage(image, expected) {
-  const index = JSON.parse(capture("docker", [
+  const index = JSON.parse(await captureWithRetry("docker", [
     "run", "--rm", "--pull=always", "--platform", "linux/amd64", "--entrypoint", "cat",
     image, "/srv/skills/index.json",
   ], repoRoot));
@@ -179,4 +179,18 @@ function capture(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr || `${command} ${args[0] ?? ""} 执行失败`);
   return result.stdout;
+}
+
+/** GHCR 的新索引可能短暂早于镜像内容可拉取；只重试同一摘要，不改变验收目标。 */
+async function captureWithRetry(command, args, cwd, attempts = 5) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return capture(command, args, cwd);
+    } catch (error) {
+      if (attempt === attempts) throw error;
+      console.warn(`镜像验收暂不可用，3 秒后重试（${attempt}/${attempts}）`);
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 3_000));
+    }
+  }
+  throw new Error("镜像验收重试状态异常");
 }
