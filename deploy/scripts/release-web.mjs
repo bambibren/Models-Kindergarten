@@ -109,7 +109,7 @@ async function verifyPublishedImage(image, expected) {
   ], repoRoot));
   assertManagedSkillNames(index.skills.map((skill) => skill.name), expected, "镜像内受管 Skill");
   for (const name of expected) {
-    const bundle = JSON.parse(capture("docker", [
+    const bundle = JSON.parse(await captureWithRetry("docker", [
       "run", "--rm", "--platform", "linux/amd64", "--entrypoint", "cat",
       image, `/srv/skills/${name}.json`,
     ], repoRoot));
