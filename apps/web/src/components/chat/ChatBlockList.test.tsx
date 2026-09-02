@@ -28,4 +28,21 @@ describe("ChatBlockList", () => {
     expect(html).toContain("assistant-message");
     expect(html.match(/href=\"\/artifacts\/artifact_12345678\"/g)).toHaveLength(2);
   });
+
+  it("只在每个 Turn 的最后一个可见区块后插入一次外部操作", () => {
+    const collection: EntryCollection = {
+      order: ["message:u1", "message:a1", "message:u2", "message:a2"],
+      byId: {
+        "message:u1": { type: "message", id: "message:u1", messageId: "u1", turnId: "turn-1", role: "user", content: [{ type: "text", text: "问题一" }], status: "done" },
+        "message:a1": { type: "message", id: "message:a1", messageId: "a1", turnId: "turn-1", role: "assistant", content: [{ type: "text", text: "回答一" }], status: "done" },
+        "message:u2": { type: "message", id: "message:u2", messageId: "u2", turnId: "turn-2", role: "user", content: [{ type: "text", text: "问题二" }], status: "done" },
+        "message:a2": { type: "message", id: "message:a2", messageId: "a2", turnId: "turn-2", role: "assistant", content: [{ type: "text", text: "回答二" }], status: "done" },
+      },
+    };
+    const html = renderToStaticMarkup(<ChatBlockList collection={collection} renderTurnFooter={(turnId) => <a href={`/score/${turnId}`}>效果打分</a>} />);
+
+    expect(html.match(/效果打分/g)).toHaveLength(2);
+    expect(html.indexOf("回答一")).toBeLessThan(html.indexOf("/score/turn-1"));
+    expect(html.indexOf("/score/turn-1")).toBeLessThan(html.indexOf("问题二"));
+  });
 });

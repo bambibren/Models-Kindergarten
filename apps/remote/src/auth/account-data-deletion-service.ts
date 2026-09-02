@@ -49,6 +49,9 @@ export class AccountDataDeletionService {
     records += removedArtifacts.ids.length;
     await pruneArtifactBlobs(this.dataDir);
 
+    const removedScores = await removePartitionOwner(join(this.dataDir, "evaluation/score-results.json"), ownerId);
+    records += removedScores.ids.length;
+
     const sessionsRepository = new SessionRepository(this.dataDir);
     const sessionIds = await sessionsRepository.removeOwner(ownerId);
     for (const id of sessionIds) await rm(join(this.dataDir, "workspaces", id), { recursive: true, force: true });
@@ -211,6 +214,7 @@ function partitionIdentity(file: string, value: unknown): string | undefined {
   const stem = basename(file, extname(file));
   const key = stem === "artifacts" ? "artifactId"
     : stem === "file-references" ? "fileReferenceId"
+      : stem === "score-results" ? "scoreResultId"
       : "experimentId";
   return typeof value[key] === "string" ? value[key] : undefined;
 }
@@ -233,6 +237,27 @@ async function removeEvaluations(dataDir: string, sessions: Set<string>): Promis
     for (const item of removed) await rm(join(root, "turn-evaluations", item.file), { force: true });
   } catch (error) {
     if (!missing(error)) throw error;
+  }
+  await removeEffectScores(join(root, "turn-effect-scores"), sessions);
+}
+
+/** 人工效果分没有独立账号索引，停机删号时逐个核对记录内的 Session 身份。 */
+async function removeEffectScores(dir: string, sessions: Set<string>): Promise<void> {
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch (error) {
+    if (missing(error)) return;
+    throw error;
+  }
+  for (const file of files) {
+    if (extname(file) !== ".json") continue;
+    const path = join(dir, file);
+    const value = JSON.parse(await readFile(path, "utf8")) as unknown;
+    if (!record(value) || typeof value.sessionId !== "string" || typeof value.turnId !== "string") {
+      throw new Error(`账号数据清理遇到无效效果打分: ${path}`);
+    }
+    if (sessions.has(value.sessionId)) await rm(path, { force: true });
   }
 }
 

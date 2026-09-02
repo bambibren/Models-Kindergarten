@@ -60,6 +60,8 @@ import { FileSandbox } from "./tools/sandbox.js";
 import { ExperimentRepository } from "./experiments/experiment-repository.js";
 import { ExperimentService } from "./experiments/experiment-service.js";
 import { EvaluationModule } from "./evaluation/evaluation-module.js";
+import { reconcileTurnEffectScoreResults, registerTurnEffectScoreRoutes } from "./evaluation/turn-effect-score-routes.js";
+import { registerScoreResultRoutes } from "./evaluation/score-result-routes.js";
 import { registerExperimentRoutes } from "./experiments/experiment-routes.js";
 import { ContextPreviewService } from "./experiments/context-preview-service.js";
 import { AnnotationWorksheetGenerator } from "./experiments/annotation-worksheet-generator.js";
@@ -334,6 +336,12 @@ const experimentService = new ExperimentService(
   new AnnotationWorksheetGenerator(modelStudents),
   contextPreviews,
 );
+await experimentService.reconcileScoreResults().catch((error) => {
+  console.warn(`上下文实验原子评分迁移失败：${error instanceof Error ? error.message : String(error)}`);
+});
+await reconcileTurnEffectScoreResults(sessions, evaluation, agentService).catch((error) => {
+  console.warn(`单轮原子评分迁移失败：${error instanceof Error ? error.message : String(error)}`);
+});
 resolver.setExperimentSnapshotResolver(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (experimentId, testId) => experimentService.snapshot(experimentId, testId));
 const runtime = new AgentRuntime(
@@ -358,9 +366,11 @@ const control = new ControlApi({
 registerAuthRoutes(control.router, auth);
 registerAgentRoutes(control.router, agentService, { defaultAgentInput });
 registerSessionRoutes(control.router, sessions, new SessionLaunchService(resolve(dataDir, "session-launches.json"), agentService, modelStudents, artifacts));
+registerTurnEffectScoreRoutes(control.router, sessions, evaluation, agentService);
 registerSkillRoutes(control.router, skillInstallations);
 registerMcpRoutes(control.router, mcpManagement);
 registerModelAdmissionRoutes(control.router, modelAdmission);
+registerScoreResultRoutes(control.router, evaluation, modelAdmission);
 registerExperimentRoutes(control.router, experimentService, contextPreviews);
 const fileReferences = new FileReferenceService(
   new FileReferenceRepository(resolve(dataDir, "file-references.json")),

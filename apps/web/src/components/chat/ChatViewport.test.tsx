@@ -39,4 +39,28 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
     expect(html).toBe('<section class="session-empty-state"></section>');
     expect(html).not.toContain("今天想让模型学习什么？");
   });
+
+  it("只为明确完成的历史 Turn 显示效果打分入口", () => {
+    const entries = {
+      order: ["message:user", "message:assistant"],
+      byId: {
+        "message:user": { type: "message" as const, id: "message:user", messageId: "user", turnId: "turn-1", role: "user" as const, content: [{ type: "text" as const, text: "问题" }], status: "done" as const },
+        "message:assistant": { type: "message" as const, id: "message:assistant", messageId: "assistant", turnId: "turn-1", role: "assistant" as const, content: [{ type: "text" as const, text: "回答" }], status: "done" as const },
+      },
+    };
+    const html = renderToStaticMarkup(<ChatViewport
+      historyPaging={{ loading: false, hasMore: false }}
+      historyChatEntries={entries}
+      initializing={false}
+      onLoadOlder={() => undefined}
+      onTurnAction={() => undefined}
+      promptTurn={idlePromptTurn}
+      scorableTurnIds={new Set(["turn-1"])}
+      sessionId="session-1"
+      streamingChatEntries={emptyEntries()}
+    />);
+
+    expect(html).toContain("效果打分");
+    expect(html).toContain("/evaluation/sessions/session-1/turns/turn-1");
+  });
 });

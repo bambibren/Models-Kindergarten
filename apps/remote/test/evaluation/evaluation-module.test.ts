@@ -54,6 +54,23 @@ describe("Evaluation 模块", () => {
       .toMatchObject({ trace: { turnId: "turn-57" } });
   });
 
+  it("人工效果打分与 Runtime 评测事实分开持久化", async () => {
+    const evaluation = await createEvaluation();
+    const saved = await evaluation.putEffectScore("session", "turn", {
+      schemaVersion: 1,
+      annotations: {
+        understanding: { requirements: [{ requirementId: "prompt-1", label: "保留真实组件", weight: 100, verdict: "met" }], completed: true },
+        planning: { score: 76, completed: true },
+        output: { score: 82, marks: [], completed: true },
+      },
+    }, 91, scoreInput());
+
+    expect(saved).toMatchObject({ sessionId: "session", turnId: "turn", executionScore: 91 });
+    expect(await evaluation.getEffectScore("session", "turn")).toEqual(saved);
+    expect((await readdir(join(dirs[0]!, "turn-effect-scores"))).filter((name) => name.endsWith(".json"))).toHaveLength(1);
+    expect(await evaluation.get("session", "turn")).toBeUndefined();
+  });
+
   it("初始化失败时降级但不阻断 Remote，并让查询明确返回 503", async () => {
     const dir = await mkdtemp(join(tmpdir(), "kindergarten-eval-degraded-"));
     dirs.push(dir);
@@ -76,6 +93,33 @@ async function createEvaluation(): Promise<EvaluationModule> {
   const evaluation = new EvaluationModule(dir);
   await evaluation.initialize();
   return evaluation;
+}
+
+function scoreInput() {
+  return {
+    ownerId: "local-admin",
+    modelStudentId: "model-1",
+    source: { kind: "turn_effect" as const, sessionId: "session", turnId: "turn" },
+    sourceTitle: "测试 Turn · 单轮效果打分",
+    agentConfiguration: {
+      agentSnapshotHash: "snapshot-1",
+      agentId: "agent-1",
+      agentName: "测试 Agent",
+      systemPrompt: "完成任务",
+      builtinTools: [], builtinSkills: [], skills: [], mcps: [],
+      historyPolicy: { mode: "none" as const },
+      memoryPolicy: { mode: "off" as const },
+      reasoning: {
+        schemaVersion: 1 as const,
+        requestedProfile: "balanced" as const,
+        resolvedProfile: "balanced" as const,
+        source: "model_default" as const,
+        providerKind: "fixture",
+        model: "fixture-model",
+        native: {},
+      },
+    },
+  };
 }
 
 function completeTurn(evaluation: EvaluationModule, sessionId: string, turnId: string): void {

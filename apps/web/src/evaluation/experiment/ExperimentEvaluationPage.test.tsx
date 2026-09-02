@@ -33,6 +33,20 @@ describe("ExperimentEvaluationPage annotation interactions", () => {
     expect(html.match(/tab-status execution-completed/g)).toHaveLength(1);
   });
 
+  it("单 Turn 页面只替换首个 Tab 文案并保持其余 Tab 不变", () => {
+    const html = renderToStaticMarkup(<ExperimentTabs
+      active="answers"
+      answerLabel="流式消息"
+      answerStatus="completed"
+      completed={{ understanding: false, planning: false, output: false }}
+      onChange={() => undefined}
+    />);
+
+    expect(html).toContain("流式消息");
+    expect(html).not.toContain(">原始回答<");
+    expect(html).toContain("综合能力分布");
+  });
+
   it("原始回答流式完成前与执行能力共用 loading，且只开放这两个 Tab", () => {
     const html = renderToStaticMarkup(<ExperimentTabs
       active="answers"

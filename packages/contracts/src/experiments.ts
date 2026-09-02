@@ -399,6 +399,8 @@ export interface ManualDimensionScores {
 /** 描述「VariantFourDimensionScore」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface VariantFourDimensionScore {
   variantId: string;
+  /** 旧 scorecard 可缺失；新写入使用该 ID 关联独立原子评分记录。 */
+  scoreResultId?: string;
   dimensionScores: { understanding?: number; planning?: number; output?: number; execution: number };
   executionEvidence: { metrics: ExecutionMetricsSnapshot; componentScores: ExecutionComponentScores };
   totalScore?: number;

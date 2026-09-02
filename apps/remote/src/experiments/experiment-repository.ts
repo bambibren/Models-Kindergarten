@@ -41,9 +41,11 @@ async update(id: string, change: (value: AnyExperimentRecord) => AnyExperimentRe
     return result;
   }
   /** 读取「getScorecard」所需数据，并遵守作用域、分页与容量边界。 */
-async getScorecard(experimentId: string): Promise<ExperimentScorecard | undefined> {
+  async getScorecard(experimentId: string): Promise<ExperimentScorecard | undefined> {
     return this.scorecards.get(experimentId);
   }
+  /** 启动迁移读取已有 scorecard；业务查询仍按 experimentId 点查。 */
+  async listScorecards(): Promise<ExperimentScorecard[]> { return this.scorecards.read(); }
   /** 更新「putScorecard」对应状态，并保持写入顺序、原子性与容量约束。 */
 async putScorecard(value: ExperimentScorecard): Promise<void> {
     await this.scorecards.put(structuredClone(value));

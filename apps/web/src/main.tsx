@@ -11,6 +11,7 @@ import { MePage } from "./product/MePage.js";
 import { ArtifactDetailPage } from "./product/ArtifactDetailPage.js";
 import { ModelAdmissionPage } from "./product/ModelAdmissionPage.js";
 import { ModelDetailPage } from "./product/ModelDetailPage.js";
+import { ModelScoreGroupPage } from "./product/ModelScoreGroupPage.js";
 import { AuthGate } from "./product/AuthGate.js";
 import { LoginPage } from "./product/LoginPage.js";
 import { SkillMarketPage } from "./product/SkillMarketPage.js";
@@ -66,6 +67,8 @@ function productRoute(path: string) {
   const artifact = path.match(/^\/artifacts\/([^/]+)$/)?.[1];
   if (artifact) return <ArtifactDetailPage artifactId={decodeURIComponent(artifact)} />;
   if (path === "/models/new") return <ModelAdmissionPage />;
+  const modelScore = path.match(/^\/models\/([^/]+)\/scores\/([^/]+)$/);
+  if (modelScore?.[1] && modelScore[2]) return <ModelScoreGroupPage modelStudentId={decodeURIComponent(modelScore[1])} configurationHash={decodeURIComponent(modelScore[2])} />;
   const model = path.match(/^\/models\/([^/]+)$/)?.[1];
   if (model) return <ModelDetailPage modelStudentId={decodeURIComponent(model)} />;
   if (path === "/agents/new") return <AgentEditorPage />;

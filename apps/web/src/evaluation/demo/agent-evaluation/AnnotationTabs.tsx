@@ -15,6 +15,7 @@ const tabs = [
 /** 渲染「AnnotationTabs」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function AnnotationTabs({
   active,
+  answerLabel = "原始回答",
   answerStatus = "completed",
   executionStatus = answerStatus,
   annotationStatus = "ready",
@@ -22,6 +23,7 @@ export function AnnotationTabs({
   onChange,
 }: {
   active: AnnotationTabId;
+  answerLabel?: string;
   answerStatus?: "loading" | "completed";
   executionStatus?: "loading" | "completed" | "failed";
   annotationStatus?: "blocked" | "loading" | "ready";
@@ -36,7 +38,7 @@ export function AnnotationTabs({
     const timer = window.setInterval(() => setGenerationElapsed(Math.floor((Date.now() - startedAt) / 1_000)), 1_000);
     return () => window.clearInterval(timer);
   }, [annotationStatus]);
-  return <nav className="annotation-tabs" aria-label="上下文实验结果模块" role="tablist">
+  return <nav className="annotation-tabs" aria-label="效果评测模块" role="tablist">
     {tabs.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
     (tab) => {
       const Icon = tab.icon;
@@ -57,12 +59,12 @@ export function AnnotationTabs({
         onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
 () => { if (!disabled) onChange(tab.id); }}
         role="tab"
-        title={disabled ? generating ? "生成中" : answerStatus !== "completed" ? "原始回答完成后可查看" : "标注题目尚未生成" : undefined}
+        title={disabled ? generating ? "生成中" : answerStatus !== "completed" ? `${answerLabel}完成后可查看` : "标注题目尚未生成" : undefined}
         type="button"
       >
         <Icon size={14} />
-        <span>{tab.label}</span>
-        {tab.id === "answer" && <i className={`tab-status answer-${answerStatus}`} title={answerStatus === "completed" ? "原始回答已完成" : "原始回答生成中"}>
+        <span>{tab.id === "answer" ? answerLabel : tab.label}</span>
+        {tab.id === "answer" && <i className={`tab-status answer-${answerStatus}`} title={answerStatus === "completed" ? `${answerLabel}已完成` : `${answerLabel}生成中`}>
           {answerStatus === "completed" ? <CircleCheck size={13} /> : <LoaderCircle className="tab-loading-icon" size={13} />}
         </i>}
         {manual && <i

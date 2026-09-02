@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ModelStudentDetailView } from "@kindergarten/contracts";
-import { ModelDetailContent, ModelDetailPage, modelStudentDetailUrl } from "./ModelDetailPage.js";
+import { ModelDetailContent, ModelDetailPage, modelScoreGroupUrl, modelStudentDetailUrl } from "./ModelDetailPage.js";
 
 describe("ModelDetailPage", /** 组织模型只读详情的页面与路径测试。 */
 () => {
@@ -35,6 +35,24 @@ describe("ModelDetailPage", /** 组织模型只读详情的页面与路径测试
 () => {
     expect(modelStudentDetailUrl("student/大聪明"))
       .toBe("/models/student%2F%E5%A4%A7%E8%81%AA%E6%98%8E");
+  });
+
+  it("同一 Agent 配置只显示一条平均分与区间分排行", () => {
+    const html = renderToStaticMarkup(<ModelDetailContent detail={detail()} groups={[{
+      configurationHash: "config/1",
+      agentName: "研究助手",
+      sampleCount: 3,
+      averageScore: 87.3,
+      minScore: 82,
+      maxScore: 93,
+      lastScoredAt: "2026-09-02T10:00:00.000Z",
+    }]} />);
+    expect(html).toContain("Agent 配置组合评分");
+    expect(html).toContain("87.3");
+    expect(html).toContain("[82 ~ 93]");
+    expect(html).toContain("3 条评分");
+    expect(html).toContain('href="/models/student-1/scores/config%2F1"');
+    expect(modelScoreGroupUrl("student/1", "config/1")).toBe("/models/student%2F1/scores/config%2F1");
   });
 });
 

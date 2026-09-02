@@ -30,6 +30,13 @@ import type {
   TurnTokenUsage,
 } from "@kindergarten/contracts";
 import type { ToolCallContent, ToolCallLocation, ToolCallStatus, ToolKind } from "@agentclientprotocol/sdk";
+import type {
+  ModelAgentScoreGroupDetail,
+  ModelAgentScoreGroupSummary,
+  ScoreResultRecord,
+  TurnEffectScoreDraft,
+  TurnEffectScoreRecord,
+} from "@kindergarten/evaluation-contract";
 import { CONTROL_API_URL } from "../deployment-endpoints.js";
 
 const CONTROL_URL = CONTROL_API_URL;
@@ -138,6 +145,9 @@ export const controlApi = {
 () => get<{ items: ModelStudentSummary[] }>("/model-students"),
   model: /** 读取单个模型完整且不含明文凭据的入园详情。 */
 (id: string) => get<ModelStudentDetailView>(`/model-students/${encodeURIComponent(id)}`),
+  modelScoreGroups: (id: string) => get<{ items: ModelAgentScoreGroupSummary[] }>(`/model-students/${encodeURIComponent(id)}/score-groups`),
+  modelScoreGroup: (id: string, configurationHash: string) => get<ModelAgentScoreGroupDetail>(`/model-students/${encodeURIComponent(id)}/score-groups/${encodeURIComponent(configurationHash)}`),
+  scoreResult: (id: string) => get<ScoreResultRecord>(`/score-results/${encodeURIComponent(id)}`),
   modelProviderPresets: /** 执行「modelProviderPresets」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 () => get<{ items: ModelProviderPresetView[] }>("/model-provider-presets"),
   testModelStudent: /** 执行「testModelStudent」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -162,6 +172,8 @@ export const controlApi = {
 (id: string) => get<{ turnId: string; state: import("@kindergarten/contracts").TurnState }>(`/turns/${encodeURIComponent(id)}`),
   turnContext: /** 执行「turnContext」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (id: string) => get<TurnContextSnapshot>(`/turns/${encodeURIComponent(id)}/context`),
+  turnEffectScore: (id: string) => get<TurnEffectScoreRecord | null>(`/turns/${encodeURIComponent(id)}/effect-score`),
+  saveTurnEffectScore: (id: string, value: TurnEffectScoreDraft) => request<TurnEffectScoreRecord>(`/turns/${encodeURIComponent(id)}/effect-score`, "PUT", value),
   skills: /** 执行「skills」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 () => get<{ items: SkillInstallation[] }>("/skills"),
   removeSkill: /** 释放或删除「removeSkill」对应资源，重复调用仍保持安全。 */

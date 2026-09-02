@@ -1,5 +1,5 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import type * as acp from "@agentclientprotocol/sdk";
@@ -27,6 +27,11 @@ import { clampArtifactWidth, defaultArtifactWidth } from "./session/artifact-spl
 import { selectContextWindowUsage } from "./chat/context-window-usage.js";
 import { projectSessionTurnPage } from "./chat/session-history-page.js";
 import { acpWebSocketUrl, CONTROL_API_URL } from "./deployment-endpoints.js";
+import {
+  activePublishedArtifactId,
+  closedPublishedArtifactPreview,
+  publishedArtifactPreviewReducer,
+} from "./session/published-artifact-preview-state.js";
 
 const ACP_URL = acpWebSocketUrl();
 const REMOTE_CWD = "/workspace";
@@ -48,7 +53,11 @@ export default function App() {
   const [identity, setIdentity] = useState<SessionIdentity>({ agentName: "Agent", modelName: "ModelStudent", agentAvailability: "loading" });
   const [configOptions, setConfigOptions] = useState<acp.SessionConfigOption[]>([]);
   const [reasoningBusy, setReasoningBusy] = useState(false);
-  const [publishedArtifactId, setPublishedArtifactId] = useState<string | null>(null);
+  const [publishedArtifactPreview, dispatchPublishedArtifactPreview] = useReducer(
+    publishedArtifactPreviewReducer,
+    closedPublishedArtifactPreview,
+  );
+  const publishedArtifactId = activePublishedArtifactId(publishedArtifactPreview, chat.sessionId);
   const [artifactWidth, setArtifactWidth] = useState(520);
   const [narrowView, setNarrowView] = useState<"artifact" | "chat">("artifact");
   const [historyPaging, setHistoryPaging] = useState<{
@@ -56,6 +65,7 @@ export default function App() {
     hasMore: boolean;
     nextBeforeTurnId?: string;
   }>({ loading: false, hasMore: false });
+  const [completedTurnIds, setCompletedTurnIds] = useState<ReadonlySet<string>>(() => new Set());
   const workspaceRef = useRef<HTMLDivElement>(null);
   const artifactWidthRef = useRef(artifactWidth);
   const artifactDragRef = useRef<{ pointerId: number; workspaceLeft: number; workspaceWidth: number } | null>(null);
@@ -66,18 +76,24 @@ export default function App() {
 (event: Event) => {
       const id = (event as CustomEvent<unknown>).detail;
       if (typeof id !== "string" || id.length === 0) return;
+      const sessionId = useAppStore.getState().chat.sessionId;
+      if (!sessionId) return;
       const containerWidth = workspaceRef.current?.clientWidth;
       if (containerWidth) {
         const width = defaultArtifactWidth(containerWidth);
         artifactWidthRef.current = width;
         setArtifactWidth(width);
       }
-      setPublishedArtifactId(id);
+      dispatchPublishedArtifactPreview({ type: "preview/open", sessionId, artifactId: id });
       setNarrowView("artifact");
     };
     window.addEventListener("mk-open-artifact", open);
     return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => window.removeEventListener("mk-open-artifact", open);
   }, []);
+
+  useEffect(() => {
+    dispatchPublishedArtifactPreview({ type: "session/change", sessionId: chat.sessionId });
+  }, [chat.sessionId]);
 
   useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
 () => {
@@ -339,6 +355,7 @@ function openEmptySession(sessionId: string): void {
     setConfigOptions([]);
     setReasoningBusy(false);
     setHistoryPaging({ loading: false, hasMore: false });
+    setCompletedTurnIds(new Set());
     setIdentity(/** 执行「openEmptySession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (current) => ({ ...current, agentAvailability: "loading" }));
   }
@@ -354,6 +371,7 @@ async function refreshSessions(client = clientRef.current): Promise<void> {
 async function loadSession(client: AcpWebClient, session: SessionInfo): Promise<void> {
     const operationId = crypto.randomUUID();
     const store = useAppStore.getState();
+    setCompletedTurnIds(new Set());
     setIdentity(/** 读取「loadSession」所需数据，并遵守作用域、分页与容量边界。 */
 (current) => ({ ...current, agentAvailability: "loading" }));
     store.dispatchPromptTurn({ type: "turn/reset" });
@@ -375,6 +393,7 @@ async function loadSession(client: AcpWebClient, session: SessionInfo): Promise<
         hasMore: page.hasMore,
         ...(page.nextBeforeTurnId ? { nextBeforeTurnId: page.nextBeforeTurnId } : {}),
       });
+      setCompletedTurnIds(new Set(page.turns.filter((turn) => turn.state.status === "completed").map((turn) => turn.turnId)));
     } finally {
       const current = useAppStore.getState();
       const turn = current.promptTurn;
@@ -411,6 +430,10 @@ async function loadSession(client: AcpWebClient, session: SessionInfo): Promise<
         return turnId ? [turnId] : [];
       })).size;
       const atLimit = retainedTurns >= PRODUCT_CONFIG.agent.maxWebRetainedTurns;
+      setCompletedTurnIds((current) => new Set([
+        ...current,
+        ...page.turns.filter((turn) => turn.state.status === "completed").map((turn) => turn.turnId),
+      ]));
       setHistoryPaging({
         loading: false,
         hasMore: page.hasMore && !atLimit,
@@ -525,6 +548,7 @@ async function send(text: string, artifactMentions: ArtifactMentionInput[] = [],
           operationId,
           reason: response.stopReason,
         });
+        setCompletedTurnIds((current) => new Set([...current, turnId]));
       }
       void refreshSessions(client).catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
 (cause: unknown) => {
@@ -640,7 +664,7 @@ function startArtifactResize(event: ReactPointerEvent<HTMLDivElement>): void {
       </div>}
       <div className={`session-workspace narrow-${narrowView}`} ref={workspaceRef} style={workspaceStyle}>
         {publishedArtifactId && <PublishedArtifactPanel artifactId={publishedArtifactId} onClose={/** 处理「onClose」事件，校验归属后再推进状态且避免重复提交。 */
-() => setPublishedArtifactId(null)} />}
+() => dispatchPublishedArtifactPreview({ type: "preview/close" })} />}
         {hasArtifact && <div
           aria-label="调整产物与聊天宽度"
           aria-orientation="vertical"
@@ -656,6 +680,8 @@ function startArtifactResize(event: ReactPointerEvent<HTMLDivElement>): void {
             initializing={connection.phase === "connecting" || identity.agentAvailability === "loading"}
             streamingChatEntries={chat.streamingChatEntries}
             promptTurn={promptTurn}
+            sessionId={chat.sessionId}
+            scorableTurnIds={completedTurnIds}
             onTurnAction={handleTurnAction}
             onLoadOlder={/** 处理「onLoadOlder」事件，校验归属后再推进状态且避免重复提交。 */
 () => void loadOlderHistory()}

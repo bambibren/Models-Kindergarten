@@ -5,8 +5,9 @@ export type ExperimentTabId = "answers" | "understanding" | "planning" | "output
 export type ExperimentAnnotationTabId = "understanding" | "planning" | "output";
 
 /** 正式页仅转换历史 answers ID，Tab 本体直接复用 Demo。 */
-export function ExperimentTabs({ active, answerStatus, executionStatus, annotationStatus, completed, onChange }: {
+export function ExperimentTabs({ active, answerLabel, answerStatus, executionStatus, annotationStatus, completed, onChange }: {
   active: ExperimentTabId;
+  answerLabel?: string;
   answerStatus: "loading" | "completed";
   executionStatus?: "loading" | "completed" | "failed";
   annotationStatus?: "blocked" | "loading" | "ready";
@@ -15,6 +16,7 @@ export function ExperimentTabs({ active, answerStatus, executionStatus, annotati
 }) {
   return <AnnotationTabs
     active={(active === "answers" ? "answer" : active) as AnnotationTabId}
+    {...(answerLabel ? { answerLabel } : {})}
     answerStatus={answerStatus}
     {...(executionStatus ? { executionStatus } : {})}
     {...(annotationStatus ? { annotationStatus } : {})}

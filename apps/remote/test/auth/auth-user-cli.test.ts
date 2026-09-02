@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runAuthUserCli } from "../../src/auth/auth-user-cli.js";
 import { AccountDataDeletionService } from "../../src/auth/account-data-deletion-service.js";
+import { EvaluationRepository } from "../../src/evaluation/repository.js";
+import { buildScoreResult } from "../../src/evaluation/score-result.js";
 import { McpConfigStore } from "../../src/mcp/mcp-config-store.js";
+import { SessionRepository } from "../../src/repository/session-repository.js";
 
 describe("服务器账号管理脚本", () => {
   it("支持新增、禁用、启用和修改密码", async () => {
@@ -77,7 +80,49 @@ describe("服务器账号管理脚本", () => {
     expect((await config.load()).servers.map(/** 构造「map」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 (server) => server.id)).toEqual(["mcp-owner-b"]);
   });
+
+  it("删除账号时只清理其 Session 对应的人工效果分", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "mk-auth-effect-score-"));
+    const sessions = new SessionRepository(dataDir);
+    const mine = await sessions.create({ cwd: "/workspace", ownerId: "owner-a", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
+    const other = await sessions.create({ cwd: "/workspace", ownerId: "owner-b", purpose: "chat", modelStudentId: "student-1", agentId: "agent-1" });
+    const evaluations = new EvaluationRepository(join(dataDir, "evaluation"));
+    await evaluations.initialize();
+    const record = {
+      schemaVersion: 1 as const,
+      executionScore: 80,
+      savedAt: new Date().toISOString(),
+      annotations: {
+        understanding: { requirements: [], completed: false },
+        planning: { completed: false },
+        output: { score: 0, marks: [], completed: false },
+      },
+    };
+    await evaluations.putEffectScore({ ...record, sessionId: mine.id, turnId: "turn-a" });
+    await evaluations.putEffectScore({ ...record, sessionId: other.id, turnId: "turn-b" });
+    await evaluations.putScoreResult(buildScoreResult(scoreInput("owner-a", mine.id, "turn-a")));
+    await evaluations.putScoreResult(buildScoreResult(scoreInput("owner-b", other.id, "turn-b")));
+
+    await new AccountDataDeletionService(dataDir).deleteOwner("owner-a");
+
+    expect(await evaluations.getEffectScore(mine.id, "turn-a")).toBeUndefined();
+    expect(await evaluations.getEffectScore(other.id, "turn-b")).toMatchObject({ sessionId: other.id });
+    expect((await evaluations.listScoreResults()).map((item) => item.ownerId)).toEqual(["owner-b"]);
+  });
 });
+
+function scoreInput(ownerId: string, sessionId: string, turnId: string) {
+  return {
+    ownerId, modelStudentId: "student-1",
+    source: { kind: "turn_effect" as const, sessionId, turnId }, sourceTitle: "评分",
+    agentConfiguration: {
+      agentSnapshotHash: "snapshot-1", agentId: "agent-1", agentName: "Agent", systemPrompt: "",
+      builtinTools: [], builtinSkills: [], skills: [], mcps: [], historyPolicy: { mode: "none" as const }, memoryPolicy: { mode: "off" as const },
+      reasoning: { schemaVersion: 1 as const, requestedProfile: "balanced" as const, resolvedProfile: "balanced" as const, source: "model_default" as const, providerKind: "fixture", model: "fixture", native: {} },
+    },
+    dimensionScores: { understanding: 80, planning: 80, output: 80, execution: 80 }, completed: true,
+  };
+}
 
 function io(input = "", output: string[] = []) {
   return {

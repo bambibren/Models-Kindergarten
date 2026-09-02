@@ -1,4 +1,11 @@
 import type {
+  ModelAgentScoreGroupDetail,
+  ModelAgentScoreGroupSummary,
+  ScoreResultRecord,
+  ScoreResultSource,
+  ScoreResultUpsertInput,
+  TurnEffectScoreDraft,
+  TurnEffectScoreRecord,
   TurnEvaluationRecord,
   TurnTraceDocument,
 } from "@kindergarten/evaluation-contract";
@@ -10,6 +17,12 @@ import { evaluateTurn } from "./evaluator.js";
 import { EvaluationRepository } from "./repository.js";
 import { TraceCollector } from "./trace-collector.js";
 import { normalizeTurnTrace } from "./trace-migration.js";
+import {
+  aggregateModelScoreGroups,
+  buildScoreResult,
+  modelScoreGroupDetail,
+  scoreResultIdForSource,
+} from "./score-result.js";
 
 const PUBLIC_PREFIX = "/api/evaluation/v1";
 
@@ -21,6 +34,9 @@ export interface EvaluationAccess {
   ): Promise<Pick<TurnEvaluationRecord, "result"> | undefined>;
   flush(): Promise<void>;
   takeTrace(sessionId: string, turnId: string): TurnTraceDocument | undefined;
+  scoreResultId(source: ScoreResultSource): string;
+  putScoreResult(input: ScoreResultUpsertInput): Promise<ScoreResultRecord>;
+  removeScoreResultsBySource(source: ScoreResultSource | { kind: "context_experiment"; experimentId: string }): Promise<void>;
 }
 
 /**
@@ -81,6 +97,108 @@ export class EvaluationModule implements RuntimeObservationSink, EvaluationAcces
     return this.repository.get(sessionId, turnId);
   }
 
+  /** 读取独立人工效果分；Evaluation 不可用时与只读客观记录保持一致。 */
+  async getEffectScore(sessionId: string, turnId: string): Promise<TurnEffectScoreRecord | undefined> {
+    if (!this.available) return undefined;
+    return this.repository.getEffectScore(sessionId, turnId);
+  }
+
+  /** 根据来源事实生成稳定 ID，页面 URL 与评分文件位置不再互相耦合。 */
+  scoreResultId(source: ScoreResultSource): string {
+    return scoreResultIdForSource(source);
+  }
+
+  /** 幂等写入一条原子评分，首次创建时间在重复保存时保持不变。 */
+  async putScoreResult(input: ScoreResultUpsertInput): Promise<ScoreResultRecord> {
+    if (!this.available) throw new Error("Evaluation 模块暂不可用");
+    const id = scoreResultIdForSource(input.source);
+    const record = buildScoreResult(input, await this.repository.getScoreResult(id));
+    await this.repository.putScoreResult(record);
+    return record;
+  }
+
+  /** 按账号读取原子评分，跨账号时与不存在保持相同结果。 */
+  async getScoreResult(scoreResultId: string, ownerId: string): Promise<ScoreResultRecord | undefined> {
+    if (!this.available) return undefined;
+    const record = await this.repository.getScoreResult(scoreResultId);
+    return record?.ownerId === ownerId ? record : undefined;
+  }
+
+  /** 模型排行只聚合完整四维评分，不让草稿参与平均值。 */
+  async modelScoreGroups(ownerId: string, modelStudentId: string): Promise<ModelAgentScoreGroupSummary[]> {
+    if (!this.available) return [];
+    return aggregateModelScoreGroups(await this.repository.listScoreResults(), ownerId, modelStudentId);
+  }
+
+  /** 配置详情返回冻结配置与逐条原子历史。 */
+  async modelScoreGroup(
+    ownerId: string,
+    modelStudentId: string,
+    configurationHash: string,
+  ): Promise<ModelAgentScoreGroupDetail | undefined> {
+    if (!this.available) return undefined;
+    return modelScoreGroupDetail(await this.repository.listScoreResults(), ownerId, modelStudentId, configurationHash);
+  }
+
+  /** 删除来源事实时同步清除其原子评分，避免模型排行留下悬空回链。 */
+  async removeScoreResultsBySource(
+    source: ScoreResultSource | { kind: "context_experiment"; experimentId: string },
+  ): Promise<void> {
+    if (!this.available) return;
+    await this.repository.removeScoreResultsBySource(source);
+  }
+
+  /** 保存人工标注并固化当时的客观执行分，不修改 Runtime Trace。 */
+  async putEffectScore(
+    sessionId: string,
+    turnId: string,
+    draft: TurnEffectScoreDraft,
+    executionScore: number,
+    scoreInput: Omit<ScoreResultUpsertInput, "dimensionScores" | "completed" | "recordedAt">,
+  ): Promise<TurnEffectScoreRecord> {
+    if (!this.available) throw new Error("Evaluation 模块暂不可用");
+    const savedAt = new Date().toISOString();
+    const dimensions = effectScoreDimensions(draft, executionScore);
+    const atom = await this.putScoreResult({
+      ...scoreInput,
+      dimensionScores: dimensions,
+      completed: draft.annotations.understanding.completed && draft.annotations.planning.completed && draft.annotations.output.completed,
+      recordedAt: savedAt,
+    });
+    const record: TurnEffectScoreRecord = {
+      ...structuredClone(draft),
+      sessionId,
+      turnId,
+      scoreResultId: atom.scoreResultId,
+      executionScore,
+      savedAt,
+    };
+    await this.repository.putEffectScore(record);
+    return record;
+  }
+
+  /** 为旧单轮评分补齐原子记录和关联 ID，并保留原始评分时间。 */
+  async reconcileEffectScore(
+    record: TurnEffectScoreRecord,
+    scoreInput: Omit<ScoreResultUpsertInput, "dimensionScores" | "completed" | "recordedAt">,
+  ): Promise<void> {
+    if (!this.available) return;
+    const atom = await this.putScoreResult({
+      ...scoreInput,
+      dimensionScores: effectScoreDimensions(record, record.executionScore),
+      completed: record.annotations.understanding.completed && record.annotations.planning.completed && record.annotations.output.completed,
+      recordedAt: record.savedAt,
+    });
+    if (record.scoreResultId === atom.scoreResultId) return;
+    await this.repository.putEffectScore({ ...structuredClone(record), scoreResultId: atom.scoreResultId });
+  }
+
+  /** 仅供启动迁移读取旧人工评分，不作为浏览器列表接口。 */
+  async effectScoresForReconciliation(): Promise<TurnEffectScoreRecord[]> {
+    if (!this.available) return [];
+    return this.repository.listEffectScores();
+  }
+
   /** 浏览器沿用同源只读路径；评测写入只允许由 Runtime 观察链触发。 */
   async fetch(request: Request): Promise<Response | undefined> {
     const url = new URL(request.url);
@@ -111,6 +229,20 @@ export class EvaluationModule implements RuntimeObservationSink, EvaluationAcces
     }
     return Response.json(record);
   }
+}
+
+/** 单轮理解分由带权需求事实计算；规划和输出沿用已校验人工分。 */
+function effectScoreDimensions(draft: TurnEffectScoreDraft, execution: number): ScoreResultRecord["dimensionScores"] {
+  const requirements = draft.annotations.understanding.requirements;
+  const totalWeight = requirements.reduce((sum, item) => sum + item.weight, 0);
+  const metWeight = requirements.reduce((sum, item) => sum + (item.verdict === "met" ? item.weight : 0), 0);
+  const understanding = totalWeight > 0 ? Math.round(100 * metWeight / totalWeight) : 0;
+  return {
+    understanding,
+    ...(draft.annotations.planning.score === undefined ? {} : { planning: draft.annotations.planning.score }),
+    output: draft.annotations.output.score,
+    execution,
+  };
 }
 
 function errorText(value: unknown): string {

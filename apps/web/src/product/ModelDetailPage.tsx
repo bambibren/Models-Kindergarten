@@ -1,9 +1,11 @@
 import {
   Activity,
   ArrowLeft,
+  BarChart3,
   Bot,
   Check,
   CircleX,
+  ChevronRight,
   Gauge,
   KeyRound,
   Link2,
@@ -15,6 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback } from "react";
 import type { ModelStudentDetailView, ProviderCapabilitySnapshot } from "@kindergarten/contracts";
+import type { ModelAgentScoreGroupSummary } from "@kindergarten/evaluation-contract";
 import { controlApi } from "../api/control-api.js";
 import { formatTokenCount } from "../components/tokens/token-format.js";
 import { profileLabel } from "../reasoning/reasoning-config.js";
@@ -25,7 +28,8 @@ import { useResource } from "./use-resource.js";
 /** 渲染模型入园只读详情；不提供任何会改变已安装模型的交互。 */
 export function ModelDetailPage({ modelStudentId }: { modelStudentId: string }) {
   const load = useCallback(/** 缓存详情读取函数，模型 ID 变化时重新读取。 */
-() => controlApi.model(modelStudentId), [modelStudentId]);
+() => Promise.all([controlApi.model(modelStudentId), controlApi.modelScoreGroups(modelStudentId)])
+    .then(([detail, groups]) => ({ detail, groups: groups.items })), [modelStudentId]);
   const { state, retry } = useResource(load);
   return <main className="product-page">
     <ProductNav active="me" />
@@ -38,15 +42,15 @@ export function ModelDetailPage({ modelStudentId }: { modelStudentId: string }) 
         ? <LoadingState label="正在读取模型入园信息" />
         : state.phase === "error"
           ? <ErrorState {...state} retry={retry} />
-          : <ModelDetailContent detail={state.data} />}
+          : <ModelDetailContent detail={state.data.detail} groups={state.data.groups} />}
     </div>
   </main>;
 }
 
 /** 把服务端安全详情投影为不可编辑的入园表单。 */
-export function ModelDetailContent({ detail }: { detail: ModelStudentDetailView }) {
+export function ModelDetailContent({ detail, groups = [] }: { detail: ModelStudentDetailView; groups?: ModelAgentScoreGroupSummary[] }) {
   const { admission } = detail;
-  return <div className="product-mcp-layout product-admission-layout">
+  return <><div className="product-mcp-layout product-admission-layout">
     <section className="product-form product-admission-form product-model-readonly-form">
       <section>
         <header><Bot size={16} /><div><strong>模型学生</strong><small>只读</small></div></header>
@@ -69,7 +73,24 @@ export function ModelDetailContent({ detail }: { detail: ModelStudentDetailView 
       <CapabilityResult snapshot={admission.snapshot} />
       <div className="product-admission-security"><ShieldCheck size={14} /><p>凭据只显示是否已配置及安全提示，不包含 Secret 引用或明文。</p></div>
     </aside>
-  </div>;
+  </div><AgentConfigurationRanking modelStudentId={detail.modelStudentId} groups={groups} /></>;
+}
+
+/** 同一冻结配置只占一行；分值同时展示平均值与历史区间。 */
+function AgentConfigurationRanking({ modelStudentId, groups }: { modelStudentId: string; groups: ModelAgentScoreGroupSummary[] }) {
+  return <section className="product-score-ranking">
+    <header><div><span><BarChart3 size={16} /></span><div><strong>Agent 配置组合评分</strong><small>完整四维评分 · 按平均分从高到低</small></div></div></header>
+    {groups.length === 0
+      ? <div className="product-score-empty"><strong>还没有可排行的评分</strong><p>完成上下文实验标注或单轮效果打分后，会按冻结的 Agent 配置自动聚合到这里。</p></div>
+      : <ol>{groups.map((group, index) => <li key={group.configurationHash}>
+        <a href={modelScoreGroupUrl(modelStudentId, group.configurationHash)}>
+          <span className="product-score-rank">{String(index + 1).padStart(2, "0")}</span>
+          <span className="product-score-agent"><strong>{group.agentName}</strong><small>{group.sampleCount} 条评分 · 最近 {formatDateTime(group.lastScoredAt)}</small></span>
+          <span className="product-score-value"><strong>{formatScore(group.averageScore)}</strong><small>[{formatScore(group.minScore)} ~ {formatScore(group.maxScore)}]</small></span>
+          <ChevronRight size={16} />
+        </a>
+      </li>)}</ol>}
+  </section>;
 }
 
 /** 渲染单个可复制但不可编辑的入园字段。 */
@@ -99,6 +120,13 @@ function CapabilityResult({ snapshot }: { snapshot: ProviderCapabilitySnapshot }
 export function modelStudentDetailUrl(modelStudentId: string): string {
   return `/models/${encodeURIComponent(modelStudentId)}`;
 }
+
+/** 模型与配置指纹分别编码，避免配置哈希被误作路径结构。 */
+export function modelScoreGroupUrl(modelStudentId: string, configurationHash: string): string {
+  return `/models/${encodeURIComponent(modelStudentId)}/scores/${encodeURIComponent(configurationHash)}`;
+}
+
+function formatScore(value: number): string { return Number.isInteger(value) ? String(value) : value.toFixed(1); }
 
 function credentialLabel(configured: boolean, hint?: string): string {
   if (!configured) return "无需凭据";

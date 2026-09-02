@@ -151,7 +151,7 @@ async () => {
   });
 
   it("有产物的 lane 改用单个产物分，无产物 lane 仍保存任意文字选区", async () => {
-    const { service, source, sessions } = await setup();
+    const { service, source, sessions, scoreResults } = await setup();
     const created = await service.create(draft(source));
     const prepared = await service.prepareRun(created.experimentId, "prepare-annotations");
     for (const run of prepared.runs) {
@@ -245,6 +245,17 @@ async () => {
     expect(scorecard.annotations.output.marks.every((mark) => mark.variantId === textRun.testId)).toBe(true);
     expect(scorecard.variants[0]?.dimensionScores.output).toBe(86);
     expect(scorecard.variants[1]?.dimensionScores.output).toBeGreaterThan(0);
+    expect(scorecard.variants.map((variant) => variant.scoreResultId)).toEqual(["score:test-a", "score:test-b"]);
+    expect(scoreResults).toHaveLength(2);
+    expect(scoreResults[0]).toMatchObject({
+      source: { kind: "context_experiment", experimentId: created.experimentId, testId: "test-a" },
+      modelStudentId: "fixture-student",
+      agentConfiguration: { agentId: source.agentId, systemPrompt: "提示 A" },
+      completed: true,
+    });
+    scoreResults.splice(0);
+    await service.reconcileScoreResults();
+    expect(scoreResults).toHaveLength(2);
   });
 
   it("读取 V1 store 但拒绝修改或运行 legacy 记录", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
@@ -273,6 +284,7 @@ async function setup(options: { dir?: string; ignoreHistory?: boolean; provider?
   });
   const source = await agents.create(agentInput("source"));
   const sessions = new SessionRepository(dir);
+  const scoreResults: unknown[] = [];
   const evaluation: EvaluationAccess = { get: /** 构造「get」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => ({ result: {
     normallyCompleted: true, firstTokenLatencyMs: 20, totalDurationMs: 100,
@@ -280,7 +292,13 @@ async () => ({ result: {
     permissionViolationCount: 0, hasRepeatedToolCall: false,
     modelRoundCount: 1, toolCallCount: 0, totalContextTokens: 10, totalOutputTokens: 3,
     truncatedContextItemCount: 0,
-  } }), flush: async () => undefined, takeTrace: () => undefined };
+  } }), flush: async () => undefined, takeTrace: () => undefined,
+  scoreResultId: (source) => `score:${source.kind === "context_experiment" ? source.testId : source.turnId}`,
+  putScoreResult: async (input) => {
+    scoreResults.push(input);
+    return { ...input, schemaVersion: 1, scoreResultId: evaluation.scoreResultId(input.source), agentConfiguration: { ...input.agentConfiguration, configurationHash: "config" }, status: input.completed ? "complete" : "draft", createdAt: input.recordedAt ?? "now", updatedAt: input.recordedAt ?? "now" };
+  },
+  removeScoreResultsBySource: async () => undefined };
   const fixture = options.provider ?? new FixtureProvider();
   const previews = { previewTest: /** 构造「previewTest」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async (_prompt: string, test: ExperimentDraftV2["tests"][number]) =>
@@ -292,7 +310,7 @@ async (_prompt: string, test: ExperimentDraftV2["tests"][number]) =>
     new AnnotationWorksheetGenerator(models), previews,
     { worksheetModelDisplayName: fixture.student.name },
   );
-  return { service, agents, sessions, source };
+  return { service, agents, sessions, source, scoreResults };
 }
 
 /** 构造「draft」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */

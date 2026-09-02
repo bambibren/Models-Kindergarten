@@ -53,6 +53,24 @@ async () => {
 
 describe("ACP 会话语义", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {
+  it("不同模型 Round 可以复用 Provider item id", async () => {
+    const provider = new ReusedRoundItemIdProvider();
+    const updates: acp.SessionNotification[] = [];
+    const client = await openClient(await makeAgent(provider), updates);
+    const created = await client.agent.request(acp.methods.agent.session.new, {
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: testSessionMeta(),
+    });
+
+    await expect(sendPrompt(client, created.sessionId, "执行两轮模型调用", "turn-reused-item-id"))
+      .resolves.toMatchObject({ stopReason: "end_turn" });
+
+    expect(provider.requests).toBe(2);
+    expect(messageTexts(updates).some(([, text]) => text === "第二轮完成")).toBe(true);
+    await closeClient(client);
+  });
+
   it("实验 Session 通过同一 ACP 连接实时发送模型失败与重试轨迹", async () => {
     const events: LiveExecutionNotification[] = [];
     const agent = await makeAgent(new RetryOnceProvider(), undefined, undefined, true);
@@ -593,6 +611,49 @@ class RetryOnceProvider implements ModelProvider {
     yield { type: "output_item_started", item: { id: "retry-message", kind: "message" } };
     yield { type: "output_item_delta", itemId: "retry-message", delta: { kind: "text", text: "重试成功" } };
     yield { type: "output_item_completed", item: { id: "retry-message", kind: "message", text: "重试成功" } };
+    yield { type: "finish", reason: "stop" };
+  }
+}
+
+class ReusedRoundItemIdProvider implements ModelProvider {
+  readonly student = testStudent;
+  requests = 0;
+
+  serializeContext(fragment: ModelContextFragment): ModelContextSerialization {
+    return serializeTestContext(this.student, fragment);
+  }
+
+  async *stream(): AsyncIterable<ModelEvent> {
+    this.requests += 1;
+    yield { type: "output_item_started", item: { id: "chat:0:reasoning", kind: "reasoning" } };
+    const thought = this.requests === 1 ? "第一轮思考" : "第二轮思考";
+    yield { type: "output_item_delta", itemId: "chat:0:reasoning", delta: { kind: "text", text: thought } };
+    yield {
+      type: "output_item_completed",
+      item: { id: "chat:0:reasoning", kind: "reasoning", text: thought },
+    };
+
+    if (this.requests === 1) {
+      const call = { id: "round-one-list", name: "list_files", arguments: { path: "." } };
+      yield {
+        type: "output_item_started",
+        item: { id: "chat:1:tool:0", kind: "tool_call", callId: call.id, name: call.name },
+      };
+      yield { type: "output_item_completed", item: { id: "chat:1:tool:0", kind: "tool_call", call } };
+      yield { type: "finish", reason: "stop" };
+      return;
+    }
+
+    yield { type: "output_item_started", item: { id: "chat:1:message", kind: "message" } };
+    yield {
+      type: "output_item_delta",
+      itemId: "chat:1:message",
+      delta: { kind: "text", text: "第二轮完成" },
+    };
+    yield {
+      type: "output_item_completed",
+      item: { id: "chat:1:message", kind: "message", text: "第二轮完成" },
+    };
     yield { type: "finish", reason: "stop" };
   }
 }

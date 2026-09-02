@@ -13,6 +13,7 @@ import {
   type OutputAnnotationFacts,
   type PlanningAnnotationFacts,
   type UnderstandingAnnotationFacts,
+  type VariantFourDimensionScore,
 } from "@kindergarten/contracts";
 import type { AgentService } from "../agent/agent-service.js";
 import type { SessionRepository } from "../repository/session-repository.js";
@@ -21,6 +22,7 @@ import { ApiProblemError } from "../server/api-problem.js";
 import type { ModelStudentCatalog } from "../model/model-student-catalog.js";
 import type { ExperimentRepository } from "./experiment-repository.js";
 import type { EvaluationAccess } from "../evaluation/evaluation-module.js";
+import type { ScoreResultUpsertInput } from "@kindergarten/evaluation-contract";
 import type { AnnotationWorksheetGenerator, WorksheetRunEvidence } from "./annotation-worksheet-generator.js";
 import type { ContextPreviewService } from "./context-preview-service.js";
 import { EXPERIMENT_CONFIG, type ExperimentConfig } from "./experiment-config.js";
@@ -260,6 +262,7 @@ async delete(experimentId: string, ownerId = "local-admin"): Promise<{ removedEx
 () => undefined);
     }
     const removedExperimentSessionIds = await this.sessions.removeExperimentSessions(experimentId, ownerId);
+    await this.evaluation.removeScoreResultsBySource({ kind: "context_experiment", experimentId });
     await this.repository.remove(experimentId);
     return { removedExperimentSessionIds };
   }
@@ -351,12 +354,16 @@ async putAnnotations(
 (run) => ({ variantId: run.testId, text: run.answerTexts.join("\n") })),
       },
     });
+    const current = await this.repository.getScorecard(experimentId);
+    const scorecardId = current?.scorecardId ?? randomUUID();
     const variants = execution.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => {
       const dimensions = manual.byVariant[item.variantId] ?? {};
       const complete = manual.complete && dimensions.understanding !== undefined && dimensions.planning !== undefined && dimensions.output !== undefined;
+      const source = { kind: "context_experiment", experimentId, testId: item.variantId, scorecardId } as const;
       return {
         variantId: item.variantId,
+        scoreResultId: this.evaluation.scoreResultId(source),
         dimensionScores: { ...dimensions, execution: item.score },
         executionEvidence: { metrics: item.metrics, componentScores: item.components },
         ...(complete ? { totalScore: Math.round((dimensions.understanding! + dimensions.planning! + dimensions.output! + item.score) / 4) } : {}),
@@ -366,11 +373,10 @@ async putAnnotations(
 (item) => item.totalScore !== undefined);
     const ranking = complete ? makeRanking(variants.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => ({ variantId: item.variantId, totalScore: item.totalScore! }))) : undefined;
-    const current = await this.repository.getScorecard(experimentId);
     const now = new Date().toISOString();
     const scorecard: ExperimentScorecard = {
       schemaVersion: 1,
-      scorecardId: current?.scorecardId ?? randomUUID(),
+      scorecardId,
       experimentId,
       rubric: rubric(),
       annotations: { understanding, planning, output },
@@ -381,6 +387,11 @@ async putAnnotations(
       updatedAt: now,
     };
     await this.repository.putScorecard(scorecard);
+    for (const variant of variants) {
+      const snapshot = experiment.snapshots?.find((item) => item.testId === variant.variantId);
+      if (!snapshot) throw new ApiProblemError(409, "SCORECARD_INCOMPLETE", `Test ${variant.variantId} 缺少冻结配置`, false);
+      await this.evaluation.putScoreResult(experimentScoreResultInput(experiment, scorecard, snapshot, variant));
+    }
     return scorecard;
   }
 
@@ -396,9 +407,42 @@ private async outputArtifactVariantIds(experiment: ExperimentRecordV2): Promise<
   }
 
   /** 执行「scorecard」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-async scorecard(experimentId: string, ownerId = "local-admin"): Promise<ExperimentScorecard | undefined> {
+  async scorecard(experimentId: string, ownerId = "local-admin"): Promise<ExperimentScorecard | undefined> {
     await this.get(experimentId, ownerId);
     return this.repository.getScorecard(experimentId);
+  }
+
+  /** 为已有 V2 scorecard 补齐每个 lane 的原子评分；V1 无冻结配置时不做推断。 */
+  async reconcileScoreResults(): Promise<void> {
+    const experiments = new Map((await this.repository.list())
+      .filter((item): item is ExperimentRecordV2 => item.schemaVersion === 2)
+      .map((item) => [item.experimentId, item]));
+    for (const current of await this.repository.listScorecards()) {
+      const experiment = experiments.get(current.experimentId);
+      if (!experiment?.snapshots) continue;
+      try {
+        const variants = current.variants.map((variant) => ({
+          ...variant,
+          scoreResultId: this.evaluation.scoreResultId({
+            kind: "context_experiment",
+            experimentId: experiment.experimentId,
+            testId: variant.variantId,
+            scorecardId: current.scorecardId,
+          }),
+        }));
+        const scorecard = { ...current, variants };
+        for (const variant of variants) {
+          const snapshot = experiment.snapshots.find((item) => item.testId === variant.variantId);
+          if (!snapshot) throw new Error(`Test ${variant.variantId} 缺少冻结配置`);
+          await this.evaluation.putScoreResult(experimentScoreResultInput(experiment, scorecard, snapshot, variant));
+        }
+        if (variants.some((variant, index) => variant.scoreResultId !== current.variants[index]?.scoreResultId)) {
+          await this.repository.putScorecard(scorecard);
+        }
+      } catch (error) {
+        console.warn(`Experiment ${current.experimentId} 原子评分迁移已跳过：${publicMessage(error)}`);
+      }
+    }
   }
 
   /** 执行「generateAnnotationWorksheet」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -806,6 +850,42 @@ function snapshotFromPreview(
     },
     effectiveConfigurationHash: preview.effectiveConfigurationHash,
     frozenAt,
+  };
+}
+
+/** 将实验 lane 的冻结快照和四维分投影为独立原子评分，不读取当前 Agent 配置。 */
+function experimentScoreResultInput(
+  experiment: ExperimentRecordV2,
+  scorecard: ExperimentScorecard,
+  snapshot: ExperimentTestSnapshotV2,
+  variant: VariantFourDimensionScore,
+): ScoreResultUpsertInput {
+  return {
+    ownerId: experiment.ownerId,
+    modelStudentId: snapshot.model.modelStudentId,
+    source: {
+      kind: "context_experiment",
+      experimentId: experiment.experimentId,
+      testId: snapshot.testId,
+      scorecardId: scorecard.scorecardId,
+    },
+    sourceTitle: `${experiment.name} · Test ${snapshot.label}`,
+    agentConfiguration: {
+      agentSnapshotHash: snapshot.agentSnapshotHash,
+      agentId: snapshot.sourceAgent.agentId,
+      agentName: snapshot.sourceAgent.name,
+      systemPrompt: snapshot.policy.systemPrompt,
+      builtinTools: structuredClone(snapshot.policy.builtinTools),
+      builtinSkills: snapshot.policy.builtinSkillIds.map((skillId) => ({ skillId, enabled: true })),
+      skills: snapshot.policy.skillInstallationIds.map((skillInstallationId) => ({ skillInstallationId, enabled: true })),
+      mcps: structuredClone(snapshot.policy.mcps),
+      historyPolicy: structuredClone(snapshot.policy.historyPolicy),
+      memoryPolicy: structuredClone(snapshot.policy.memoryPolicy),
+      reasoning: structuredClone(snapshot.reasoning),
+    },
+    dimensionScores: structuredClone(variant.dimensionScores),
+    completed: scorecard.status === "complete" && variant.totalScore !== undefined,
+    recordedAt: scorecard.updatedAt,
   };
 }
 /** 执行「runtimeFactsFromTurn」主流程，传播取消与失败并在结束时清理临时资源。 */

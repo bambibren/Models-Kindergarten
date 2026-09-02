@@ -572,6 +572,14 @@ private async requireSession(id: string, cwd: string, maxTurns?: number): Promis
   }
 }
 
+/**
+ * Provider item id 只保证在单次模型流内唯一。
+ * Round 前缀隔离不同模型调用；同一 Round 的不同 Attempt 由重试开始时的整体清理隔离。
+ */
+function scopedModelItemId(round: number, itemId: string): string {
+  return `${round}\u0000${itemId}`;
+}
+
 class TurnProjection implements RunObserver {
   readonly streamingSessionEntries: SessionEntry[] = [];
   private readonly messages = new Map<number, SessionMessageEntry>();
@@ -806,8 +814,9 @@ executionFacts(): Partial<import("../repository/session-types.js").TurnExecution
 
   /** 记录模型 item 的显式开始；工具请求一旦可稳定关联就立即投影为 pending。 */
 async modelOutputItemStarted(round: number, item: ModelOutputItemStarted): Promise<void> {
-    if (this.modelItems.has(item.id)) throw new Error(`模型输出 item 重复开始: ${item.id}`);
-    this.modelItems.set(item.id, {
+    const scopedId = scopedModelItemId(round, item.id);
+    if (this.modelItems.has(scopedId)) throw new Error(`模型输出 item 重复开始: ${item.id}`);
+    this.modelItems.set(scopedId, {
       round,
       kind: item.kind,
       ...(item.kind === "tool_call" ? { callId: item.callId } : {}),
@@ -857,7 +866,7 @@ async modelOutputItemStarted(round: number, item: ModelOutputItemStarted): Promi
 
   /** 文本增量沿用 ACP chunk；工具参数只在 Remote 聚合，避免把大参数逐片复制到 Browser。 */
 async modelOutputItemDelta(round: number, itemId: string, delta: ModelOutputItemDelta): Promise<void> {
-    const state = this.modelItems.get(itemId);
+    const state = this.modelItems.get(scopedModelItemId(round, itemId));
     if (!state || state.round !== round || state.completed) throw new Error(`模型输出 item 增量无有效活动项: ${itemId}`);
     if (state.kind === "message") {
       if (delta.kind !== "text") throw new Error(`消息 item 收到非文本增量: ${itemId}`);
@@ -870,7 +879,7 @@ async modelOutputItemDelta(round: number, itemId: string, delta: ModelOutputItem
 
   /** item 完成时立刻关闭对应消息，而不是等待整个模型 Round 结束。 */
 async modelOutputItemCompleted(round: number, item: ModelOutputItemCompleted): Promise<void> {
-    const state = this.modelItems.get(item.id);
+    const state = this.modelItems.get(scopedModelItemId(round, item.id));
     if (!state || state.round !== round || state.kind !== item.kind || state.completed) {
       throw new Error(`模型输出 item 完成边界无效: ${item.id}`);
     }

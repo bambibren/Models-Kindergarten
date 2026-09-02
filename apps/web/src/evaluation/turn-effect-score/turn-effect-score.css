@@ -1,0 +1,52 @@
+/* Hallmark · existing MK warm-neutral workbench · single completed Turn annotation. */
+body:has(.turn-effect-score-shell) { overflow: hidden; background: #f6f6f3; }
+.turn-effect-score-shell { color: #2c2d29; font-family: "PingFang SC", "Noto Sans SC", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.turn-effect-score-shell .save { min-width: 94px; justify-content: center; }
+.turn-effect-score-shell .save:disabled { border-color: #d5d5cf; color: #92948c; background: #ecece8; opacity: 1; }
+.turn-effect-score-shell .save.saved { border-color: #cbd8c7; color: #557052; background: #edf3eb; }
+.turn-effect-score-shell .save.error { border-color: #d6aaa5; color: #864943; background: #f7e9e7; }
+.turn-score-task { grid-template-columns: minmax(0, 1fr) auto auto; }
+.turn-score-task code { max-width: 180px; overflow: hidden; color: #7a7c75; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.single-turn-card { width: 100%; min-width: 0; overflow: hidden; border: 1px solid #deded9; border-radius: 11px; background: #fff; }
+.single-turn-card .experiment-chat-content { width: min(760px, 100%); min-height: 360px; padding: 26px 24px 32px; }
+.single-turn-card .assistant-message:last-child { margin-bottom: 0; }
+.single-score { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 5px; padding: 13px 14px; border-bottom: 1px solid #e6e6e1; background: #fafaf8; }
+.single-score span { color: #73756e; font-size: 9px; font-weight: 650; }
+.single-score strong { color: #30312d; font-size: 24px; line-height: 1; }
+.single-score small { color: #92948c; font-size: 8px; }
+.execution-single { padding: 0 14px 14px; }
+.execution-single > .single-score { margin: 0 -14px 14px; }
+.output-single > .single-score { border-bottom: 0; }
+.turn-understanding-map { align-self: start; }
+.turn-understanding-map > .empty-annotation { min-height: 180px; display: grid; place-items: center; margin: 0; }
+.turn-requirement-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 58px; padding: 10px 12px; border-bottom: 1px solid #e9e9e4; }
+.turn-requirement-row:last-child { border-bottom: 0; }
+.turn-requirement-row p { margin: 0; color: #4f514b; font-size: 9px; line-height: 1.55; }
+.turn-requirement-row > span { display: flex; gap: 5px; }
+.turn-requirement-row button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; border: 1px solid #dcdcd7; border-radius: 6px; color: #777971; background: #fff; font-size: 8px; }
+.turn-requirement-row button:hover { color: #3f413c; background: #f5f5f2; }
+.turn-requirement-row button.met.active { border-color: #bfd0ba; color: #486344; background: #edf4eb; }
+.turn-requirement-row button.missed.active { border-color: #ddbbb7; color: #8a4b45; background: #f8ecea; }
+.turn-summary .radar-series { fill: #516b75; stroke: #516b75; }
+.turn-dimension-ledger article { grid-template-columns: minmax(0, 1fr) auto auto; }
+.turn-dimension-ledger article > span { font-size: 9px; }
+.turn-dimension-ledger article > strong { font-size: 18px; }
+.turn-dimension-ledger article > small { align-self: end; padding-bottom: 2px; }
+.turn-save-message { position: sticky; z-index: 14; bottom: 0; width: min(1180px, calc(100% - 36px)); margin: 12px auto 0; padding: 9px 11px; border: 1px solid #d9d9d4; border-radius: 8px 8px 0 0; color: #71736c; background: rgb(250 250 248 / .96); font-size: 8px; text-align: right; backdrop-filter: blur(12px); }
+.turn-save-message.error { color: #8a4b45; }
+.turn-score-state { color: #2c2d29; background: #f6f6f3; }
+.turn-score-state > div { border-color: #deded9; background: #fff; }
+.turn-score-state p { color: #777971; }
+.turn-score-state button { border-color: #d9d9d4; color: #555750; background: #f7f7f4; }
+
+@media (max-width: 760px) {
+  .turn-effect-score-shell > header { grid-template-columns: 34px minmax(0, 1fr) auto; }
+  .turn-effect-score-shell .save { display: inline-flex; min-width: 34px; padding-inline: 8px; }
+  .turn-score-task { grid-template-columns: 1fr auto; }
+  .turn-score-task code { display: none; }
+  .turn-requirement-row { align-items: start; grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-effect-score-shell *, .turn-effect-score-shell *::before, .turn-effect-score-shell *::after { transition-duration: .01ms !important; }
+}
