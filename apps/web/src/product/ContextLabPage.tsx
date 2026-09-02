@@ -2,6 +2,8 @@ import { Beaker, History, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type {
   AgentRecord,
+  ArtifactMentionInput,
+  ArtifactRecord,
   ContextPreviewResponseV2,
   ExperimentDraftV2,
   McpInstallationView,
@@ -26,6 +28,9 @@ import {
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { ProductNav } from "./ProductNav.js";
 import { useResource } from "./use-resource.js";
+import { ArtifactMentionTags } from "../components/composer/ArtifactMentionTags.js";
+import { mentionInputs } from "../components/composer/composer-mention.js";
+import { readContextLabEntryDraft } from "./context-lab-entry-draft.js";
 
 interface PreviewState {
   fingerprint: string;
@@ -37,16 +42,18 @@ interface PreviewState {
 /** 渲染「ContextLabPage」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ContextLabPage() {
   const turnId = new URLSearchParams(location.search).get("turnId") ?? undefined;
+  const [entryDraft] = useState(() => turnId ? undefined : readContextLabEntryDraft(sessionStorage, location.search));
   const load = useCallback(/** 缓存「load」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
 async () => {
-    const [agents, models, options, skills, mcps, source] = await Promise.all([
+    const [agents, models, options, skills, mcps, source, entryArtifacts] = await Promise.all([
       controlApi.agents(), controlApi.models(), controlApi.capabilityOptions(),
       controlApi.skills(), controlApi.mcps(),
       turnId ? controlApi.turnContext(turnId) : Promise.resolve(undefined),
+      resolveEntryArtifacts(entryDraft?.artifactMentions ?? []),
     ]);
     return { agents: agents.items, models: models.items.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.status === "ready"), options, skills: skills.items, mcps, source };
-  }, [turnId]);
+(item) => item.status === "ready"), options, skills: skills.items, mcps, source, entryPrompt: entryDraft?.promptText, entryArtifacts };
+  }, [entryDraft, turnId]);
   const { state, retry } = useResource(load);
   return <main className="product-page"><ProductNav active="context" />{
     state.phase === "loading" ? <LoadingState label={turnId ? "正在导入 Turn 配置" : "正在读取实验能力"} />
@@ -56,13 +63,15 @@ async () => {
 }
 
 /** 渲染「ContextLabReady」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-function ContextLabReady({ agents, models, options, skills, mcps, source }: {
+function ContextLabReady({ agents, models, options, skills, mcps, source, entryPrompt, entryArtifacts }: {
   agents: AgentRecord[];
   models: ModelStudentSummary[];
   options: CapabilityOptions;
   skills: SkillInstallation[];
   mcps: McpInstallationView[];
   source: TurnContextSnapshot | undefined;
+  entryPrompt: string | undefined;
+  entryArtifacts: ArtifactRecord[];
 }) {
   const initialAgent = agents.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.agentId === source?.turn.agentId) ?? agents[0];
@@ -75,7 +84,8 @@ function ContextLabReady({ agents, models, options, skills, mcps, source }: {
   const initialPolicy = source?.sourcePolicy ?? policyFromAgent(initialAgent);
   const importedReasoning = source?.resolvedReasoning?.resolvedProfile ?? "auto";
   const [name, setName] = useState(source ? "来源 Turn 配置对照" : "上下文配置对照");
-  const [prompt, setPrompt] = useState(source?.promptText ?? "");
+  const [prompt, setPrompt] = useState(source?.promptText ?? entryPrompt ?? "");
+  const [mentions, setMentions] = useState<ArtifactRecord[]>(entryArtifacts);
   const [lanes, setLanes] = useState<ContextLabLane[]>(/** 执行「[lanes, setLanes]」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 () => initialContextLanes(initialAgent, initialPolicy, initialModelId, importedReasoning));
   const [activeTestId, setActiveTestId] = useState(/** 执行「[activeTestId, setActiveTestId]」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -88,7 +98,7 @@ function ContextLabReady({ agents, models, options, skills, mcps, source }: {
 (item) => item.testId === activeTestId) ?? lanes[0];
   const fingerprints = useMemo(/** 缓存「fingerprints」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
 () => Object.fromEntries(lanes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(lane) => [lane.testId, fingerprint(prompt, lane)])), [lanes, prompt]);
+(lane) => [lane.testId, fingerprint(prompt, lane, mentionInputs(mentions))])), [lanes, mentions, prompt]);
 
   useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
 () => {
@@ -99,7 +109,7 @@ function ContextLabReady({ agents, models, options, skills, mcps, source }: {
         const currentFingerprint = fingerprints[lane.testId]!;
         setPreviews(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (current) => ({ ...current, [lane.testId]: { fingerprint: currentFingerprint, loading: true } }));
-        void previewLane(prompt, lane).then(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+        void previewLane(prompt, lane, mentionInputs(mentions)).then(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
 (value) => {
           if (!cancelled) setPreviews(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (current) => ({ ...current, [lane.testId]: { fingerprint: currentFingerprint, loading: false, value } }));
@@ -111,7 +121,7 @@ function ContextLabReady({ agents, models, options, skills, mcps, source }: {
       }
     }, 250);
     return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => { cancelled = true; window.clearTimeout(timer); };
-  }, [fingerprints, lanes, prompt]);
+  }, [fingerprints, lanes, mentions, prompt]);
 
   /** 执行「importAgent」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function importAgent(agentId: string) {
@@ -159,11 +169,11 @@ function removeLane(testId: string) {
   /** 执行「refreshPreview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async function refreshPreview() {
     if (!activeLane) return;
-    const currentFingerprint = fingerprint(prompt, activeLane);
+    const currentFingerprint = fingerprint(prompt, activeLane, mentionInputs(mentions));
     setPreviews(/** 执行「refreshPreview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (current) => ({ ...current, [activeLane.testId]: { fingerprint: currentFingerprint, loading: true } }));
     try {
-      const value = await previewLane(prompt, activeLane);
+      const value = await previewLane(prompt, activeLane, mentionInputs(mentions));
       setPreviews(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (current) => ({ ...current, [activeLane.testId]: { fingerprint: currentFingerprint, loading: false, value } }));
     } catch (error) {
@@ -178,6 +188,7 @@ async function submit(event: FormEvent) {
     try {
       const input: ExperimentDraftV2 = {
         schemaVersion: 2, name, promptText: prompt,
+        ...(mentions.length > 0 ? { artifactMentions: mentionInputs(mentions) } : {}),
         ...(source ? { sourceRef: { kind: "turn", id: source.turn.turnId } } : {}),
         toolUseWasExpected: toolExpected,
         tests: lanes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
@@ -213,7 +224,9 @@ async function submit(event: FormEvent) {
       <section className="product-context-prompt">
         <label><span>实验名称</span><input required value={name} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setName(event.target.value)} /></label>
-        <label><span>公共用户提示词</span><textarea required rows={4} value={prompt} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+        <label><span>公共用户提示词</span><ArtifactMentionTags artifacts={mentions} onRemove={(artifactId) => setMentions(
+          (current) => current.filter((item) => item.artifactId !== artifactId),
+        )} /><textarea required rows={4} value={prompt} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setPrompt(event.target.value)} placeholder="输入所有 Test 都要回答的问题…" /></label>
         <div><label className="product-checkbox"><input checked={toolExpected} type="checkbox" onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setToolExpected(event.target.checked)} /><span>这个任务预期必须使用 Tool</span></label></div>
@@ -237,7 +250,7 @@ async function submit(event: FormEvent) {
             <LaneModelReasoning lane={activeLane} models={models} onModelChange={changeModel} onReasoningChange={/** 处理「onReasoningChange」事件，校验归属后再推进状态且避免重复提交。 */
 (reasoningProfile) => patchLane({ reasoningProfile })} />
             <div className="product-policy-stack"><AgentPolicyFields builtinSkills={options.builtinSkills} builtinToolIds={options.builtinTools} mcps={mcps} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
-(policy) => patchLane({ policy })} readOnly={false} showHistory={false} showMemory={false} skills={skills} value={activeLane.policy} /></div>
+(policy) => patchLane({ policy })} readOnly={false} runtimeBaseInstruction={options.runtimeBaseInstruction} showHistory={false} showMemory={false} skills={skills} value={activeLane.policy} /></div>
             <HistoryFact policy={activeLane.policy.historyPolicy} />
             <ContextPreviewPanel error={visiblePreview?.error} loading={visiblePreview?.loading} onRefresh={/** 处理「onRefresh」事件，校验归属后再推进状态且避免重复提交。 */
 () => void refreshPreview()} value={visiblePreview?.value} />
@@ -276,13 +289,22 @@ function modelOption(model: ModelStudentSummary) {
   return <option key={model.modelStudentId} value={model.modelStudentId}>{joinMetadata([model.displayName, formatContextWindow(model.contextWindowTokens), model.model])}</option>;
 }
 /** 执行「fingerprint」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function fingerprint(prompt: string, lane: ContextLabLane): string { return JSON.stringify({ prompt, lane }); }
+function fingerprint(prompt: string, lane: ContextLabLane, artifactMentions: ArtifactMentionInput[]): string { return JSON.stringify({ prompt, artifactMentions, lane }); }
 /** 执行「previewLane」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function previewLane(promptText: string, lane: ContextLabLane) {
-  return controlApi.contextPreview({ schemaVersion: 2, promptText, test: {
+function previewLane(promptText: string, lane: ContextLabLane, artifactMentions: ArtifactMentionInput[]) {
+  return controlApi.contextPreview({ schemaVersion: 2, promptText, ...(artifactMentions.length ? { artifactMentions } : {}), test: {
     testId: lane.testId, label: lane.label, sourceAgent: lane.sourceAgent,
     modelStudentId: lane.modelStudentId, reasoningProfile: lane.reasoningProfile, policy: lane.policy,
   } });
+}
+/** 按首页交接顺序重新读取当前账号 Artifact，展示字段不信任 sessionStorage。 */
+async function resolveEntryArtifacts(mentions: ArtifactMentionInput[]): Promise<ArtifactRecord[]> {
+  return Promise.all(mentions.map(async ({ artifactId }) => {
+    const result = await controlApi.artifacts(artifactId, "all");
+    const artifact = result.items.find((item) => item.artifactId === artifactId);
+    if (!artifact) throw new Error(`首页引用的 Artifact 不存在或无权访问：${artifactId}`);
+    return artifact;
+  }));
 }
 /** 把未知异常转换为「errorMessage」文本，避免错误序列化过程再次抛出。 */
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }

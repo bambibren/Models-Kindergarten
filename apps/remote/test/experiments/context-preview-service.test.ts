@@ -14,16 +14,17 @@ async () => {
       historyPolicy: { mode: "recent_turns" as const, maxTurns: 6 },
       memoryPolicy: { mode: "off" as const },
     };
+    const buildObserved = vi.fn(/** 构造「buildObserved」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+    async () => ({
+      messages: [{ role: "user", content: "生成页面" }],
+      messageTraces: [], segments: [], truncatedSourceIds: [],
+    }));
     const resolver = {
       preview: vi.fn(/** 构造「preview」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 async () => ({
         model: fixture,
         agent: { systemPrompt: policy.systemPrompt },
-        context: { buildObserved: vi.fn(/** 构造「buildObserved」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async () => ({
-          messages: [{ role: "user", content: "生成页面" }],
-          messageTraces: [], segments: [], truncatedSourceIds: [],
-        })) },
+        context: { buildObserved },
         tools: { registry: { definitions: [] } },
         agentSnapshotHash: "agent-hash", capabilityHash: "capability-hash",
       })),
@@ -36,15 +37,41 @@ async () => ({
           reasoning: fixture.reasoningCapability! },
       })),
     } as unknown as RuntimeCapabilityResolver;
-    const service = new ContextPreviewService(resolver);
+    const artifacts = {
+      resolveMentions: vi.fn(async () => [{
+        artifactId: "artifact_12345678",
+        uri: "artifact://artifact_12345678",
+        displayName: "首页海报",
+        kind: "file" as const,
+        mimeType: "image/png",
+        byteLength: 42,
+      }]),
+    };
+    const service = new ContextPreviewService(resolver, artifacts);
     const test = {
       testId: "test-a", label: "A" as const,
       sourceAgent: { agentId: "agent-1", name: "Agent", updatedAt: "2026-08-18T12:00:00.000Z" },
       modelStudentId: fixture.student.id, reasoningProfile: "auto" as const, policy,
     };
-    const result = await service.preview({ schemaVersion: 2, promptText: "生成页面", test });
+    const result = await service.preview({
+      schemaVersion: 2,
+      promptText: "生成页面",
+      artifactMentions: [{ artifactId: "artifact_12345678" }],
+      test,
+    });
 
-    expect(resolver.preview).toHaveBeenCalledWith("local-admin", policy, "生成页面", fixture.student.id);
+    expect(artifacts.resolveMentions).toHaveBeenCalledWith(["artifact_12345678"], "local-admin");
+    expect(resolver.preview).toHaveBeenCalledWith(
+      "local-admin",
+      policy,
+      expect.stringContaining('"artifactId":"artifact_12345678"'),
+      fixture.student.id,
+    );
+    expect(buildObserved).toHaveBeenCalledWith(
+      [],
+      expect.stringContaining('"artifactId":"artifact_12345678"'),
+      expect.any(AbortSignal),
+    );
     expect(result.schemaVersion).toBe(2);
     expect(result.contextSummary.items[0]?.raw?.value).toContain("【每轮响应契约】");
     expect(result.providerInput.value).toContain("【Skill 使用协议】");

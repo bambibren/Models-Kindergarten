@@ -42,6 +42,24 @@ async () => {
     expect(await service.binding(experiment.experimentId, "test-a")).toBeUndefined();
   });
 
+  it("创建和冻结实验时保留并预检 Artifact Mention", async () => {
+    const { service, source, previewCalls, resolvedPrompts } = await setup();
+    const input = draft(source);
+    input.artifactMentions = [{ artifactId: "artifact_12345678" }];
+
+    const created = await service.create(input);
+    expect(created.artifactMentions).toEqual([{ artifactId: "artifact_12345678" }]);
+    expect(resolvedPrompts).toEqual([{
+      promptText: "完成任务",
+      artifactMentions: [{ artifactId: "artifact_12345678" }],
+      ownerId: "local-admin",
+    }]);
+
+    await service.prepareRun(created.experimentId, "prepare-artifact");
+    expect(previewCalls).toHaveLength(2);
+    expect(previewCalls.every((item) => item.artifactMentions[0]?.artifactId === "artifact_12345678")).toBe(true);
+  });
+
   it("prepare-run 原子冻结 Test 快照并按 Idempotency-Key 幂等", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const { service, source } = await setup();
@@ -300,9 +318,19 @@ async () => ({ result: {
   },
   removeScoreResultsBySource: async () => undefined };
   const fixture = options.provider ?? new FixtureProvider();
-  const previews = { previewTest: /** 构造「previewTest」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
-async (_prompt: string, test: ExperimentDraftV2["tests"][number]) =>
-    preview(test, options.ignoreHistory === true) } as ContextPreviewService;
+  const previewCalls: Array<{ artifactMentions: Array<{ artifactId: string }> }> = [];
+  const resolvedPrompts: Array<{ promptText: string; artifactMentions: Array<{ artifactId: string }>; ownerId: string }> = [];
+  const previews = {
+    previewTest: /** 构造「previewTest」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
+    async (_prompt: string, test: ExperimentDraftV2["tests"][number], _ownerId: string, artifactMentions: Array<{ artifactId: string }> = []) => {
+      previewCalls.push({ artifactMentions: structuredClone(artifactMentions) });
+      return preview(test, options.ignoreHistory === true);
+    },
+    resolvePrompt: async (promptText: string, artifactMentions: Array<{ artifactId: string }>, ownerId: string) => {
+      resolvedPrompts.push({ promptText, artifactMentions: structuredClone(artifactMentions), ownerId });
+      return promptText;
+    },
+  } as ContextPreviewService;
   const models = new ModelStudentCatalog(fixture, "ready");
   const service = new ExperimentService(
     new ExperimentRepository(join(dir, "experiments.json"), join(dir, "scorecards.json")),
@@ -310,7 +338,7 @@ async (_prompt: string, test: ExperimentDraftV2["tests"][number]) =>
     new AnnotationWorksheetGenerator(models), previews,
     { worksheetModelDisplayName: fixture.student.name },
   );
-  return { service, agents, sessions, source, scoreResults };
+  return { service, agents, sessions, source, scoreResults, previewCalls, resolvedPrompts };
 }
 
 /** 构造「draft」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */

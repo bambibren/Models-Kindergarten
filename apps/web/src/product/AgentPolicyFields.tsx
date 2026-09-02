@@ -22,6 +22,7 @@ export interface AgentPolicyValue {
 /** 渲染「AgentPolicyFields」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function AgentPolicyFields({
   value,
+  runtimeBaseInstruction,
   builtinToolIds,
   builtinSkills,
   skills,
@@ -32,6 +33,7 @@ export function AgentPolicyFields({
   showMemory = true,
 }: {
   value: AgentPolicyValue;
+  runtimeBaseInstruction: string;
   builtinToolIds: string[];
   builtinSkills: BuiltinSkillOption[];
   skills: SkillInstallation[];
@@ -79,9 +81,10 @@ function toggleMcp(mcp: McpInstallationView, enabled: boolean) {
 
   return <>
     <section className="product-policy-section">
-      <header><ShieldCheck size={16} /><div><strong>Agent 基础指令</strong><small>这是可编辑部分；Runtime 固定指令由运行时追加</small></div></header>
-      <label><span>系统提示</span><textarea readOnly={readOnly} required rows={7} value={value.systemPrompt} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+      <header><ShieldCheck size={16} /><div><strong>Agent 指令</strong><small>自定义指令可编辑；底层规则由 Runtime 固定追加</small></div></header>
+      <label><span>Agent 自定义指令（可编辑）</span><textarea readOnly={readOnly} required rows={4} value={value.systemPrompt} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => patch({ systemPrompt: event.target.value })} /></label>
+      <label><span>Runtime 固定指令（只读）</span><textarea aria-label="Runtime 固定指令" className="product-runtime-instructions" readOnly rows={5} value={runtimeBaseInstruction} /></label>
     </section>
     <section className="product-policy-section">
       <header><Wrench size={16} /><div><strong>Built-in Tools</strong><small>启用状态与权限共同决定当前模型可见和可执行的能力</small></div></header>

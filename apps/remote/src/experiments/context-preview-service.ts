@@ -3,24 +3,31 @@ import {
   parseContextPreviewInputV2,
   stableJson,
   type ContextPreviewResponseV2,
+  type ArtifactMention,
+  type ArtifactMentionInput,
   type ExperimentTestDraftV2,
 } from "@kindergarten/contracts";
 import { buildContextSummary, buildRuntimeSystemPrompt, serializeModelInput } from "../runtime/agent-runtime.js";
 import type { RuntimeCapabilityResolver } from "../capability/runtime-capability-resolver.js";
 import { resolveReasoning } from "../reasoning/reasoning-resolver.js";
 import { ApiProblemError } from "../server/api-problem.js";
+import { promptWithArtifacts } from "../artifacts/artifact-prompt.js";
+
+interface ArtifactMentionResolver {
+  resolveMentions(ids: string[], ownerId: string): Promise<ArtifactMention[]>;
+}
 
 /** 创建页预览与 prepare-run 共用这一条真实 Runtime/serializer 路径。 */
 export class ContextPreviewService {
   /** 初始化「ContextPreviewService」所需依赖，不在构造阶段启动不可回收的后台任务。 */
-constructor(private readonly resolver: RuntimeCapabilityResolver, ..._legacy: unknown[]) {}
+constructor(private readonly resolver: RuntimeCapabilityResolver, private readonly artifacts?: ArtifactMentionResolver, ..._legacy: unknown[]) {}
 
   /** 执行「preview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async preview(raw: unknown, ownerId = "local-admin"): Promise<ContextPreviewResponseV2> {
     let input;
     try { input = parseContextPreviewInputV2(raw); }
     catch (error) { throw invalid(publicMessage(error)); }
-    return this.previewTest(input.promptText, input.test, ownerId);
+    return this.previewTest(input.promptText, input.test, ownerId, input.artifactMentions ?? []);
   }
 
   /** 执行「previewTest」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -28,8 +35,10 @@ async previewTest(
     promptText: string,
     test: ExperimentTestDraftV2,
     ownerId = "local-admin",
+    artifactMentions: ArtifactMentionInput[] = [],
   ): Promise<ContextPreviewResponseV2> {
-    const resolved = await this.resolver.preview(ownerId, test.policy, promptText, test.modelStudentId);
+    const effectivePrompt = await this.resolvePrompt(promptText, artifactMentions, ownerId);
+    const resolved = await this.resolver.preview(ownerId, test.policy, effectivePrompt, test.modelStudentId);
     const summary = this.resolver.modelSummary(test.modelStudentId, ownerId);
     if (!summary || summary.status !== "ready") {
       throw new ApiProblemError(409, "EXPERIMENT_NOT_RUNNABLE", "ModelStudent 不可用", false);
@@ -65,7 +74,7 @@ async previewTest(
       native: /** 执行「native」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (profile) => resolved.model.nativeReasoning?.(profile) ?? {},
     });
-    const built = await resolved.context.buildObserved([], promptText, new AbortController().signal);
+    const built = await resolved.context.buildObserved([], effectivePrompt, new AbortController().signal);
     const tools = structuredClone(resolved.tools.registry.definitions);
     const systemPrompt = buildRuntimeSystemPrompt(resolved.agent.systemPrompt);
     const contextSummary = buildContextSummary("context-preview", resolved.model, systemPrompt, tools, built);
@@ -103,6 +112,14 @@ async previewTest(
         actualHistoryTurns: 0,
       },
     };
+  }
+
+  /** 在预检和真实 ACP Turn 前使用同一份 Remote 解析结果，保证冻结哈希可复现。 */
+  async resolvePrompt(promptText: string, artifactMentions: ArtifactMentionInput[], ownerId: string): Promise<string> {
+    if (artifactMentions.length === 0) return promptText;
+    if (!this.artifacts) throw new ApiProblemError(503, "EXPERIMENT_PREVIEW_UNAVAILABLE", "上下文实验暂不支持 Artifact 引用", true);
+    const mentions = await this.artifacts.resolveMentions(artifactMentions.map((item) => item.artifactId), ownerId);
+    return promptWithArtifacts(promptText, mentions);
   }
 }
 

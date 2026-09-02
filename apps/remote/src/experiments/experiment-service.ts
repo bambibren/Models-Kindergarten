@@ -48,6 +48,10 @@ async create(raw: unknown, ownerId = "local-admin"): Promise<ExperimentRecordV2>
     catch (error) { throw new ApiProblemError(400, "VALIDATION_FAILED", publicMessage(error), false); }
     const worksheetModelStudentId = this.configuredWorksheetModelStudentId(ownerId);
     await this.validateDraftDependencies(input, ownerId);
+    if (input.artifactMentions?.length) {
+      if (!this.previews) throw new ApiProblemError(503, "EXPERIMENT_PREVIEW_UNAVAILABLE", "上下文实验预检服务不可用", true);
+      await this.previews.resolvePrompt(input.promptText, input.artifactMentions, ownerId);
+    }
     const now = new Date().toISOString();
     const record: ExperimentRecordV2 = {
       schemaVersion: 2,
@@ -56,6 +60,7 @@ async create(raw: unknown, ownerId = "local-admin"): Promise<ExperimentRecordV2>
       name: input.name,
       status: "draft",
       promptText: input.promptText,
+      ...(input.artifactMentions?.length ? { artifactMentions: input.artifactMentions } : {}),
       ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
       toolUseWasExpected: input.toolUseWasExpected,
       worksheetModelStudentId,
@@ -77,14 +82,19 @@ async update(experimentId: string, raw: unknown, ownerId = "local-admin"): Promi
     catch (error) { throw new ApiProblemError(400, "VALIDATION_FAILED", publicMessage(error), false); }
     const worksheetModelStudentId = this.configuredWorksheetModelStudentId(ownerId);
     await this.validateDraftDependencies(input, ownerId);
+    if (input.artifactMentions?.length) {
+      if (!this.previews) throw new ApiProblemError(503, "EXPERIMENT_PREVIEW_UNAVAILABLE", "上下文实验预检服务不可用", true);
+      await this.previews.resolvePrompt(input.promptText, input.artifactMentions, ownerId);
+    }
     return this.repository.update(experimentId, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (record) => {
       if (record.schemaVersion !== 2) throw legacyReadOnly();
-      const { sourceRef: _sourceRef, ...withoutSourceRef } = record;
+      const { sourceRef: _sourceRef, artifactMentions: _artifactMentions, ...withoutSourceRef } = record;
       return {
         ...withoutSourceRef,
         name: input.name,
         promptText: input.promptText,
+        ...(input.artifactMentions?.length ? { artifactMentions: input.artifactMentions } : {}),
         ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
         toolUseWasExpected: input.toolUseWasExpected,
         worksheetModelStudentId,
@@ -104,7 +114,7 @@ async prepareRun(experimentId: string, idempotencyKey: string, ownerId = "local-
     }
     if (!this.previews) throw new ApiProblemError(503, "EXPERIMENT_PREVIEW_UNAVAILABLE", "上下文预检服务不可用", true);
     const previews = await Promise.all(experiment.tests.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(test) => this.previews!.previewTest(experiment.promptText, test, ownerId)));
+(test) => this.previews!.previewTest(experiment.promptText, test, ownerId, experiment.artifactMentions ?? [])));
     const diagnostics = previews.flatMap(/** 执行「diagnostics」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (preview, index) => preview.diagnostics.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => ({

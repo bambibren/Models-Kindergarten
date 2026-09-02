@@ -107,6 +107,7 @@ export interface SessionTurnPage {
 export interface CapabilityOptions {
   builtinTools: string[];
   builtinSkills: BuiltinSkillOption[];
+  runtimeBaseInstruction: string;
   readySkillInstallationIds: string[];
   mcps: Array<{ installationId: string; tools: string[]; resources: string[] }>;
 }

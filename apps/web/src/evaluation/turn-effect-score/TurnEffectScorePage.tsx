@@ -10,7 +10,6 @@ import {
   Route,
   Save,
   ShieldCheck,
-  X,
 } from "lucide-react";
 import { calculateExecutionScores } from "@kindergarten/contracts";
 import type {
@@ -139,11 +138,6 @@ function TurnEffectScorePageInner({ record, sessionId, turnId }: {
     changed();
   }
 
-  function setVerdict(requirementId: string, verdict: Exclude<RequirementVerdict, "unmarked">): void {
-    setRequirementVerdicts((current) => ({ ...current, [requirementId]: verdict }));
-    changed();
-  }
-
   async function save(): Promise<void> {
     if (!dirty || saveState === "saving") return;
     setSaveState("saving");
@@ -214,27 +208,15 @@ function TurnEffectScorePageInner({ record, sessionId, turnId }: {
       <div className="single-turn-card execution-single"><div className="single-score"><span>Runtime 自动评分</span><strong>{executionScore}</strong><small>/ 100</small></div><ExecutionTrace execution={{ ...toDemoExecution({ variantId: turnId, status: "completed" }, record), score: executionScore }} /></div>
     </section>}
 
-    {tab === "understanding" && <section className="annotation-panel understanding-panel"><div className="understanding-workspace">
-      <SectionHeading icon={<BrainCircuit size={16} />} title="需求理解能力 打分" detail="候选项仅从用户 Prompt 的显式分行提取；先选择真实需求，再逐项判断该 Turn 是否理解。" />
-      <RequirementSelector
-        requirements={requirements.map((item) => ({ id: item.requirementId, label: item.label, sources: ["用户 Prompt"] }))}
-        selectedIds={selectedRequirementIds}
-        hasOtherRequirement={hasOtherRequirement}
-        listedRequirementsWeight={listedRequirementsWeight}
-        onToggle={toggleRequirement}
-        onOtherRequirementToggle={() => { setHasOtherRequirement((current) => !current); changed(); }}
-        onWeightChange={(value) => { setListedRequirementsWeight(value); changed(); }}
-        weightMin={1}
-        weightMax={99}
-      />
-      <div className="mapping-heading"><span>TURN REQUIREMENT MAPPING</span><strong>所选 Turn 理解判断</strong><p>每条需求由您明确标记“已理解”或“未理解”，不从最终回答反推。</p></div>
-      <div className="single-turn-card turn-understanding-map">
-        <div className="single-score"><span>当前理解得分</span><strong>{understandingScore}</strong><small>/ 100</small></div>
-        {understanding.length === 0 ? <p className="empty-annotation">请先选择真实需求</p> : understanding.map((item) => <div className="turn-requirement-row" key={item.requirementId}>
-          <p>{item.label}</p><span><button className={item.verdict === "met" ? "active met" : ""} onClick={() => setVerdict(item.requirementId, "met")} type="button"><Check size={12} />已理解</button><button className={item.verdict === "missed" ? "active missed" : ""} onClick={() => setVerdict(item.requirementId, "missed")} type="button"><X size={12} />未理解</button></span>
-        </div>)}
-      </div>
-    </div></section>}
+    {tab === "understanding" && <TurnUnderstandingPanel
+      hasOtherRequirement={hasOtherRequirement}
+      listedRequirementsWeight={listedRequirementsWeight}
+      requirements={requirements}
+      selectedRequirementIds={selectedRequirementIds}
+      onOtherRequirementToggle={() => { setHasOtherRequirement((current) => !current); changed(); }}
+      onToggle={toggleRequirement}
+      onWeightChange={(value) => { setListedRequirementsWeight(value); changed(); }}
+    />}
 
     {tab === "planning" && <section className="annotation-panel">
       <SectionHeading icon={<Route size={16} />} title="Workflow 规划能力评分" detail="只读材料来自该 Turn 的真实思考消息；滑块评分不会改变或重跑 Turn。" />
@@ -261,27 +243,59 @@ function TurnEffectScorePageInner({ record, sessionId, turnId }: {
       </div>
     </section>}
 
-    {tab === "summary" && <Summary scores={{ understanding: understandingScore, planning: planningScore ?? 0, output: outputScore, execution: executionScore }} />}
+    {tab === "summary" && <TurnScoreSummary scores={{ understanding: understandingScore, planning: planningScore ?? 0, output: outputScore, execution: executionScore }} />}
     {saveMessage && <p className={`turn-save-message ${saveState}`}>{saveMessage}</p>}
   </main>;
 }
 
-function Summary({ scores }: { scores: Record<"understanding" | "planning" | "output" | "execution", number> }) {
+/** 单 Turn 理解页只复用真实需求选择，不额外发明一套逐条 verdict 小模块。 */
+export function TurnUnderstandingPanel({ requirements, selectedRequirementIds, hasOtherRequirement, listedRequirementsWeight, onToggle, onOtherRequirementToggle, onWeightChange }: {
+  requirements: Array<{ requirementId: string; label: string }>;
+  selectedRequirementIds: string[];
+  hasOtherRequirement: boolean;
+  listedRequirementsWeight: number;
+  onToggle: (requirementId: string) => void;
+  onOtherRequirementToggle: () => void;
+  onWeightChange: (value: number) => void;
+}) {
+  return <section className="annotation-panel understanding-panel"><div className="turn-understanding-workspace">
+    <SectionHeading icon={<BrainCircuit size={16} />} title="需求理解能力 打分" detail="候选项仅从用户 Prompt 的显式分行提取；选择本次评测中的真实需求。" />
+    <RequirementSelector
+      requirements={requirements.map((item) => ({ id: item.requirementId, label: item.label, sources: ["用户 Prompt"] }))}
+      selectedIds={selectedRequirementIds}
+      hasOtherRequirement={hasOtherRequirement}
+      listedRequirementsWeight={listedRequirementsWeight}
+      onToggle={onToggle}
+      onOtherRequirementToggle={onOtherRequirementToggle}
+      onWeightChange={onWeightChange}
+      weightMin={1}
+      weightMax={99}
+    />
+  </div></section>;
+}
+
+/** 单 Turn 综合页沿用 AB Test 的四维等权总分口径，但不产生排名。 */
+export function TurnScoreSummary({ scores }: { scores: Record<"understanding" | "planning" | "output" | "execution", number> }) {
   const axes = [
     ["understanding", "理解能力"],
     ["planning", "规划能力"],
     ["output", "输出结果"],
     ["execution", "执行能力"],
   ] as const;
+  const totalScore = turnTotalScore(scores);
   const point = (index: number, value: number) => {
     const angle = -Math.PI / 2 + index * Math.PI / 2;
     return `${120 + Math.cos(angle) * 82 * value / 100},${120 + Math.sin(angle) * 82 * value / 100}`;
   };
-  return <section className="summary-grid turn-summary"><div className="radar-card"><header><BarChart3 size={16} /><div><strong>综合能力分布</strong><small>单 Turn 四维分布，不进行分数排名</small></div></header><svg aria-label="单 Turn 综合能力分布" role="img" viewBox="0 0 240 240">
+  return <section className="summary-grid turn-summary"><div className="radar-card"><header><BarChart3 size={16} /><div><strong>综合能力分布</strong><small>理解、规划、输出、执行各占 25% · 不进行排名</small></div></header><svg aria-label="单 Turn 综合能力分布" role="img" viewBox="0 0 240 240">
     {[25, 50, 75, 100].map((level) => <polygon className="radar-grid" key={level} points={axes.map((_, index) => point(index, level)).join(" ")} />)}
     <polygon className="radar-series series-0" points={axes.map(([id], index) => point(index, scores[id])).join(" ")} />
     {axes.map(([, label], index) => { const [x, y] = point(index, 118).split(","); return <text key={label} x={x} y={y}>{label}</text>; })}
-  </svg></div><div className="score-ledger turn-dimension-ledger"><header><strong>四维评分</strong><small>未完成的人工维度按 0 分显示</small></header>{axes.map(([id, label]) => <article key={id}><span>{label}</span><strong>{scores[id]}</strong><small>/ 100</small></article>)}</div></section>;
+  </svg></div><div className="score-ledger turn-dimension-ledger"><header className="turn-score-ledger-header"><div><strong>四维评分</strong><small>未完成的人工维度按 0 分显示</small></div><div className="turn-total-score"><span>总分</span><strong>{totalScore}</strong><small>/ 100</small></div></header>{axes.map(([id, label]) => <article key={id}><span>{label}</span><strong>{scores[id]}</strong><small>/ 100</small></article>)}</div></section>;
+}
+
+export function turnTotalScore(scores: Record<"understanding" | "planning" | "output" | "execution", number>): number {
+  return Math.round((scores.understanding + scores.planning + scores.output + scores.execution) / 4);
 }
 
 function State({ title, detail }: { title: string; detail: string }) {

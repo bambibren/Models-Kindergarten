@@ -9,6 +9,7 @@ import {
   readTurnStateNotification,
   type LiveExecutionNotification,
   type TurnStateNotification,
+  type ArtifactMentionInput,
 } from "@kindergarten/contracts";
 
 const REMOTE_CWD = "/workspace";
@@ -146,6 +147,7 @@ async run(
     experimentId: string,
     testId: string,
     prompt: string,
+    artifactMentions: ArtifactMentionInput[],
     onSession: (sessionId: string, turnId: string) => void,
   ): Promise<{ sessionId: string; turnId: string; stopReason: acp.StopReason }> {
     const created = await this.connection.agent.request(acp.methods.agent.session.new, {
@@ -158,11 +160,10 @@ async run(
     onSession(created.sessionId, turnId);
     this.activeSessions.add(created.sessionId);
     try {
-      const response = await this.connection.agent.request(acp.methods.agent.session.prompt, {
-        sessionId: created.sessionId,
-        prompt: [{ type: "text", text: prompt }],
-        _meta: makePromptMeta({ schemaVersion: 1, turnId }),
-      });
+      const response = await this.connection.agent.request(
+        acp.methods.agent.session.prompt,
+        experimentPromptRequest(created.sessionId, prompt, turnId, artifactMentions),
+      );
       return { sessionId: created.sessionId, turnId, stopReason: response.stopReason };
     } finally {
       this.activeSessions.delete(created.sessionId);
@@ -177,7 +178,25 @@ async cancelAll(): Promise<void> {
   }
 
   /** 释放或删除「close」对应资源，重复调用仍保持安全。 */
-close() { this.connection.close(); }
+  close() { this.connection.close(); }
+}
+
+/** 构造实验首轮 ACP Prompt；Artifact 继续走既有 PromptMeta 稳定 ID 合同。 */
+export function experimentPromptRequest(
+  sessionId: string,
+  prompt: string,
+  turnId: string,
+  artifactMentions: ArtifactMentionInput[],
+): acp.PromptRequest {
+  return {
+    sessionId,
+    prompt: [{ type: "text", text: prompt }],
+    _meta: makePromptMeta({
+      schemaVersion: 1,
+      turnId,
+      ...(artifactMentions.length ? { artifactMentions } : {}),
+    }),
+  };
 }
 
 /** 执行「elicitationFields」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

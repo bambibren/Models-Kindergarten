@@ -1,4 +1,4 @@
-import { ArrowUp, FileArchive, FileCode2, FileText, Search, Square, X } from "lucide-react";
+import { ArrowUp, Search, Square } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { ArtifactMentionInput, ArtifactRecord, ModelReasoningCapability, ReasoningProfile } from "@kindergarten/contracts";
 import type { ReasoningConfigView } from "../../reasoning/reasoning-config.js";
@@ -7,6 +7,7 @@ import { controlApi } from "../../api/control-api.js";
 import { addMention, mentionInputs, mentionQuery, removeMentionTrigger } from "./composer-mention.js";
 import type { ContextWindowUsageView } from "../../chat/context-window-usage.js";
 import { ContextWindowUsageIndicator } from "./ContextWindowUsageIndicator.js";
+import { ArtifactMentionTags } from "./ArtifactMentionTags.js";
 
 /** 渲染「Composer」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function Composer({ contextWindowUsage, disabled, onCancel, onReasoningChange, onSend, reasoning, reasoningBusy = false, reasoningCapability, running }: {
@@ -91,15 +92,9 @@ function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
   }
   return <form className="composer" onSubmit={/** 处理「onSubmit」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => void submit(event)}>
-    {mentions.length > 0 && <div className="composer-mention-tags" aria-label="已引用产物">{mentions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(artifact) => <span className="composer-mention-tag" key={artifact.artifactId} title={`${artifact.displayName} · ${artifact.artifactId}`}>
-      {artifact.kind === "html_bundle" ? <FileCode2 size={12} /> : artifact.primary.mimeType.startsWith("image/") ? <FileArchive size={12} /> : <FileText size={12} />}
-      <strong>{artifact.displayName}</strong><small>{artifact.artifactId.slice(-6)}</small>
-      <button aria-label={`移除 ${artifact.displayName}`} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-() => setMentions(/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-(current) => current.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.artifactId !== artifact.artifactId))}><X size={11} /></button>
-    </span>)}</div>}
+    <ArtifactMentionTags artifacts={mentions} onRemove={(artifactId) => setMentions(
+      (current) => current.filter((item) => item.artifactId !== artifactId),
+    )} />
     <div className="composer-input-wrap">
     <textarea ref={ref} value={text} rows={1} aria-label="消息输入" placeholder="给 ModelStudent 发送消息…" disabled={disabled} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setText(event.target.value)} onKeyDown={keyDown} />

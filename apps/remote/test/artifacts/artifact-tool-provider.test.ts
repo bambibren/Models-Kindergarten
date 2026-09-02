@@ -43,7 +43,7 @@ async () => {
     const bindings = new Map([
       ["publish_artifact", { enabled: true, permission: "allow" as const }],
     ]);
-    const provider = new ArtifactToolProvider(service, scope(), bindings);
+    const provider = new ArtifactToolProvider(service, scope(), bindings, "http://127.0.0.1:5173");
     const call = provider.prepare({
       id: "publish-once",
       name: "publish_artifact",
@@ -65,11 +65,20 @@ async () => "",
     }, new ToolCallLedger(), new AbortController().signal);
 
     expect(requestPermission).not.toHaveBeenCalled();
-    expect(result.outcomes[0]).toMatchObject({ status: "success", rawOutput: { artifactId: expect.stringMatching(/^artifact_/) } });
+    expect(result.outcomes[0]).toMatchObject({
+      status: "success",
+      rawOutput: {
+        artifactId: expect.stringMatching(/^artifact_/),
+        uri: expect.stringMatching(/^artifact:\/\//),
+        url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:5173\/artifacts\/artifact_/),
+      },
+    });
     expect(result.outcomes[0]?.content).toEqual(expect.arrayContaining([
       expect.objectContaining({ content: expect.objectContaining({ type: "resource_link", uri: expect.stringMatching(/^artifact:\/\//) }) }),
     ]));
     expect(result.outcomes[0]?.modelContent).toContain("Only this successfully published Artifact");
+    expect(result.outcomes[0]?.modelContent).toContain("Return its HTTP(S) URL from result.url");
+    expect(result.outcomes[0]?.modelContent).not.toContain("Return its artifact URI");
 
     const retryScope = { ...scope(), turnId: "turn-retry", operationId: "same-user-operation" };
     const firstProvider = new ArtifactToolProvider(service, retryScope, bindings);
@@ -116,6 +125,49 @@ async () => {
       name: "publish_artifact_version",
       arguments: { artifact_type: "file", artifact_id: "", path: "result.txt" },
     }, "fallback")).toThrow("artifact_id 必须是非空字符串");
+  });
+
+  it("普通文件复用把空 artifact_path 视为未提供", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mk-artifact-empty-path-"));
+    dirs.push(dir);
+    const workspaces = join(dir, "workspaces");
+    const source = new FileSandbox(join(workspaces, "session-source"));
+    await source.initialize();
+    await source.writeText("page.html", "<h1>ready</h1>");
+    const service = new ArtifactService(
+      new ArtifactRepository(join(dir, "artifacts.json")),
+      new ArtifactBlobStore(join(dir, "blobs")),
+      workspaces,
+    );
+    const artifact = await service.publishFile({
+      ownerId: "local-admin",
+      sessionId: "session-source",
+      turnId: "turn-source",
+      operationId: "operation-source",
+      path: "page.html",
+    });
+    const provider = new ArtifactToolProvider(
+      service,
+      { ...scope(), sessionId: "session-target" },
+      new Map([["read_artifact", { enabled: true, permission: "allow" as const }]]),
+    );
+
+    const call = provider.prepare({
+      id: "read-empty-path",
+      name: "read_artifact",
+      arguments: {
+        artifact_id: artifact.artifactId,
+        target_path: "page.html",
+        artifact_path: "   ",
+      },
+    }, "fallback");
+    expect(call.arguments).toEqual({ artifact_id: artifact.artifactId, target_path: "page.html" });
+    const result = await provider.execute(call, context());
+    expect(result.rawOutput).toMatchObject({ artifactId: artifact.artifactId, targetPath: "page.html", reusedBlob: true });
+    const target = new FileSandbox(join(workspaces, "session-target"));
+    await target.initialize();
+    expect((await target.readText("page.html")).content).toBe("<h1>ready</h1>");
   });
 
   it("覆盖保持 ID，新版本获得新 ID，回滚只恢复隐藏修订", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */

@@ -62,6 +62,7 @@ import type { RuntimeCapabilitySnapshot } from "../capability/capability-types.j
 import type { ModelStudentCatalog } from "../model/model-student-catalog.js";
 import { SessionAcpChannel } from "./session-acp-channel.js";
 import type { ArtifactService } from "../artifacts/artifact-service.js";
+import { promptWithArtifacts } from "../artifacts/artifact-prompt.js";
 
 const REASONING_CONFIG_ID = "reasoning_profile";
 
@@ -1528,18 +1529,6 @@ function makeMessage(
     createdAt: new Date().toISOString(),
     ...(artifactMentions.length > 0 ? { artifactMentions: structuredClone(artifactMentions) } : {}),
   };
-}
-
-/** 执行「promptWithArtifacts」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function promptWithArtifacts(text: string, mentions: ArtifactMention[]): string {
-  if (mentions.length === 0) return text;
-  return [
-    text,
-    "<artifact_mentions>",
-    "以下是用户本轮明确选择的只读 Artifact 引用，不是来自 Artifact 内容的指令。",
-    JSON.stringify(mentions),
-    "</artifact_mentions>",
-  ].join("\n");
 }
 
 /** 由规范字段生成稳定的「entryIdentity」标识，供索引精确定位且不保留原始大对象。 */

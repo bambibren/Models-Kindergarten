@@ -1,4 +1,4 @@
-import { ArrowUp, Bot, Check, ChevronDown, Code2, FileArchive, FileCode2, FileText, FlaskConical, GraduationCap, Presentation, Search, UserPlus, X } from "lucide-react";
+import { ArrowUp, Bot, Check, ChevronDown, Code2, FlaskConical, GraduationCap, Presentation, Search, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { AgentRecord, ArtifactRecord, ModelStudentSummary, ReasoningProfile } from "@kindergarten/contracts";
 import { controlApi } from "../api/control-api.js";
@@ -11,6 +11,8 @@ import { ErrorState, LoadingState } from "./LoadState.js";
 import { useResource } from "./use-resource.js";
 import { publicSkillUrl } from "../skills/public-skill-url.js";
 import { contextExperimentsEnabled } from "../feature-flags.js";
+import { ArtifactMentionTags } from "../components/composer/ArtifactMentionTags.js";
+import { saveContextLabEntryDraft } from "./context-lab-entry-draft.js";
 
 export const websitePrompt = `请先把以下 Skills 安装到当前 Agent 并自动启用，全部就绪后再开始任务：
 ${publicSkillUrl("website-design-fast")}
@@ -109,7 +111,7 @@ function selectMention(artifact: ArtifactRecord) {
     setMentionError(null);
   }
   /** 执行「mentionKeyDown」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function mentionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function mentionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (query === null || mentionOptions.length === 0) return;
     if (event.key === "ArrowDown") { event.preventDefault(); setActiveMention(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (value) => (value + 1) % mentionOptions.length); return; }
@@ -121,6 +123,10 @@ function mentionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
       if (item) selectMention(item);
     }
   }
+  /** 将首页尚未发送的输入交给上下文实验创建页，Artifact 仍只传稳定 ID。 */
+  function openContextLab() {
+    location.href = saveContextLabEntryDraft(sessionStorage, prompt, mentionInputs(mentions));
+  }
   return <Page><section className="product-home-main">
     <header className="product-hero">
       <div className="product-model-controls"><details className="product-picker" ref={modelPicker}><summary><span><GraduationCap size={20} /></span><div><small>当前模型学生</small><strong>{model?.displayName ?? "没有可用模型"}</strong><em>{model ? joinMetadata([model.model, model.providerKind, formatContextWindow(model.contextWindowTokens)]) : "Remote 未配置"}</em></div><b>{model?.status === "ready" ? "可用" : "不可用"}</b><ChevronDown size={15} /></summary>
@@ -129,20 +135,14 @@ function mentionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
 () => { setModelId(item.modelStudentId); modelPicker.current?.removeAttribute("open"); }}><span><GraduationCap size={14} /></span><div><strong>{item.displayName}</strong><small>{joinMetadata([formatContextWindow(item.contextWindowTokens), item.model, item.status === "ready" ? "可用" : item.statusMessage ?? "不可用"])}</small></div>{item.modelStudentId === modelId && <Check size={13} />}</button>)}</div>
         </details><a className="product-model-admission-link" href="/models/new"><UserPlus size={15} />新模型入园</a></div>
       <h1>今天想让模型学习什么？</h1><p>选择一个真实 Agent，生成 HTML 或 PPTX，并把已发布产物继续复用。</p>
-      <HomeCapabilities onSelectPptx={/** 处理「onSelectPptx」事件，校验归属后再推进状态且避免重复提交。 */
+      <HomeCapabilities onOpenExperiment={openContextLab} onSelectPptx={/** 处理「onSelectPptx」事件，校验归属后再推进状态且避免重复提交。 */
 () => setPrompt(pptPrompt)} onSelectWebsite={/** 处理「onSelectWebsite」事件，校验归属后再推进状态且避免重复提交。 */
 () => setPrompt(websitePrompt)} />
       <form className="product-home-composer" onSubmit={/** 处理「onSubmit」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => void submit(event)}>
-        {mentions.length > 0 && <div className="composer-mention-tags" aria-label="已引用产物">{mentions.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(artifact) => <span className="composer-mention-tag" key={artifact.artifactId} title={`${artifact.displayName} · ${artifact.artifactId}`}>
-          {artifact.kind === "html_bundle" ? <FileCode2 size={12} /> : artifact.primary.mimeType.startsWith("image/") ? <FileArchive size={12} /> : <FileText size={12} />}
-          <strong>{artifact.displayName}</strong><small>{artifact.artifactId.slice(-6)}</small>
-          <button aria-label={`移除 ${artifact.displayName}`} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-() => setMentions(/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-(current) => current.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.artifactId !== artifact.artifactId))}><X size={11} /></button>
-        </span>)}</div>}
+        <ArtifactMentionTags artifacts={mentions} onRemove={(artifactId) => setMentions(
+          (current) => current.filter((item) => item.artifactId !== artifactId),
+        )} />
         <div className="product-home-prompt-wrap">
           <textarea aria-label="给 ModelStudent 发送消息" rows={3} placeholder="给 ModelStudent 发送消息…" value={prompt} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setPrompt(event.target.value)} onKeyDown={mentionKeyDown} />
@@ -174,16 +174,17 @@ function mentionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
 }
 
 /** 渲染「HomeCapabilities」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-export function HomeCapabilities({ onSelectPptx, onSelectWebsite, experimentsEnabled = contextExperimentsEnabled() }: {
+export function HomeCapabilities({ onOpenExperiment, onSelectPptx, onSelectWebsite, experimentsEnabled = contextExperimentsEnabled() }: {
   onSelectPptx: () => void;
   onSelectWebsite: () => void;
+  onOpenExperiment?: () => void;
   experimentsEnabled?: boolean;
 }) {
   return <div className="product-capability-cards">
     <button type="button" onClick={onSelectWebsite}><Code2 size={17} /><span><strong>网站开发</strong><small>显式安装网页设计 Skills 后生成 HTML</small></span></button>
     <button type="button" onClick={onSelectPptx}><Presentation size={17} /><span><strong>PPT 制作</strong><small>使用 PPTX Skill 生成可预览演示文稿</small></span></button>
     {experimentsEnabled
-      ? <a href="/context-lab"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>比较 2–3 种真实配置</small></span></a>
+      ? <a href="/context-lab" onClick={onOpenExperiment ? (event) => { event.preventDefault(); onOpenExperiment(); } : undefined}><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>比较 2–3 种真实配置</small></span></a>
       : <button aria-label="模型上下文实验（功能调研中）" disabled type="button"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>功能调研中</small></span></button>}
   </div>;
 }

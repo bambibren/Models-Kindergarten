@@ -63,4 +63,34 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
     expect(html).toContain("效果打分");
     expect(html).toContain("/evaluation/sessions/session-1/turns/turn-1");
   });
+
+  it("把回答中的内部 Artifact 标识投影为当前站点的 HTTP 路由", () => {
+    const entries = {
+      order: ["message:assistant"],
+      byId: {
+        "message:assistant": {
+          type: "message" as const,
+          id: "message:assistant",
+          messageId: "assistant",
+          turnId: "turn-1",
+          role: "assistant" as const,
+          content: [{ type: "text" as const, text: "[打开产物](artifact://artifact_12345678)" }],
+          status: "done" as const,
+        },
+      },
+    };
+    const html = renderToStaticMarkup(<ChatViewport
+      historyPaging={{ loading: false, hasMore: false }}
+      historyChatEntries={entries}
+      initializing={false}
+      onLoadOlder={() => undefined}
+      onTurnAction={() => undefined}
+      promptTurn={idlePromptTurn}
+      streamingChatEntries={emptyEntries()}
+    />);
+
+    expect(html).toContain('href="/artifacts/artifact_12345678"');
+    expect(html).toContain('target="_blank"');
+    expect(html).not.toContain('type="button"');
+  });
 });

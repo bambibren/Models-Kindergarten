@@ -59,6 +59,7 @@ constructor(
     private readonly service: ArtifactService,
     private readonly scope: TurnScope,
     private readonly bindings: Map<string, { enabled: boolean; permission: "allow" | "ask" | "deny" }>,
+    private readonly publicOrigin?: string,
   ) {
     this.definitions = artifactToolDefinitions.filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => this.bindings.get(item.function.name)?.enabled === true);
@@ -74,7 +75,7 @@ prepare(call: ModelToolCall, fallbackId: string): PreparedToolCall {
     if (name === "read_artifact") {
       const artifactId = stringArg(call.arguments, "artifact_id");
       const targetPath = optionalStringArg(call.arguments, "target_path");
-      const artifactPath = optionalStringArg(call.arguments, "artifact_path");
+      const artifactPath = optionalArtifactPathArg(call.arguments);
       return prepared(id, name, targetPath ? `复用 Artifact 到 ${targetPath}` : "读取 Artifact", targetPath ? "edit" : "read", {
         artifact_id: artifactId,
         ...(targetPath ? { target_path: targetPath } : {}),
@@ -139,6 +140,7 @@ async execute(call: PreparedToolCall, context: ToolExecutionContext): Promise<To
       return result(call, {
         artifactId: artifact.artifactId,
         uri: makeArtifactUri(artifact.artifactId),
+        url: this.webUrl(artifact.artifactId),
         displayName: artifact.displayName,
         kind: artifact.kind,
         mimeType: artifact.primary.mimeType,
@@ -218,6 +220,7 @@ private publicationResult(
     return result(call, {
       artifactId: artifact.artifactId,
       uri,
+      url: this.webUrl(artifact.artifactId),
       displayName: artifact.displayName,
       kind: artifact.kind,
       byteLength: artifact.primary.byteLength,
@@ -226,7 +229,13 @@ private publicationResult(
       rollbackAvailable: rollbackAvailable(artifact.revisions?.length ?? 1),
       publication,
     }, [link], [], undefined,
-    "Only this successfully published Artifact is deliverable and previewable. Return its artifact URI and server-assigned version to the user as the generated file result.");
+    "Only this successfully published Artifact is deliverable and previewable. Return its HTTP(S) URL from result.url and server-assigned version to the user. The artifact URI is an internal stable identifier and must not be presented as a user-openable address.");
+  }
+
+  /** 面向用户的地址使用部署公开 Origin；内部 resource_link 继续使用稳定 artifact URI。 */
+  private webUrl(artifactId: string): string {
+    const path = `/artifacts/${encodeURIComponent(artifactId)}`;
+    return this.publicOrigin ? new URL(path, this.publicOrigin).toString() : path;
   }
 
   /** 生成「capabilitySnapshot」不可变视图，隔离后续状态修改并只暴露该层需要的事实。 */
@@ -317,6 +326,13 @@ function optionalArtifactIdArg(input: Record<string, unknown>): string | undefin
   const value = input.artifact_id;
   if (typeof value === "string" && value.trim().length === 0) return undefined;
   return optionalStringArg(input, "artifact_id");
+}
+
+/** 普通文件复用时允许模型显式传空 Bundle 路径，并按未提供处理。 */
+function optionalArtifactPathArg(input: Record<string, unknown>): string | undefined {
+  const value = input.artifact_path;
+  if (typeof value === "string" && value.trim().length === 0) return undefined;
+  return optionalStringArg(input, "artifact_path");
 }
 
 /** 执行「artifactTypeArg」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */

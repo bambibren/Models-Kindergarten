@@ -137,6 +137,7 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
       schemaVersion: 2,
       name: "模型与上下文对比",
       promptText: "分析首屏性能",
+      artifactMentions: [{ artifactId: "artifact_12345678" }],
       sourceRef: { kind: "turn", id: "turn-1" },
       toolUseWasExpected: false,
       tests,
@@ -145,6 +146,11 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
 (item) => [item.modelStudentId, item.reasoningProfile])).toEqual([
       ["student-1", "auto"], ["student-2", "deep"],
     ]);
+    expect(value.artifactMentions).toEqual([{ artifactId: "artifact_12345678" }]);
+    expect(() => parseExperimentDraftV2({
+      ...value,
+      artifactMentions: [{ artifactId: "artifact_12345678", displayName: "不能信任" }],
+    })).toThrow("未知字段");
     expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => parseExperimentDraftV2({ ...value, mode: "history_turn" })).toThrow("未知字段");
     expect(/** 构造「toThrow」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */

@@ -3,6 +3,7 @@ import { parseAgentInput } from "./agent-management.js";
 import { isRecord, requiredString, stableJson } from "./common.js";
 import type { ReasoningProfile, ResolvedReasoningSnapshot } from "./reasoning.js";
 import { parseReasoningProfile } from "./reasoning.js";
+import type { ArtifactMentionInput } from "./artifacts.js";
 
 /** 描述「ExperimentContextPolicy」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ExperimentContextPolicy {
@@ -142,6 +143,7 @@ export interface ExperimentDraftV2 {
   schemaVersion: 2;
   name: string;
   promptText: string;
+  artifactMentions?: ArtifactMentionInput[];
   sourceRef?: { kind: "turn"; id: string };
   toolUseWasExpected: boolean;
   tests: ExperimentTestDraftV2[];
@@ -217,6 +219,7 @@ export interface ExperimentRecordV2 {
   name: string;
   status: "draft" | "prepared" | "running" | "completed" | "partially_failed" | "failed" | "cancelled" | "interrupted";
   promptText: string;
+  artifactMentions?: ArtifactMentionInput[];
   sourceRef?: { kind: "turn"; id: string };
   toolUseWasExpected: boolean;
   worksheetModelStudentId: string;
@@ -237,6 +240,7 @@ export type AnyExperimentRecord = LegacyExperimentRecordV1 | ExperimentRecordV2;
 export interface ContextPreviewInputV2 {
   schemaVersion: 2;
   promptText: string;
+  artifactMentions?: ArtifactMentionInput[];
   test: ExperimentTestDraftV2;
 }
 
@@ -472,7 +476,7 @@ export function parseExperimentDraftInput(value: unknown): ExperimentDraftInput 
 /** 校验并规范化「parseExperimentDraftV2」输入，非法数据直接返回明确错误。 */
 export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
   if (!isRecord(value)) throw new Error("Experiment V2 draft 必须是对象");
-  assertOnlyKeys(value, ["schemaVersion", "name", "promptText", "sourceRef", "toolUseWasExpected", "tests"], "Experiment V2 draft");
+  assertOnlyKeys(value, ["schemaVersion", "name", "promptText", "artifactMentions", "sourceRef", "toolUseWasExpected", "tests"], "Experiment V2 draft");
   if (value.schemaVersion !== 2) throw new Error("Experiment V2 schemaVersion 必须为 2");
   if (!Array.isArray(value.tests) || value.tests.length < 2 || value.tests.length > 3) {
     throw new Error("Experiment V2 必须有 2 到 3 个 Test");
@@ -496,6 +500,7 @@ export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
     schemaVersion: 2,
     name: requiredString(value, "name", { max: 120 }),
     promptText: requiredString(value, "promptText", { max: 100_000 }),
+    ...parseArtifactMentions(value.artifactMentions),
     ...(sourceRef ? { sourceRef } : {}),
     toolUseWasExpected: value.toolUseWasExpected === true,
     tests,
@@ -505,13 +510,29 @@ export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
 /** 校验并规范化「parseContextPreviewInputV2」输入，非法数据直接返回明确错误。 */
 export function parseContextPreviewInputV2(value: unknown): ContextPreviewInputV2 {
   if (!isRecord(value)) throw new Error("Context Preview V2 输入必须是对象");
-  assertOnlyKeys(value, ["schemaVersion", "promptText", "test"], "Context Preview V2");
+  assertOnlyKeys(value, ["schemaVersion", "promptText", "artifactMentions", "test"], "Context Preview V2");
   if (value.schemaVersion !== 2) throw new Error("Context Preview V2 schemaVersion 必须为 2");
   return {
     schemaVersion: 2,
     promptText: requiredString(value, "promptText", { max: 100_000 }),
+    ...parseArtifactMentions(value.artifactMentions),
     test: parseExperimentTestDraftV2(value.test),
   };
+}
+
+/** Artifact Mention 只接受稳定 ID，并拒绝重复引用和额外展示字段。 */
+function parseArtifactMentions(value: unknown): { artifactMentions?: ArtifactMentionInput[] } {
+  if (value === undefined) return {};
+  if (!Array.isArray(value)) throw new Error("artifactMentions 必须是数组");
+  const artifactMentions = value.map((item) => {
+    if (!isRecord(item)) throw new Error("Artifact Mention 必须是对象");
+    assertOnlyKeys(item, ["artifactId"], "Artifact Mention");
+    return { artifactId: requiredString(item, "artifactId", { max: 160 }) };
+  });
+  if (new Set(artifactMentions.map((item) => item.artifactId)).size !== artifactMentions.length) {
+    throw new Error("artifactMentions 不能重复");
+  }
+  return artifactMentions.length > 0 ? { artifactMentions } : {};
 }
 
 /** 校验并规范化「parseExperimentTestDraftV2」输入，非法数据直接返回明确错误。 */

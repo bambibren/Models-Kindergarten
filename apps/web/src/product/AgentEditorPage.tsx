@@ -66,7 +66,7 @@ function updatePolicy(policy: AgentPolicyValue) { setForm(/** 更新「updatePol
       <section><header><Bot size={16} /><div><strong>基础信息</strong><small>名称只是展示；运行时使用保存的 ID</small></div></header><label><span>名称</span><input required maxLength={80} value={form.name} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setForm({ ...form, name: event.target.value })} /></label><label><span>说明</span><input maxLength={500} value={form.description ?? ""} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setForm({ ...form, description: event.target.value })} /></label></section>
-      <AgentPolicyFields builtinSkills={options.builtinSkills} builtinToolIds={options.builtinTools} mcps={mcps} onChange={updatePolicy} skills={skills} value={form} />
+      <AgentPolicyFields builtinSkills={options.builtinSkills} builtinToolIds={options.builtinTools} mcps={mcps} onChange={updatePolicy} runtimeBaseInstruction={options.runtimeBaseInstruction} skills={skills} value={form} />
       <footer><span className={status}>{message || "最后一次成功保存生效，不需要 ETag 或迁移 Session。"}</span><button disabled={status === "submitting"} type="submit"><Save size={14} />{status === "submitting" ? "正在保存" : "保存 Agent"}</button></footer>
     </form></div>;
 }

@@ -57,6 +57,7 @@ constructor(
     private readonly workspacesRoot: string,
     private readonly skillInstallations?: SkillInstallationService,
     private readonly artifacts?: ArtifactService,
+    private readonly publicOrigin?: string,
   ) {
     if (modelOrCatalog instanceof ModelStudentCatalog) {
       this.models = modelOrCatalog;
@@ -155,7 +156,7 @@ private async resolveAgent(
     const providers = [
       new ToolRegistry(sandbox, undefined, undefined, builtinBindings),
       new PptxToolProvider(new PptxBuildService(sandbox), builtinBindings),
-      ...(this.artifacts ? [new ArtifactToolProvider(this.artifacts, scope, builtinBindings)] : []),
+      ...(this.artifacts ? [new ArtifactToolProvider(this.artifacts, scope, builtinBindings, this.publicOrigin)] : []),
       new McpToolProvider(this.mcp, agent.mcps),
       new SkillToolProvider(this.skills, skillNames),
       ...(this.skillInstallations && currentUserMessage

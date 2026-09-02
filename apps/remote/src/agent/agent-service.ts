@@ -10,11 +10,13 @@ import {
 } from "@kindergarten/contracts";
 import { ApiProblemError } from "../server/api-problem.js";
 import type { AgentRepository } from "./agent-repository.js";
+import { migrateDefaultAgentSystemPrompt } from "./default-agent-system-prompt.js";
 
 /** 描述「AgentCapabilitySource」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface AgentCapabilitySource {
   builtinToolIds(): string[];
   builtinSkills?(): BuiltinSkillOption[];
+  runtimeBaseInstruction?(): string;
   readySkillInstallationIds(ownerId: string): Promise<string[]>;
   mcpCapabilities(ownerId: string): Promise<Array<{ installationId: string; tools: string[]; resources: string[] }>>;
   skillInstallationIds?(ownerId: string): Promise<string[]>;
@@ -55,6 +57,14 @@ constructor(
       createdAt: now,
       updatedAt: now,
     });
+    const migratedPrompt = migrateDefaultAgentSystemPrompt(record.systemPrompt);
+    if (migratedPrompt !== record.systemPrompt) {
+      record = await this.repository.update(record.agentId, (current) => ({
+        ...current,
+        systemPrompt: migrateDefaultAgentSystemPrompt(current.systemPrompt),
+        updatedAt: new Date().toISOString(),
+      }));
+    }
     const existing = new Set(record.builtinTools.map((item) => item.toolId));
     if (input.builtinTools.some((item) => !existing.has(item.toolId))) {
       record = await this.repository.update(record.agentId, (current) => {
@@ -280,6 +290,7 @@ async capabilityOptions(ownerId = "local-admin") {
     return {
       builtinTools: this.capabilities.builtinToolIds(),
       builtinSkills: this.capabilities.builtinSkills?.() ?? [],
+      runtimeBaseInstruction: this.capabilities.runtimeBaseInstruction?.() ?? "",
       readySkillInstallationIds: await this.capabilities.readySkillInstallationIds(ownerId),
       mcps: await this.capabilities.mcpCapabilities(ownerId),
     };

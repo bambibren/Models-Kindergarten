@@ -62,6 +62,7 @@ interface EvalExperiment {
   experimentId: string;
   name: string;
   promptText: string;
+  artifactMentions: import("@kindergarten/contracts").ArtifactMentionInput[];
   status: string;
   savedAt?: string;
   legacy: boolean;
@@ -212,7 +213,7 @@ async (run) => {
         try {
           let sessionId: string | undefined;
           try {
-            await client.current!.run(experimentId, run.variantId, experiment.promptText, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
+            await client.current!.run(experimentId, run.variantId, experiment.promptText, experiment.artifactMentions, /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (createdSessionId, turnId) => {
               sessionId = createdSessionId;
               sessionVariants.current.set(createdSessionId, run.variantId);
@@ -788,7 +789,7 @@ function outputScore(text: string, marks: OutputAnnotationFacts["marks"]): numbe
 /** 校验并规范化「normalizeExperiment」输入，非法数据直接返回明确错误。 */
 function normalizeExperiment(raw: AnyExperimentRecord): EvalExperiment {
   if (raw.schemaVersion === 1) return {
-    experimentId: raw.experimentId, name: raw.name, promptText: raw.promptText, status: raw.status,
+    experimentId: raw.experimentId, name: raw.name, promptText: raw.promptText, artifactMentions: [], status: raw.status,
     ...(raw.savedAt ? { savedAt: raw.savedAt } : {}), legacy: true,
     variants: raw.variants.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => ({ variantId: item.variantId, label: item.label, subtitle: item.mode === "reuse_snapshot" ? "旧版历史快照" : "旧版 Runtime", contextConfiguration: item })),
@@ -797,7 +798,7 @@ function normalizeExperiment(raw: AnyExperimentRecord): EvalExperiment {
     ...(raw.annotationWorksheet ? { annotationWorksheet: raw.annotationWorksheet } : {}),
   };
   return {
-    experimentId: raw.experimentId, name: raw.name, promptText: raw.promptText, status: raw.status,
+    experimentId: raw.experimentId, name: raw.name, promptText: raw.promptText, artifactMentions: raw.artifactMentions ?? [], status: raw.status,
     ...(raw.savedAt ? { savedAt: raw.savedAt } : {}), legacy: false,
     variants: raw.tests.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (test) => { const snapshot = raw.snapshots?.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */

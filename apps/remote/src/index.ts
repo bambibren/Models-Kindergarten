@@ -38,7 +38,7 @@ import { RemoteModelUrlPolicy } from "./model/remote-model-url-policy.js";
 import { ModelStudentCatalog } from "./model/model-student-catalog.js";
 import { LegacyOllamaMigration } from "./model/legacy-ollama-migration.js";
 import { SessionRepository } from "./repository/session-repository.js";
-import { AgentRuntime } from "./runtime/agent-runtime.js";
+import { AgentRuntime, runtimeBaseInstruction } from "./runtime/agent-runtime.js";
 import { RemoteServer } from "./server/http-server.js";
 import { ControlApi } from "./server/control-api.js";
 import { SessionBindingService } from "./session/session-binding-service.js";
@@ -76,7 +76,6 @@ import { registerArtifactRoutes } from "./artifacts/artifact-routes.js";
 import { OnlyOfficePreviewService } from "./artifacts/onlyoffice-preview.js";
 import {
   DEFAULT_AGENT_SYSTEM_PROMPT,
-  removeLegacyModelIdentity,
 } from "./agent/default-agent-system-prompt.js";
 import {
   assertImplementedDeploymentFeatures,
@@ -178,6 +177,7 @@ const agentService = new AgentService(agentRepository, {
     ...PPTX_TOOL_IDS,
   ],
   builtinSkills: () => skills.builtinOptions(),
+  runtimeBaseInstruction,
   readySkillInstallationIds: /** 读取「readySkillInstallationIds」所需数据，并遵守作用域、分页与容量边界。 */
 (ownerId) => skillInstallations?.readyInstallationIds(ownerId) ?? Promise.resolve([]),
   mcpCapabilities: /** 执行「mcpCapabilities」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -238,29 +238,7 @@ const defaultAgentInput = async (ownerId: string): Promise<AgentInput> => ({
 await agentService.reconcileCapabilities(localPrincipal.principalId);
 const startupDefaultAgentInput = await defaultAgentInput(localPrincipal.principalId);
 await agentService.migrateSystemDefaultTools(startupDefaultAgentInput.builtinTools);
-let defaultAgent = await agentService.ensureDefault(startupDefaultAgentInput, localPrincipal.principalId);
-if (defaultAgent) {
-  const systemPrompt = removeLegacyModelIdentity(defaultAgent.systemPrompt);
-  if (systemPrompt !== defaultAgent.systemPrompt) {
-    defaultAgent = await agentService.update(defaultAgent.agentId, {
-      name: defaultAgent.name,
-      ...(defaultAgent.description ? { description: defaultAgent.description } : {}),
-      systemPrompt,
-      builtinTools: defaultAgent.builtinTools,
-      builtinSkillIds: defaultAgent.builtinSkills
-        .filter((item) => item.enabled)
-        .map((item) => item.skillId),
-      skillInstallationIds: defaultAgent.skills
-        .filter(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.enabled)
-        .map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(item) => item.skillInstallationId),
-      mcps: defaultAgent.mcps,
-      historyPolicy: defaultAgent.historyPolicy,
-      memoryPolicy: defaultAgent.memoryPolicy,
-    });
-  }
-}
+const defaultAgent = await agentService.ensureDefault(startupDefaultAgentInput, localPrincipal.principalId);
 agentService.protect(defaultAgent.agentId);
 const sessions = new SessionRepository(dataDir, {
   ownerId: "local-admin",
@@ -325,8 +303,9 @@ const resolver = new RuntimeCapabilityResolver(
   resolve(dataDir, "workspaces"),
   skillInstallations,
   artifacts,
+  deployment.publicOrigin ?? "http://127.0.0.1:5173",
 );
-const contextPreviews = new ContextPreviewService(resolver);
+const contextPreviews = new ContextPreviewService(resolver, artifacts);
 const experimentService = new ExperimentService(
   new ExperimentRepository(resolve(dataDir, "experiments.json"), resolve(dataDir, "experiment-scorecards.json")),
   agentService,

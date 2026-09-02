@@ -149,6 +149,7 @@
 .product-form label, .product-context-prompt label, .product-lanes label { display: grid; gap: 6px; margin: 12px 0; color: #64665f; font-size: 10px; font-weight: 600; }
 .product-form input, .product-form textarea, .product-form select, .product-context-shell input, .product-context-shell textarea, .product-context-shell select, .product-inline-install input { width: 100%; padding: 9px 10px; border: 1px solid #dcdcd7; border-radius: 8px; outline: 0; color: #383936; background: #fbfbfa; font-size: 11px; line-height: 1.5; }
 .product-form input:focus, .product-form textarea:focus, .product-form select:focus, .product-context-shell input:focus, .product-context-shell textarea:focus, .product-context-shell select:focus { border-color: #a9aaa4; background: #fff; }
+.product-form textarea.product-runtime-instructions, .product-context-shell textarea.product-runtime-instructions { color: #74766f; background: #f3f3f0; cursor: default; }
 .product-field-help { color: #8b8d86; font-size: 9px; font-weight: 450; line-height: 1.6; }
 .product-option-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .product-option-grid > label { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 8px; margin: 0; padding: 10px; border: 1px solid #e3e3de; border-radius: 9px; background: #fafaf8; }

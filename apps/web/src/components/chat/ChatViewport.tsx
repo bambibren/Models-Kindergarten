@@ -13,6 +13,10 @@ import { Loader } from "../primitives/Loader.js";
 import { TokenUsageTotal } from "./TokenUsageTotal.js";
 import { Gauge } from "lucide-react";
 
+const artifactNavigation = {
+  href: (artifactId: string) => `/artifacts/${encodeURIComponent(artifactId)}`,
+};
+
 /** 渲染「ChatViewport」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ChatViewport({ historyPaging, historyChatEntries, streamingChatEntries, initializing, promptTurn, sessionId, scorableTurnIds, onTurnAction, onLoadOlder }: {
   historyPaging: { loading: boolean; hasMore: boolean };
@@ -64,10 +68,10 @@ function updateFollowState() {
       type="button"
       onClick={onLoadOlder}
     >{historyPaging.loading ? "正在加载更早记录…" : "加载更早的 20 个 Turn"}</button></div> : null}
-    <ChatBlockList collection={historyChatEntries} renderTurnFooter={(turnId) => sessionId && scorableTurnIds?.has(turnId) ? <div className="turn-score-action">
+    <ChatBlockList artifactNavigation={artifactNavigation} collection={historyChatEntries} renderTurnFooter={(turnId) => sessionId && scorableTurnIds?.has(turnId) ? <div className="turn-score-action">
       <a href={`/evaluation/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`}><Gauge size={14} />效果打分</a>
     </div> : null} />
-    <ChatBlockList collection={streamingChatEntries} />
+    <ChatBlockList artifactNavigation={artifactNavigation} collection={streamingChatEntries} />
     {isPromptTurnActive(promptTurn) && <PromptTurnLoader turn={promptTurn} />}
     {!isPromptTurnActive(promptTurn) && <PromptTurnStatusRow state={promptTurn} onAction={onTurnAction} />}
     {canDisplaySessionTokenTotal(promptTurn) && <TokenUsageTotal

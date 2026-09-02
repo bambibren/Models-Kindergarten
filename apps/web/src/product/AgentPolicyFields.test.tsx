@@ -60,6 +60,7 @@ describe("AgentPolicyFields", /** 组织这一组相关测试，统一建立场�
       mcps={[mcp]}
       onChange={/** 构造「onChange」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => undefined}
+      runtimeBaseInstruction="只能使用本轮实际提供的工具。"
       showHistory={false}
       showMemory={false}
       skills={[skill]}
@@ -71,6 +72,10 @@ describe("AgentPolicyFields", /** 组织这一组相关测试，统一建立场�
     expect(html).toContain("frontend-design");
     expect(html).toContain("sandbox-notes");
     expect(html).toContain("Docs MCP");
+    expect(html).toContain("Agent 自定义指令（可编辑）");
+    expect(html).toContain("Runtime 固定指令（只读）");
+    expect(html).toContain("只能使用本轮实际提供的工具。");
+    expect(html).toContain("readOnly=\"\"");
     expect(html).not.toContain("聊天历史");
     expect(html).not.toContain("Memory");
   });
@@ -83,6 +88,7 @@ describe("AgentPolicyFields", /** 组织这一组相关测试，统一建立场�
       mcps={[]}
       onChange={/** 构造「onChange」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => undefined}
+      runtimeBaseInstruction="Runtime 固定规则"
       skills={[skill]}
       value={policy}
     />);
