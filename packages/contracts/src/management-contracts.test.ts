@@ -113,7 +113,7 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
 () => parseExperimentDraftInput({ ...draft, variants: [draft.variants[0], { ...draft.variants[0], variantId: "b", label: "B" }] })).toThrow("策略差异");
   });
 
-  it("V2 每个 Test 独立选择模型和推理，且拒绝历史复用字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+  it("V2 解析 Test 的模型和推理快照，且拒绝历史复用字段", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     const policy = {
       systemPrompt: "保持简洁",
@@ -139,7 +139,6 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
       promptText: "分析首屏性能",
       artifactMentions: [{ artifactId: "artifact_12345678" }],
       sourceRef: { kind: "turn", id: "turn-1" },
-      toolUseWasExpected: false,
       tests,
     });
     expect(value.tests.map(/** 构造「toEqual」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
@@ -157,6 +156,8 @@ describe("management contracts", /** 组织这一组相关测试，统一建立�
 () => parseExperimentDraftV2({ ...value, tests: [{ ...tests[0], mode: "reuse_snapshot" }, tests[1]] })).toThrow("未知字段");
     expect(/** 浏览器不能再覆盖服务端配置的工作表模型。 */
 () => parseExperimentDraftV2({ ...value, worksheetModelStudentId: "student-1" })).toThrow("未知字段");
+    expect(/** 已删除的 Tool 使用预期不能再进入实验草稿。 */
+() => parseExperimentDraftV2({ ...value, toolUseWasExpected: true })).toThrow("未知字段");
   });
 
   it("mk-file URI 只接受 opaque ID，不接受路径、host 或 query", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
@@ -212,7 +213,6 @@ describe("four-dimension score contracts", /** 组织这一组相关测试，统
       normallyCompleted: true,
       firstTokenLatencyMs: 200,
       totalDurationMs: 1_000,
-      toolUseWasExpected: false,
       toolSuccessCount: 0,
       toolFailureCount: 0,
       errorCount: 0,
@@ -229,7 +229,6 @@ describe("four-dimension score contracts", /** 组织这一组相关测试，统
       normallyCompleted: false,
       firstTokenLatencyMs: 400,
       totalDurationMs: 2_000,
-      toolUseWasExpected: true,
       toolSuccessCount: 0,
       toolFailureCount: 1,
       errorCount: 2,

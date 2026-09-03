@@ -62,7 +62,6 @@ async create(raw: unknown, ownerId = "local-admin"): Promise<ExperimentRecordV2>
       promptText: input.promptText,
       ...(input.artifactMentions?.length ? { artifactMentions: input.artifactMentions } : {}),
       ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
-      toolUseWasExpected: input.toolUseWasExpected,
       worksheetModelStudentId,
       tests: input.tests,
       runs: [],
@@ -96,7 +95,6 @@ async update(experimentId: string, raw: unknown, ownerId = "local-admin"): Promi
         promptText: input.promptText,
         ...(input.artifactMentions?.length ? { artifactMentions: input.artifactMentions } : {}),
         ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
-        toolUseWasExpected: input.toolUseWasExpected,
         worksheetModelStudentId,
         tests: input.tests,
         updatedAt: new Date().toISOString(),
@@ -232,9 +230,8 @@ async markRunFinished(
     answerTexts: string[],
     error?: unknown,
   ): Promise<void> {
-    const experiment = await this.getV2(experimentId);
     let metrics: ExecutionMetricsSnapshot | undefined;
-    try { metrics = await this.executionMetrics(experiment, variantId, sessionId, turnId); }
+    try { metrics = await this.executionMetrics(variantId, sessionId, turnId); }
     catch (error) { console.warn(`Experiment 执行指标暂不可用：${publicMessage(error)}`); }
     const session = await this.sessions.get(sessionId).catch(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
 () => undefined);
@@ -569,7 +566,6 @@ private async refreshStatus(id: string): Promise<ExperimentRecordV2> {
 
   /** 执行「executionMetrics」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 private async executionMetrics(
-    experiment: ExperimentRecordV2,
     variantId: string,
     sessionId: string,
     turnId: string,
@@ -584,7 +580,6 @@ private async executionMetrics(
       normallyCompleted: result.normallyCompleted,
       ...(result.firstTokenLatencyMs !== undefined ? { firstTokenLatencyMs: result.firstTokenLatencyMs } : {}),
       totalDurationMs: requiredMetric(result.totalDurationMs, "totalDurationMs"),
-      toolUseWasExpected: experiment.toolUseWasExpected,
       toolSuccessCount: requiredMetric(result.toolSuccessCount, "toolSuccessCount"),
       toolFailureCount: requiredMetric(result.toolFailureCount, "toolFailureCount"),
       errorCount: requiredMetric(result.errorCount, "errorCount"),

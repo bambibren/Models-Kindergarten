@@ -32,7 +32,6 @@ export interface ExperimentDraftInput {
   sourceAgentId: string;
   promptText: string;
   sourceTurnId?: string;
-  toolUseWasExpected: boolean;
   variants: ExperimentVariant[];
 }
 
@@ -109,7 +108,6 @@ export interface LegacyExperimentRecordV1 {
   sourceAgentId: string;
   promptText: string;
   sourceTurnId?: string;
-  toolUseWasExpected: boolean;
   variants: ExperimentVariant[];
   runs: ExperimentRun[];
   annotationWorksheet?: ExperimentAnnotationWorksheet;
@@ -145,7 +143,6 @@ export interface ExperimentDraftV2 {
   promptText: string;
   artifactMentions?: ArtifactMentionInput[];
   sourceRef?: { kind: "turn"; id: string };
-  toolUseWasExpected: boolean;
   tests: ExperimentTestDraftV2[];
 }
 
@@ -221,7 +218,6 @@ export interface ExperimentRecordV2 {
   promptText: string;
   artifactMentions?: ArtifactMentionInput[];
   sourceRef?: { kind: "turn"; id: string };
-  toolUseWasExpected: boolean;
   worksheetModelStudentId: string;
   tests: ExperimentTestDraftV2[];
   snapshots?: ExperimentTestSnapshotV2[];
@@ -364,7 +360,6 @@ export interface ExecutionMetricsSnapshot {
   normallyCompleted: boolean;
   firstTokenLatencyMs?: number;
   totalDurationMs: number;
-  toolUseWasExpected: boolean;
   toolSuccessCount: number;
   toolFailureCount: number;
   errorCount: number;
@@ -468,7 +463,6 @@ export function parseExperimentDraftInput(value: unknown): ExperimentDraftInput 
     sourceAgentId: requiredString(value, "sourceAgentId", { max: 160 }),
     promptText: requiredString(value, "promptText", { max: 100_000 }),
     ...(sourceTurnId ? { sourceTurnId } : {}),
-    toolUseWasExpected: value.toolUseWasExpected === true,
     variants,
   };
 }
@@ -476,7 +470,7 @@ export function parseExperimentDraftInput(value: unknown): ExperimentDraftInput 
 /** 校验并规范化「parseExperimentDraftV2」输入，非法数据直接返回明确错误。 */
 export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
   if (!isRecord(value)) throw new Error("Experiment V2 draft 必须是对象");
-  assertOnlyKeys(value, ["schemaVersion", "name", "promptText", "artifactMentions", "sourceRef", "toolUseWasExpected", "tests"], "Experiment V2 draft");
+  assertOnlyKeys(value, ["schemaVersion", "name", "promptText", "artifactMentions", "sourceRef", "tests"], "Experiment V2 draft");
   if (value.schemaVersion !== 2) throw new Error("Experiment V2 schemaVersion 必须为 2");
   if (!Array.isArray(value.tests) || value.tests.length < 2 || value.tests.length > 3) {
     throw new Error("Experiment V2 必须有 2 到 3 个 Test");
@@ -502,7 +496,6 @@ export function parseExperimentDraftV2(value: unknown): ExperimentDraftV2 {
     promptText: requiredString(value, "promptText", { max: 100_000 }),
     ...parseArtifactMentions(value.artifactMentions),
     ...(sourceRef ? { sourceRef } : {}),
-    toolUseWasExpected: value.toolUseWasExpected === true,
     tests,
   };
 }
@@ -575,7 +568,7 @@ export function calculateExecutionScores(metrics: ExecutionMetricsSnapshot[]): E
   return metrics.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => {
     const totalTools = item.toolSuccessCount + item.toolFailureCount;
-    const toolReliability = item.toolCallCount === 0 && !item.toolUseWasExpected
+    const toolReliability = item.toolCallCount === 0
       ? 25
       : totalTools === 0 ? 0 : 25 * item.toolSuccessCount / totalTools;
     const ttft = item.firstTokenLatencyMs === undefined ? 0 : 5 * lowerIsBetter(item.firstTokenLatencyMs, ttftValues);

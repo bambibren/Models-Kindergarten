@@ -36,7 +36,6 @@ export function registerTurnEffectScoreRoutes(
       normallyCompleted: metrics.normallyCompleted,
       ...(metrics.firstTokenLatencyMs === undefined ? {} : { firstTokenLatencyMs: metrics.firstTokenLatencyMs }),
       totalDurationMs: metrics.totalDurationMs,
-      toolUseWasExpected: metrics.toolCallCount > 0,
       toolSuccessCount: metrics.toolSuccessCount,
       toolFailureCount: metrics.toolFailureCount,
       errorCount: metrics.errorCount,

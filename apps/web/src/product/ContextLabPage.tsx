@@ -22,6 +22,7 @@ import {
   initialContextLanes,
   policyFromAgent,
   removeContextLane,
+  testDraftFromLane,
   updateContextLane,
   type ContextLabLane,
 } from "./context-lab-state.js";
@@ -86,11 +87,11 @@ function ContextLabReady({ agents, models, options, skills, mcps, source, entryP
   const [name, setName] = useState(source ? "来源 Turn 配置对照" : "上下文配置对照");
   const [prompt, setPrompt] = useState(source?.promptText ?? entryPrompt ?? "");
   const [mentions, setMentions] = useState<ArtifactRecord[]>(entryArtifacts);
+  const [modelStudentId, setModelStudentId] = useState(initialModelId);
   const [lanes, setLanes] = useState<ContextLabLane[]>(/** 执行「[lanes, setLanes]」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-() => initialContextLanes(initialAgent, initialPolicy, initialModelId, importedReasoning));
+() => initialContextLanes(initialAgent, initialPolicy, importedReasoning));
   const [activeTestId, setActiveTestId] = useState(/** 执行「[activeTestId, setActiveTestId]」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 () => lanes[0]?.testId ?? "");
-  const [toolExpected, setToolExpected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [previews, setPreviews] = useState<Record<string, PreviewState>>({});
@@ -98,7 +99,7 @@ function ContextLabReady({ agents, models, options, skills, mcps, source, entryP
 (item) => item.testId === activeTestId) ?? lanes[0];
   const fingerprints = useMemo(/** 缓存「fingerprints」的派生计算，依赖变化时重新生成以避免陈旧闭包。 */
 () => Object.fromEntries(lanes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(lane) => [lane.testId, fingerprint(prompt, lane, mentionInputs(mentions))])), [lanes, mentions, prompt]);
+(lane) => [lane.testId, fingerprint(prompt, lane, modelStudentId, mentionInputs(mentions))])), [lanes, mentions, modelStudentId, prompt]);
 
   useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
 () => {
@@ -109,7 +110,7 @@ function ContextLabReady({ agents, models, options, skills, mcps, source, entryP
         const currentFingerprint = fingerprints[lane.testId]!;
         setPreviews(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (current) => ({ ...current, [lane.testId]: { fingerprint: currentFingerprint, loading: true } }));
-        void previewLane(prompt, lane, mentionInputs(mentions)).then(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
+        void previewLane(prompt, lane, modelStudentId, mentionInputs(mentions)).then(/** 处理异步阶段的完成或清理，确保成功与失败路径都释放临时状态。 */
 (value) => {
           if (!cancelled) setPreviews(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (current) => ({ ...current, [lane.testId]: { fingerprint: currentFingerprint, loading: false, value } }));
@@ -121,7 +122,7 @@ function ContextLabReady({ agents, models, options, skills, mcps, source, entryP
       }
     }, 250);
     return /** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */ () => { cancelled = true; window.clearTimeout(timer); };
-  }, [fingerprints, lanes, mentions, prompt]);
+  }, [fingerprints, lanes, mentions, modelStudentId, prompt]);
 
   /** 执行「importAgent」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function importAgent(agentId: string) {
@@ -133,20 +134,22 @@ function importAgent(agentId: string) {
   }
 
   /** 执行「patchLane」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function patchLane(change: Partial<Pick<ContextLabLane, "modelStudentId" | "reasoningProfile" | "policy">>) {
+function patchLane(change: Partial<Pick<ContextLabLane, "reasoningProfile" | "policy">>) {
     if (activeLane) setLanes(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (current) => updateContextLane(current, activeLane.testId, change));
   }
 
   /** 执行「changeModel」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 function changeModel(modelStudentId: string) {
-    if (!activeLane) return;
     const model = models.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
 (item) => item.modelStudentId === modelStudentId);
     const supported = model?.supports.reasoning.supportedProfiles ?? [];
-    const reset = activeLane.reasoningProfile !== "auto" && !supported.includes(activeLane.reasoningProfile);
-    patchLane({ modelStudentId, ...(reset ? { reasoningProfile: "auto" } : {}) });
-    if (reset) setMessage(`Test ${activeLane.label} 的原推理档位不受新模型支持，已重置为“自动”。`);
+    const resetLabels = lanes.filter((lane) => lane.reasoningProfile !== "auto" && !supported.includes(lane.reasoningProfile)).map((lane) => lane.label);
+    setModelStudentId(modelStudentId);
+    if (resetLabels.length > 0) {
+      setLanes((current) => current.map((lane) => resetLabels.includes(lane.label) ? { ...lane, reasoningProfile: "auto" } : lane));
+      setMessage(`Test ${resetLabels.join("、")} 的原推理档位不受新模型支持，已重置为“自动”。`);
+    }
   }
 
   /** 执行「addLane」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -169,11 +172,11 @@ function removeLane(testId: string) {
   /** 执行「refreshPreview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async function refreshPreview() {
     if (!activeLane) return;
-    const currentFingerprint = fingerprint(prompt, activeLane, mentionInputs(mentions));
+    const currentFingerprint = fingerprint(prompt, activeLane, modelStudentId, mentionInputs(mentions));
     setPreviews(/** 执行「refreshPreview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (current) => ({ ...current, [activeLane.testId]: { fingerprint: currentFingerprint, loading: true } }));
     try {
-      const value = await previewLane(prompt, activeLane, mentionInputs(mentions));
+      const value = await previewLane(prompt, activeLane, modelStudentId, mentionInputs(mentions));
       setPreviews(/** 执行当前调用点的回调步骤；仅使用显式参数与受控闭包状态，并遵循外层 API 的返回约定。 */
 (current) => ({ ...current, [activeLane.testId]: { fingerprint: currentFingerprint, loading: false, value } }));
     } catch (error) {
@@ -190,12 +193,8 @@ async function submit(event: FormEvent) {
         schemaVersion: 2, name, promptText: prompt,
         ...(mentions.length > 0 ? { artifactMentions: mentionInputs(mentions) } : {}),
         ...(source ? { sourceRef: { kind: "turn", id: source.turn.turnId } } : {}),
-        toolUseWasExpected: toolExpected,
         tests: lanes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(lane) => ({
-          testId: lane.testId, label: lane.label, sourceAgent: lane.sourceAgent,
-          modelStudentId: lane.modelStudentId, reasoningProfile: lane.reasoningProfile, policy: lane.policy,
-        })),
+(lane) => testDraftFromLane(lane, modelStudentId)),
       };
       const experiment = await controlApi.createExperiment(input);
       await controlApi.prepareExperiment(experiment.experimentId, crypto.randomUUID());
@@ -217,10 +216,11 @@ async function submit(event: FormEvent) {
 (item) => item ? [item.effectiveConfigurationHash] : [])).size >= 2;
 
   return <div className="product-context-shell">
-    <header className="product-context-heading"><span>MODEL CONTEXT · EXPERIMENT V2</span><h1>模型上下文实验</h1><p>同一份用户提示词；每个 Test 独立配置 Agent、模型和推理级别，并在全新 Session 的首轮重新运行。</p></header>
+    <header className="product-context-heading"><span>MODEL CONTEXT · EXPERIMENT V2</span><h1>模型上下文实验</h1><p>同一份用户提示词和同一个模型；每个 Test 独立配置 Agent、推理级别和上下文，并在全新 Session 的首轮重新运行。</p></header>
     {source && <section className="product-source-snapshot"><History size={15} /><div><strong>已从 Turn 导入配置</strong><small>{source.turn.turnId} · 只导入提示词、Agent、模型和实际推理事实；不读取历史、不复用回答，提示词仍可编辑。</small></div></section>}
     <form onSubmit={/** 处理「onSubmit」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => void submit(event)}>
+      <SharedModelPicker modelStudentId={modelStudentId} models={models} onChange={changeModel} />
       <section className="product-context-prompt">
         <label><span>实验名称</span><input required value={name} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setName(event.target.value)} /></label>
@@ -228,8 +228,6 @@ async function submit(event: FormEvent) {
           (current) => current.filter((item) => item.artifactId !== artifactId),
         )} /><textarea required rows={4} value={prompt} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => setPrompt(event.target.value)} placeholder="输入所有 Test 都要回答的问题…" /></label>
-        <div><label className="product-checkbox"><input checked={toolExpected} type="checkbox" onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
-(event) => setToolExpected(event.target.checked)} /><span>这个任务预期必须使用 Tool</span></label></div>
       </section>
       <section className="product-lanes">
         <header><div><strong>Test 配置</strong><small>A/B 初始一致；至少两个 Test 的实际运行配置需要不同</small></div><button disabled={lanes.length >= 3} type="button" onClick={addLane}><Plus size={13} />添加 C</button></header>
@@ -247,7 +245,7 @@ async function submit(event: FormEvent) {
             <label className="product-agent-import"><span>导入已保存 Agent</span><select value={activeLane.sourceAgent.agentId} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => importAgent(event.target.value)}>{agents.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => <option key={item.agentId} value={item.agentId}>{item.name}</option>)}</select><small>只复制到当前 Test；模型和推理级别保持不变。</small></label>
-            <LaneModelReasoning lane={activeLane} models={models} onModelChange={changeModel} onReasoningChange={/** 处理「onReasoningChange」事件，校验归属后再推进状态且避免重复提交。 */
+            <LaneReasoning lane={activeLane} model={models.find((item) => item.modelStudentId === modelStudentId)} onReasoningChange={/** 处理「onReasoningChange」事件，校验归属后再推进状态且避免重复提交。 */
 (reasoningProfile) => patchLane({ reasoningProfile })} />
             <div className="product-policy-stack"><AgentPolicyFields builtinSkills={options.builtinSkills} builtinToolIds={options.builtinTools} mcps={mcps} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (policy) => patchLane({ policy })} readOnly={false} runtimeBaseInstruction={options.runtimeBaseInstruction} showHistory={false} showMemory={false} skills={skills} value={activeLane.policy} /></div>
@@ -262,19 +260,24 @@ async function submit(event: FormEvent) {
   </div>;
 }
 
-/** 渲染「LaneModelReasoning」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-function LaneModelReasoning({ lane, models, onModelChange, onReasoningChange }: {
-  lane: ContextLabLane;
+/** 渲染实验级公共模型选择，生成 Test 草稿时统一填入该模型。 */
+function SharedModelPicker({ modelStudentId, models, onChange }: {
+  modelStudentId: string;
   models: ModelStudentSummary[];
-  onModelChange: (value: string) => void;
+  onChange: (value: string) => void;
+}) {
+  return <section className="product-context-model"><header><strong>模型选择</strong><small>所有 Test 共用；prepare-run 后冻结</small></header><label><span>ModelStudent</span><select value={modelStudentId} onChange={(event) => onChange(event.target.value)}>{models.map(modelOption)}</select></label></section>;
+}
+
+/** 渲染当前 Test 的推理档位；模型由实验级公共选择提供。 */
+function LaneReasoning({ lane, model, onReasoningChange }: {
+  lane: ContextLabLane;
+  model: ModelStudentSummary | undefined;
   onReasoningChange: (value: ReasoningProfile) => void;
 }) {
-  const model = models.find(/** 按当前业务条件筛选或判断元素，不修改原始集合。 */
-(item) => item.modelStudentId === lane.modelStudentId);
   const capability = model?.supports.reasoning;
   const choices: ReasoningProfile[] = capability?.adjustable ? ["auto", ...capability.supportedProfiles] : [];
-  return <section className="product-lane-model"><header><strong>模型与推理</strong><small>每个 Test 独立选择；prepare-run 后冻结</small></header><label><span>ModelStudent</span><select value={lane.modelStudentId} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
-(event) => onModelChange(event.target.value)}>{models.map(modelOption)}</select></label>{capability?.adjustable ? <label><span>推理级别</span><select value={lane.reasoningProfile} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
+  return <section className="product-lane-model"><header><strong>推理级别</strong><small>当前 Test 独立选择；prepare-run 后冻结</small></header>{capability?.adjustable ? <label><span>推理级别</span><select value={lane.reasoningProfile} onChange={/** 处理「onChange」事件，校验归属后再推进状态且避免重复提交。 */
 (event) => onReasoningChange(event.target.value as ReasoningProfile)}>{choices.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (choice) => <option key={choice} value={choice}>{choice === "auto" ? reasoningAutoLabel(capability) : profileLabel(choice, capability)}</option>)}</select></label> : <p className="product-readonly-fact">推理级别：固定 · {capability ? profileLabel(capability.defaultProfile, capability) : "未知"}</p>}</section>;
 }
@@ -289,12 +292,11 @@ function modelOption(model: ModelStudentSummary) {
   return <option key={model.modelStudentId} value={model.modelStudentId}>{joinMetadata([model.displayName, formatContextWindow(model.contextWindowTokens), model.model])}</option>;
 }
 /** 执行「fingerprint」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function fingerprint(prompt: string, lane: ContextLabLane, artifactMentions: ArtifactMentionInput[]): string { return JSON.stringify({ prompt, artifactMentions, lane }); }
+function fingerprint(prompt: string, lane: ContextLabLane, modelStudentId: string, artifactMentions: ArtifactMentionInput[]): string { return JSON.stringify({ prompt, artifactMentions, test: testDraftFromLane(lane, modelStudentId) }); }
 /** 执行「previewLane」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
-function previewLane(promptText: string, lane: ContextLabLane, artifactMentions: ArtifactMentionInput[]) {
+function previewLane(promptText: string, lane: ContextLabLane, modelStudentId: string, artifactMentions: ArtifactMentionInput[]) {
   return controlApi.contextPreview({ schemaVersion: 2, promptText, ...(artifactMentions.length ? { artifactMentions } : {}), test: {
-    testId: lane.testId, label: lane.label, sourceAgent: lane.sourceAgent,
-    modelStudentId: lane.modelStudentId, reasoningProfile: lane.reasoningProfile, policy: lane.policy,
+    ...testDraftFromLane(lane, modelStudentId),
   } });
 }
 /** 按首页交接顺序重新读取当前账号 Artifact，展示字段不信任 sessionStorage。 */

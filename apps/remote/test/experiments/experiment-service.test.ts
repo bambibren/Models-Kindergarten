@@ -348,7 +348,6 @@ function draft(source: { agentId: string; name: string; updatedAt: string }): Ex
     schemaVersion: 2,
     name: "上下文对照",
     promptText: "完成任务",
-    toolUseWasExpected: false,
     tests: [
       { testId: "test-a", label: "A", sourceAgent, modelStudentId: "fixture-student", reasoningProfile: "auto", policy: policy("提示 A") },
       { testId: "test-b", label: "B", sourceAgent, modelStudentId: "fixture-student", reasoningProfile: "balanced", policy: policy("提示 B") },
@@ -409,7 +408,7 @@ function legacyRecord() {
     experimentId: "legacy-1", ownerId: "local-admin", name: "旧实验",
     mode: "history_turn" as const, status: "completed" as const,
     modelStudentId: "fixture-student", sourceAgentId: "legacy-agent",
-    promptText: "旧问题", sourceTurnId: "old-turn", toolUseWasExpected: false,
+    promptText: "旧问题", sourceTurnId: "old-turn",
     variants: [
       { variantId: "variant-a", label: "A" as const, mode: "reuse_snapshot" as const, policy: policy("A") },
       { variantId: "variant-b", label: "B" as const, mode: "rerun" as const, policy: policy("B") },

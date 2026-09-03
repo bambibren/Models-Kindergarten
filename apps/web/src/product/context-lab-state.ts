@@ -1,11 +1,10 @@
-import type { AgentRecord, ExperimentContextPolicy, ReasoningProfile } from "@kindergarten/contracts";
+import type { AgentRecord, ExperimentContextPolicy, ExperimentTestDraftV2, ReasoningProfile } from "@kindergarten/contracts";
 
 /** 描述「ContextLabLane」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ContextLabLane {
   testId: string;
   label: "A" | "B" | "C";
   sourceAgent: { agentId: string; name: string; updatedAt: string };
-  modelStudentId: string;
   reasoningProfile: ReasoningProfile;
   policy: ExperimentContextPolicy;
 }
@@ -14,12 +13,11 @@ export interface ContextLabLane {
 export function initialContextLanes(
   agent: AgentRecord,
   policy: ExperimentContextPolicy,
-  modelStudentId: string,
   reasoningProfile: ReasoningProfile = "auto",
 ): ContextLabLane[] {
   return [
-    makeContextLane("A", agent, policy, modelStudentId, reasoningProfile),
-    makeContextLane("B", agent, policy, modelStudentId, reasoningProfile),
+    makeContextLane("A", agent, policy, reasoningProfile),
+    makeContextLane("B", agent, policy, reasoningProfile),
   ];
 }
 
@@ -47,10 +45,22 @@ export function removeContextLane(lanes: ContextLabLane[], testId: string): Cont
 export function updateContextLane(
   lanes: ContextLabLane[],
   testId: string,
-  change: Partial<Pick<ContextLabLane, "modelStudentId" | "reasoningProfile" | "policy">>,
+  change: Partial<Pick<ContextLabLane, "reasoningProfile" | "policy">>,
 ): ContextLabLane[] {
   return lanes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.testId === testId ? { ...item, ...structuredClone(change) } : item);
+}
+
+/** 把实验级公共模型填入 Test 草稿，Test 状态本身不再持有可分叉的模型选择。 */
+export function testDraftFromLane(lane: ContextLabLane, modelStudentId: string): ExperimentTestDraftV2 {
+  return {
+    testId: lane.testId,
+    label: lane.label,
+    sourceAgent: lane.sourceAgent,
+    modelStudentId,
+    reasoningProfile: lane.reasoningProfile,
+    policy: lane.policy,
+  };
 }
 
 /** 执行「importAgentIntoLane」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -92,14 +102,12 @@ function makeContextLane(
   label: ContextLabLane["label"],
   agent: AgentRecord,
   policy: ExperimentContextPolicy,
-  modelStudentId: string,
   reasoningProfile: ReasoningProfile,
 ): ContextLabLane {
   return {
     testId: globalThis.crypto.randomUUID(),
     label,
     sourceAgent: sourceAgentRef(agent),
-    modelStudentId,
     reasoningProfile,
     policy: structuredClone(policy),
   };

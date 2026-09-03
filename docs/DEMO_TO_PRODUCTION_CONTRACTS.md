@@ -709,7 +709,6 @@ export interface ExecutionMetricsSnapshot {
   normallyCompleted: boolean;
   firstTokenLatencyMs?: number;
   totalDurationMs: number;
-  toolUseWasExpected: boolean;
   toolSuccessCount: number;
   toolFailureCount: number;
   errorCount: number;
@@ -792,7 +791,7 @@ export interface ExperimentScorecard {
 四维规则：
 
 1. 理解、规划、输出分由服务端根据三类 annotation facts 和 rubricVersion 计算；不能直接信任浏览器提交的维度分。v1 由模型生成题目、人做判断：理解维逐 lane 标记公共需求“命中/未命中”；规划维对工作表中的每个步骤标记“有效/部分有效/不计分”；输出维对工作表中的每个完整结果段标记“有效/部分有效/不计分”，以去空白字符覆盖率计分。Remote 校验题目 ID、字符范围和 hash 必须来自当前工作表，不能只靠浏览器提交。
-2. 执行分由同一 Experiment 各 lane 的 `ExecutionMetricsSnapshot` 和 `runtime_execution_v1` 计算：正常完成 30 分；Tool 成功率最多 25 分（无 Tool 且本次实验策略没有要求使用 Tool 时按满分）；无错误 15 分；无权限违规 15 分；无重复 Tool 5 分；相同模型、相同环境下的首 Token 延迟和总耗时相对表现合计最多 10 分。`toolUseWasExpected` 由 Experiment policy/fixture 在运行前确定，不能根据回答文本事后猜测。未正常完成时最终执行分取 `min(rawScore, 59)`。
+2. 执行分由同一 Experiment 各 lane 的 `ExecutionMetricsSnapshot` 和 `runtime_execution_v1` 计算：正常完成 30 分；实际发生 Tool 调用时按成功率计算、没有 Tool 调用时该项满分，最多 25 分；无错误 15 分；无权限违规 15 分；无重复 Tool 5 分；相同模型、相同环境下的首 Token 延迟和总耗时相对表现合计最多 10 分。未正常完成时最终执行分取 `min(rawScore, 59)`。
 3. `modelRoundCount`、`toolCallCount`、Context/Output Tokens 作为解释证据保存，但 v1 没有可靠单调方向，不直接加减分。
 4. 三个人工维度任一未完成时 status=`draft`，不生成 totalScore、ranking 或 winner，也不得默认 100 分。
 5. 完整时每个 lane 的 `totalScore = round((understanding + planning + output + execution) / 4)`。ranking 和 winner 由服务端派生；并列第一时 `winnerVariantIds` 可有多个，UI 显示“并列”。
@@ -801,11 +800,9 @@ export interface ExperimentScorecard {
 `runtime_execution_v1` 的确定性公式：
 
 ```ts
-toolReliability = toolCallCount === 0 && !toolUseWasExpected
+toolReliability = toolCallCount === 0
   ? 25
-  : toolCallCount === 0
-    ? 0
-    : 25 * toolSuccessCount / (toolSuccessCount + toolFailureCount);
+  : 25 * toolSuccessCount / (toolSuccessCount + toolFailureCount);
 
 errorHygiene = Math.max(0, 15 - 5 * errorCount);
 permissionSafety = permissionViolationCount === 0 ? 15 : 0;

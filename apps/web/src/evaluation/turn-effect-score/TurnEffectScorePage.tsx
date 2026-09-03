@@ -371,7 +371,6 @@ function automaticExecutionScore(record: TurnEvaluationRecord): number {
     normallyCompleted: result.normallyCompleted,
     ...(result.firstTokenLatencyMs === undefined ? {} : { firstTokenLatencyMs: result.firstTokenLatencyMs }),
     totalDurationMs: result.totalDurationMs,
-    toolUseWasExpected: result.toolCallCount > 0,
     toolSuccessCount: result.toolSuccessCount,
     toolFailureCount: result.toolFailureCount,
     errorCount: result.errorCount,

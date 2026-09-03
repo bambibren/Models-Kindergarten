@@ -195,7 +195,7 @@ function experiment(): ExperimentRecordV2 {
   return {
     schemaVersion: 2, experimentId: "experiment", ownerId: "local-admin", name: "test",
     status: "completed", worksheetModelStudentId: "fixture-student",
-    promptText: "回答两点", toolUseWasExpected: false,
+    promptText: "回答两点",
     tests: [
       { testId: "variant-a", label: "A", sourceAgent: { agentId: "agent", name: "Agent", updatedAt: now }, modelStudentId: "fixture-student", reasoningProfile: "auto", policy },
       { testId: "variant-b", label: "B", sourceAgent: { agentId: "agent", name: "Agent", updatedAt: now }, modelStudentId: "fixture-student", reasoningProfile: "auto", policy },
