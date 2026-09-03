@@ -50,10 +50,12 @@ async function main() {
     const tag = releaseTag(release);
     if (!tag.startsWith(shortCommit)) throw new Error(`release 必须以当前提交 ${shortCommit} 开头`);
     const image = `${imageRepository}:${tag}`;
+    const contextExperiments = booleanFlag(args, "enable-context-experiments");
 
     run("docker", [
       "buildx", "build", "--platform", "linux/amd64",
       "--file", "deploy/images/Dockerfile.web",
+      "--build-arg", `VITE_ENABLE_CONTEXT_EXPERIMENTS=${String(contextExperiments)}`,
       "--tag", image, "--provenance=true", "--push", ".",
     ], source);
     const digest = imageDigest(image);
@@ -63,6 +65,7 @@ async function main() {
     const manifestFile = resolve(repoRoot, "deploy/releases", release, "release-manifest.json");
     await mkdir(dirname(manifestFile), { recursive: true });
     await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    console.log(`上下文实验构建开关：${contextExperiments ? "已开启" : "已关闭"}`);
     console.log(`Web 镜像发布并验收通过：${pinnedImage}`);
     console.log(`Release manifest 已生成：${manifestFile}`);
   } finally {
@@ -164,6 +167,13 @@ function required(values, key) {
   const value = values.get(key);
   if (typeof value !== "string" || !value) throw new Error(`缺少 --${key}`);
   return value;
+}
+
+function booleanFlag(values, key) {
+  const value = values.get(key);
+  if (value === undefined) return false;
+  if (value === true) return true;
+  throw new Error(`--${key} 是无值开关，请不要追加参数值`);
 }
 
 function run(command, args, cwd, inherit = true, extraEnv = {}) {

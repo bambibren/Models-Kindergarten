@@ -11,7 +11,9 @@ COPY packages/evaluation-contract/package.json packages/evaluation-contract/pack
 COPY packages/runtime-observation/package.json packages/runtime-observation/package.json
 RUN pnpm install --frozen-lockfile
 COPY . .
-RUN pnpm --filter @kindergarten/web build
+# Vite 开关只在构建期生效；默认关闭，由正式发布脚本显式决定是否开放上下文实验。
+ARG VITE_ENABLE_CONTEXT_EXPERIMENTS=false
+RUN VITE_ENABLE_CONTEXT_EXPERIMENTS=${VITE_ENABLE_CONTEXT_EXPERIMENTS} pnpm --filter @kindergarten/web build
 # Web 镜像是受管 Skill 的正式发布载体；缺项或夹带额外目录都必须让构建失败。
 RUN MK_REQUIRED_SKILLS_FILE=/workspace/deploy/managed-web-skills.json \
   node resource/export-static.mjs /workspace/resource/dist-static
