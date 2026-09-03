@@ -19,7 +19,7 @@ const artifactNavigation = {
 };
 
 /** 渲染「ChatViewport」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-export function ChatViewport({ historyPaging, historyChatEntries, streamingChatEntries, initializing, promptTurn, sessionId, scoreCompatibilityPassed, contextExperimentCompatibilityPassed, scorableTurnIds, experimentsEnabled = contextExperimentsEnabled(), onTurnAction, onLoadOlder }: {
+export function ChatViewport({ historyPaging, historyChatEntries, streamingChatEntries, initializing, promptTurn, sessionId, scoreCompatibilityPassed, contextExperimentCompatibilityPassed, completedTurnIds, experimentsEnabled = contextExperimentsEnabled(), onTurnAction, onLoadOlder }: {
   historyPaging: { loading: boolean; hasMore: boolean };
   historyChatEntries: EntryCollection;
   streamingChatEntries: EntryCollection;
@@ -28,7 +28,7 @@ export function ChatViewport({ historyPaging, historyChatEntries, streamingChatE
   sessionId?: string | null;
   scoreCompatibilityPassed: boolean;
   contextExperimentCompatibilityPassed: boolean;
-  scorableTurnIds?: ReadonlySet<string>;
+  completedTurnIds?: ReadonlySet<string>;
   experimentsEnabled?: boolean;
   onTurnAction: (action: TurnAction) => void;
   onLoadOlder: () => void;
@@ -77,11 +77,12 @@ function updateFollowState() {
       onClick={onLoadOlder}
     >{historyPaging.loading ? "正在加载更早记录…" : "加载更早的 20 个 Turn"}</button></div> : null}
     <ChatBlockList artifactNavigation={artifactNavigation} collection={historyChatEntries} renderTurnFooter={(turnId) => {
-      // 两个兼容参数只控制各自评测入口；效果打分与上下文实验仍分别判断自己的业务条件。
-      const scoreHref = scoreCompatibilityPassed && sessionId && scorableTurnIds?.has(turnId)
+      // Turn 终态是两个入口共同的生命周期边界；兼容与功能开关仍分别判断，失败或执行中的 Turn 不显示入口。
+      const turnCompleted = completedTurnIds?.has(turnId) === true;
+      const scoreHref = turnCompleted && scoreCompatibilityPassed && sessionId
         ? `/evaluation/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`
         : undefined;
-      const experimentHref = contextExperimentCompatibilityPassed && experimentsEnabled && experimentTurnIds.has(turnId)
+      const experimentHref = turnCompleted && contextExperimentCompatibilityPassed && experimentsEnabled && experimentTurnIds.has(turnId)
         ? `/context-lab?turnId=${encodeURIComponent(turnId)}`
         : undefined;
       if (!scoreHref && !experimentHref) return null;

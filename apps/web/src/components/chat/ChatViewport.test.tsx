@@ -61,7 +61,7 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
       onTurnAction={() => undefined}
       promptTurn={idlePromptTurn}
       scoreCompatibilityPassed
-      scorableTurnIds={new Set(["turn-1"])}
+      completedTurnIds={new Set(["turn-1"])}
       sessionId="session-1"
       streamingChatEntries={emptyEntries()}
     />);
@@ -72,7 +72,7 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
 
   it("在效果打分右侧独立显示上下文实验按钮", () => {
     const entries = {
-      order: ["context:turn-1", "message:assistant"],
+      order: ["context:turn-1", "message:assistant", "tool:failed"],
       byId: {
         "context:turn-1": {
           type: "context_summary" as const,
@@ -86,11 +86,23 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
           },
         },
         "message:assistant": { type: "message" as const, id: "message:assistant", messageId: "assistant", turnId: "turn-1", role: "assistant" as const, content: [{ type: "text" as const, text: "回答" }], status: "done" as const },
+        "tool:failed": {
+          type: "tool_call" as const,
+          id: "tool:failed",
+          toolCallId: "failed",
+          turnId: "turn-1",
+          title: "复用 Artifact 失败",
+          name: "reuse_artifact",
+          kind: "other" as const,
+          status: "failed" as const,
+          content: [],
+          locations: [],
+        },
       },
     };
     const render = (
       experimentsEnabled: boolean,
-      scorableTurnIds: ReadonlySet<string>,
+      completedTurnIds: ReadonlySet<string>,
       scoreCompatibilityPassed = true,
       contextExperimentCompatibilityPassed = true,
     ) => renderToStaticMarkup(<ChatViewport
@@ -103,23 +115,27 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
       onTurnAction={() => undefined}
       promptTurn={idlePromptTurn}
       scoreCompatibilityPassed={scoreCompatibilityPassed}
-      scorableTurnIds={scorableTurnIds}
+      completedTurnIds={completedTurnIds}
       sessionId="session-1"
       streamingChatEntries={emptyEntries()}
     />);
 
     const both = render(true, new Set(["turn-1"]));
-    const experimentOnly = render(true, new Set());
+    const experimentOnly = render(true, new Set(["turn-1"]), false, true);
     const scoreOnly = render(false, new Set(["turn-1"]));
+    const failed = render(true, new Set());
     const historical = render(true, new Set(["turn-1"]), false, false);
     const scoreCompatibilityOnly = render(true, new Set(["turn-1"]), true, false);
     const experimentCompatibilityOnly = render(true, new Set(["turn-1"]), false, true);
     expect(both.indexOf("本次对话效果打分")).toBeLessThan(both.indexOf("ABTest评测"));
+    expect(both.indexOf("复用 Artifact 失败")).toBeLessThan(both.indexOf("本次对话效果打分"));
     expect(both).toContain('<button class="turn-context-experiment" type="button">');
     expect(experimentOnly).toContain("ABTest评测");
     expect(experimentOnly).not.toContain("本次对话效果打分");
     expect(scoreOnly).toContain("本次对话效果打分");
     expect(scoreOnly).not.toContain("ABTest评测");
+    expect(failed).not.toContain("本次对话效果打分");
+    expect(failed).not.toContain("ABTest评测");
     expect(historical).not.toContain("本次对话效果打分");
     expect(historical).not.toContain("ABTest评测");
     expect(scoreCompatibilityOnly).toContain("本次对话效果打分");

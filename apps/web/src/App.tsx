@@ -689,7 +689,7 @@ function startArtifactResize(event: ReactPointerEvent<HTMLDivElement>): void {
             promptTurn={promptTurn}
             sessionId={chat.sessionId}
             contextExperimentCompatibilityPassed={evaluationEntryCompatibilityPassed}
-            scorableTurnIds={completedTurnIds}
+            completedTurnIds={completedTurnIds}
             scoreCompatibilityPassed={evaluationEntryCompatibilityPassed}
             onTurnAction={handleTurnAction}
             onLoadOlder={/** 处理「onLoadOlder」事件，校验归属后再推进状态且避免重复提交。 */
