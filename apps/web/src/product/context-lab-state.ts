@@ -5,7 +5,6 @@ export interface ContextLabLane {
   testId: string;
   label: "A" | "B" | "C";
   sourceAgent: { agentId: string; name: string; updatedAt: string };
-  reasoningProfile: ReasoningProfile;
   policy: ExperimentContextPolicy;
 }
 
@@ -13,11 +12,10 @@ export interface ContextLabLane {
 export function initialContextLanes(
   agent: AgentRecord,
   policy: ExperimentContextPolicy,
-  reasoningProfile: ReasoningProfile = "auto",
 ): ContextLabLane[] {
   return [
-    makeContextLane("A", agent, policy, reasoningProfile),
-    makeContextLane("B", agent, policy, reasoningProfile),
+    makeContextLane("A", agent, policy),
+    makeContextLane("B", agent, policy),
   ];
 }
 
@@ -45,20 +43,20 @@ export function removeContextLane(lanes: ContextLabLane[], testId: string): Cont
 export function updateContextLane(
   lanes: ContextLabLane[],
   testId: string,
-  change: Partial<Pick<ContextLabLane, "reasoningProfile" | "policy">>,
+  change: Partial<Pick<ContextLabLane, "policy">>,
 ): ContextLabLane[] {
   return lanes.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => item.testId === testId ? { ...item, ...structuredClone(change) } : item);
 }
 
-/** 把实验级公共模型填入 Test 草稿，Test 状态本身不再持有可分叉的模型选择。 */
-export function testDraftFromLane(lane: ContextLabLane, modelStudentId: string): ExperimentTestDraftV2 {
+/** 把实验级公共模型与推理档位填入 Test 草稿，Test 状态不再持有这两项公共配置。 */
+export function testDraftFromLane(lane: ContextLabLane, modelStudentId: string, reasoningProfile: ReasoningProfile): ExperimentTestDraftV2 {
   return {
     testId: lane.testId,
     label: lane.label,
     sourceAgent: lane.sourceAgent,
     modelStudentId,
-    reasoningProfile: lane.reasoningProfile,
+    reasoningProfile,
     policy: lane.policy,
   };
 }
@@ -102,13 +100,11 @@ function makeContextLane(
   label: ContextLabLane["label"],
   agent: AgentRecord,
   policy: ExperimentContextPolicy,
-  reasoningProfile: ReasoningProfile,
 ): ContextLabLane {
   return {
     testId: globalThis.crypto.randomUUID(),
     label,
     sourceAgent: sourceAgentRef(agent),
-    reasoningProfile,
     policy: structuredClone(policy),
   };
 }

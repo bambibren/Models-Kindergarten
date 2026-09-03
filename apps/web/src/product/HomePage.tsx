@@ -134,7 +134,7 @@ function selectMention(artifact: ArtifactRecord) {
 (item) => <button disabled={item.status !== "ready"} key={item.modelStudentId} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
 () => { setModelId(item.modelStudentId); modelPicker.current?.removeAttribute("open"); }}><span><GraduationCap size={14} /></span><div><strong>{item.displayName}</strong><small>{joinMetadata([formatContextWindow(item.contextWindowTokens), item.model, item.status === "ready" ? "可用" : item.statusMessage ?? "不可用"])}</small></div>{item.modelStudentId === modelId && <Check size={13} />}</button>)}</div>
         </details><a className="product-model-admission-link" href="/models/new"><UserPlus size={15} />新模型入园</a></div>
-      <h1>今天想让模型学习什么？</h1><p>选择一个真实 Agent，生成 HTML 或 PPTX，并把已发布产物继续复用。</p>
+      <h1>今天想让模型学习什么？</h1><p>通过Agent组合拳，学会做更厉害的事情！</p>
       <HomeCapabilities onOpenExperiment={openContextLab} onSelectPptx={/** 处理「onSelectPptx」事件，校验归属后再推进状态且避免重复提交。 */
 () => setPrompt(pptPrompt)} onSelectWebsite={/** 处理「onSelectWebsite」事件，校验归属后再推进状态且避免重复提交。 */
 () => setPrompt(websitePrompt)} />
