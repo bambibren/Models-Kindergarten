@@ -11,12 +11,14 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
     const html = renderToStaticMarkup(<ChatViewport
       historyPaging={{ loading: false, hasMore: false }}
       historyChatEntries={emptyEntries()}
+      contextExperimentCompatibilityPassed
       initializing
       onLoadOlder={/** 构造「onLoadOlder」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => undefined}
       onTurnAction={/** 构造「onTurnAction」测试辅助步骤；固定输入与隔离状态，并返回当前用例可直接断言的结果。 */
 () => undefined}
       promptTurn={idlePromptTurn}
+      scoreCompatibilityPassed
       streamingChatEntries={emptyEntries()}
     />);
 
@@ -29,10 +31,12 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
     const html = renderToStaticMarkup(<ChatViewport
       historyPaging={{ loading: false, hasMore: false }}
       historyChatEntries={emptyEntries()}
+      contextExperimentCompatibilityPassed
       initializing={false}
       onLoadOlder={() => undefined}
       onTurnAction={() => undefined}
       promptTurn={idlePromptTurn}
+      scoreCompatibilityPassed
       streamingChatEntries={emptyEntries()}
     />);
 
@@ -51,17 +55,77 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
     const html = renderToStaticMarkup(<ChatViewport
       historyPaging={{ loading: false, hasMore: false }}
       historyChatEntries={entries}
+      contextExperimentCompatibilityPassed
       initializing={false}
       onLoadOlder={() => undefined}
       onTurnAction={() => undefined}
       promptTurn={idlePromptTurn}
+      scoreCompatibilityPassed
       scorableTurnIds={new Set(["turn-1"])}
       sessionId="session-1"
       streamingChatEntries={emptyEntries()}
     />);
 
-    expect(html).toContain("效果打分");
+    expect(html).toContain("本次对话效果打分");
     expect(html).toContain("/evaluation/sessions/session-1/turns/turn-1");
+  });
+
+  it("在效果打分右侧独立显示上下文实验按钮", () => {
+    const entries = {
+      order: ["context:turn-1", "message:assistant"],
+      byId: {
+        "context:turn-1": {
+          type: "context_summary" as const,
+          id: "context:turn-1",
+          turnId: "turn-1",
+          summary: {
+            schemaVersion: 1 as const,
+            turnId: "turn-1",
+            items: [{ id: "system", kind: "system_instruction" as const, title: "系统指令", estimatedTokens: 12 }],
+            totalEstimatedTokens: 12,
+          },
+        },
+        "message:assistant": { type: "message" as const, id: "message:assistant", messageId: "assistant", turnId: "turn-1", role: "assistant" as const, content: [{ type: "text" as const, text: "回答" }], status: "done" as const },
+      },
+    };
+    const render = (
+      experimentsEnabled: boolean,
+      scorableTurnIds: ReadonlySet<string>,
+      scoreCompatibilityPassed = true,
+      contextExperimentCompatibilityPassed = true,
+    ) => renderToStaticMarkup(<ChatViewport
+      contextExperimentCompatibilityPassed={contextExperimentCompatibilityPassed}
+      experimentsEnabled={experimentsEnabled}
+      historyPaging={{ loading: false, hasMore: false }}
+      historyChatEntries={entries}
+      initializing={false}
+      onLoadOlder={() => undefined}
+      onTurnAction={() => undefined}
+      promptTurn={idlePromptTurn}
+      scoreCompatibilityPassed={scoreCompatibilityPassed}
+      scorableTurnIds={scorableTurnIds}
+      sessionId="session-1"
+      streamingChatEntries={emptyEntries()}
+    />);
+
+    const both = render(true, new Set(["turn-1"]));
+    const experimentOnly = render(true, new Set());
+    const scoreOnly = render(false, new Set(["turn-1"]));
+    const historical = render(true, new Set(["turn-1"]), false, false);
+    const scoreCompatibilityOnly = render(true, new Set(["turn-1"]), true, false);
+    const experimentCompatibilityOnly = render(true, new Set(["turn-1"]), false, true);
+    expect(both.indexOf("本次对话效果打分")).toBeLessThan(both.indexOf("ABTest评测"));
+    expect(both).toContain('<button class="turn-context-experiment" type="button">');
+    expect(experimentOnly).toContain("ABTest评测");
+    expect(experimentOnly).not.toContain("本次对话效果打分");
+    expect(scoreOnly).toContain("本次对话效果打分");
+    expect(scoreOnly).not.toContain("ABTest评测");
+    expect(historical).not.toContain("本次对话效果打分");
+    expect(historical).not.toContain("ABTest评测");
+    expect(scoreCompatibilityOnly).toContain("本次对话效果打分");
+    expect(scoreCompatibilityOnly).not.toContain("ABTest评测");
+    expect(experimentCompatibilityOnly).not.toContain("本次对话效果打分");
+    expect(experimentCompatibilityOnly).toContain("ABTest评测");
   });
 
   it("把回答中的内部 Artifact 标识投影为当前站点的 HTTP 路由", () => {
@@ -82,10 +146,12 @@ describe("ChatViewport empty state", /** 组织这一组相关测试，统一建
     const html = renderToStaticMarkup(<ChatViewport
       historyPaging={{ loading: false, hasMore: false }}
       historyChatEntries={entries}
+      contextExperimentCompatibilityPassed
       initializing={false}
       onLoadOlder={() => undefined}
       onTurnAction={() => undefined}
       promptTurn={idlePromptTurn}
+      scoreCompatibilityPassed
       streamingChatEntries={emptyEntries()}
     />);
 

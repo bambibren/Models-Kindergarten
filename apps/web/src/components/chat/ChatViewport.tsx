@@ -11,21 +11,25 @@ import { PromptTurnLoader } from "./PromptTurnLoader.js";
 import { PromptTurnStatusRow } from "../errors/PromptTurnStatusRow.js";
 import { Loader } from "../primitives/Loader.js";
 import { TokenUsageTotal } from "./TokenUsageTotal.js";
-import { Gauge } from "lucide-react";
+import { FlaskConical, Gauge } from "lucide-react";
+import { contextExperimentsEnabled } from "../../feature-flags.js";
 
 const artifactNavigation = {
   href: (artifactId: string) => `/artifacts/${encodeURIComponent(artifactId)}`,
 };
 
 /** 渲染「ChatViewport」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-export function ChatViewport({ historyPaging, historyChatEntries, streamingChatEntries, initializing, promptTurn, sessionId, scorableTurnIds, onTurnAction, onLoadOlder }: {
+export function ChatViewport({ historyPaging, historyChatEntries, streamingChatEntries, initializing, promptTurn, sessionId, scoreCompatibilityPassed, contextExperimentCompatibilityPassed, scorableTurnIds, experimentsEnabled = contextExperimentsEnabled(), onTurnAction, onLoadOlder }: {
   historyPaging: { loading: boolean; hasMore: boolean };
   historyChatEntries: EntryCollection;
   streamingChatEntries: EntryCollection;
   initializing: boolean;
   promptTurn: PromptTurnState;
   sessionId?: string | null;
+  scoreCompatibilityPassed: boolean;
+  contextExperimentCompatibilityPassed: boolean;
   scorableTurnIds?: ReadonlySet<string>;
+  experimentsEnabled?: boolean;
   onTurnAction: (action: TurnAction) => void;
   onLoadOlder: () => void;
 }) {
@@ -38,6 +42,10 @@ export function ChatViewport({ historyPaging, historyChatEntries, streamingChatE
 () => streamingChatEntries.order.at(-1) ?? historyChatEntries.order.at(-1),
     [historyChatEntries.order, streamingChatEntries.order],
   );
+  const experimentTurnIds = useMemo(() => new Set(historyChatEntries.order.flatMap((id) => {
+    const entry = historyChatEntries.byId[id];
+    return entry?.type === "context_summary" ? [entry.turnId] : [];
+  })), [historyChatEntries]);
   useEffect(/** 同步组件生命周期内的外部状态，并在清理阶段释放订阅或临时资源。 */
 () => {
     const viewport = viewportRef.current;
@@ -68,9 +76,24 @@ function updateFollowState() {
       type="button"
       onClick={onLoadOlder}
     >{historyPaging.loading ? "正在加载更早记录…" : "加载更早的 20 个 Turn"}</button></div> : null}
-    <ChatBlockList artifactNavigation={artifactNavigation} collection={historyChatEntries} renderTurnFooter={(turnId) => sessionId && scorableTurnIds?.has(turnId) ? <div className="turn-score-action">
-      <a href={`/evaluation/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`}><Gauge size={14} />效果打分</a>
-    </div> : null} />
+    <ChatBlockList artifactNavigation={artifactNavigation} collection={historyChatEntries} renderTurnFooter={(turnId) => {
+      // 两个兼容参数只控制各自评测入口；效果打分与上下文实验仍分别判断自己的业务条件。
+      const scoreHref = scoreCompatibilityPassed && sessionId && scorableTurnIds?.has(turnId)
+        ? `/evaluation/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`
+        : undefined;
+      const experimentHref = contextExperimentCompatibilityPassed && experimentsEnabled && experimentTurnIds.has(turnId)
+        ? `/context-lab?turnId=${encodeURIComponent(turnId)}`
+        : undefined;
+      if (!scoreHref && !experimentHref) return null;
+      return <div className="turn-score-action">
+        {scoreHref && <a href={scoreHref}><Gauge size={14} />本次对话效果打分</a>}
+        {experimentHref && <button
+          className="turn-context-experiment"
+          type="button"
+          onClick={() => { location.href = experimentHref; }}
+        ><FlaskConical size={13} /><span>ABTest评测</span></button>}
+      </div>;
+    }} />
     <ChatBlockList artifactNavigation={artifactNavigation} collection={streamingChatEntries} />
     {isPromptTurnActive(promptTurn) && <PromptTurnLoader turn={promptTurn} />}
     {!isPromptTurnActive(promptTurn) && <PromptTurnStatusRow state={promptTurn} onAction={onTurnAction} />}

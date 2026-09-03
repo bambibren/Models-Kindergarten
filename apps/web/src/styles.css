@@ -213,11 +213,11 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid #343431; outli
 .token-usage-total { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--context-line-soft); color: var(--context-ink-faint); font-size: 10px; line-height: 1.4; }
 .token-usage-total span { white-space: nowrap; }
 .token-usage-total span + span::before { margin-right: 12px; color: #c0c1bb; content: "·"; }
-.turn-score-action { display: flex; align-items: center; min-height: 28px; margin: -18px 0 27px; }
-.turn-score-action a { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 5px 9px; border: 1px solid #d8d9d3; border-radius: 8px; color: #696b65; background: #fff; font-size: 10px; font-weight: 570; line-height: 1; text-decoration: none; transition: border-color var(--context-duration) var(--context-ease-out), background var(--context-duration) var(--context-ease-out), color var(--context-duration) var(--context-ease-out); }
-.turn-score-action a:hover { border-color: #bfc1b8; color: #30332e; background: #f7f7f4; }
-.turn-score-action a:active { background: #ededE8; }
-.turn-score-action a:focus-visible { outline: 2px solid var(--context-focus); outline-offset: 2px; }
+.turn-score-action { display: flex; align-items: center; gap: 6px; min-height: 28px; margin: -18px 0 27px; }
+.turn-score-action a, .turn-score-action button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 5px 9px; border: 1px solid #d8d9d3; border-radius: 8px; color: #696b65; background: #fff; font-size: 10px; font-weight: 570; line-height: 1; text-decoration: none; transition: border-color var(--context-duration) var(--context-ease-out), background var(--context-duration) var(--context-ease-out), color var(--context-duration) var(--context-ease-out); }
+.turn-score-action a:hover, .turn-score-action button:hover { border-color: #bfc1b8; color: #30332e; background: #f7f7f4; }
+.turn-score-action a:active, .turn-score-action button:active { background: #ededE8; }
+.turn-score-action a:focus-visible, .turn-score-action button:focus-visible { outline: 2px solid var(--context-focus); outline-offset: 2px; }
 .spin { animation: spin .95s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

@@ -27,6 +27,7 @@ import { clampArtifactWidth, defaultArtifactWidth } from "./session/artifact-spl
 import { selectContextWindowUsage } from "./chat/context-window-usage.js";
 import { projectSessionTurnPage } from "./chat/session-history-page.js";
 import { acpWebSocketUrl, CONTROL_API_URL } from "./deployment-endpoints.js";
+import { sessionSupportsEvaluationEntries } from "./session/evaluation-entry-compatibility.js";
 import {
   activePublishedArtifactId,
   closedPublishedArtifactPreview,
@@ -66,6 +67,7 @@ export default function App() {
     nextBeforeTurnId?: string;
   }>({ loading: false, hasMore: false });
   const [completedTurnIds, setCompletedTurnIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [evaluationEntryCompatibilityPassed, setEvaluationEntryCompatibilityPassed] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const artifactWidthRef = useRef(artifactWidth);
   const artifactDragRef = useRef<{ pointerId: number; workspaceLeft: number; workspaceWidth: number } | null>(null);
@@ -356,6 +358,8 @@ function openEmptySession(sessionId: string): void {
     setReasoningBusy(false);
     setHistoryPaging({ loading: false, hasMore: false });
     setCompletedTurnIds(new Set());
+    // 评测入口兼容性判断只拦截上线前的历史 Session，不影响 Chat 的其它能力。
+    setEvaluationEntryCompatibilityPassed(true);
     setIdentity(/** 执行「openEmptySession」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (current) => ({ ...current, agentAvailability: "loading" }));
   }
@@ -372,6 +376,8 @@ async function loadSession(client: AcpWebClient, session: SessionInfo): Promise<
     const operationId = crypto.randomUUID();
     const store = useAppStore.getState();
     setCompletedTurnIds(new Set());
+    // 服务端创建时间返回前先关闭评测入口，避免历史 Session 短暂继承上一个 Session 的兼容状态。
+    setEvaluationEntryCompatibilityPassed(false);
     setIdentity(/** 读取「loadSession」所需数据，并遵守作用域、分页与容量边界。 */
 (current) => ({ ...current, agentAvailability: "loading" }));
     store.dispatchPromptTurn({ type: "turn/reset" });
@@ -394,6 +400,7 @@ async function loadSession(client: AcpWebClient, session: SessionInfo): Promise<
         ...(page.nextBeforeTurnId ? { nextBeforeTurnId: page.nextBeforeTurnId } : {}),
       });
       setCompletedTurnIds(new Set(page.turns.filter((turn) => turn.state.status === "completed").map((turn) => turn.turnId)));
+      setEvaluationEntryCompatibilityPassed(sessionSupportsEvaluationEntries(page.session.createdAt));
     } finally {
       const current = useAppStore.getState();
       const turn = current.promptTurn;
@@ -681,7 +688,9 @@ function startArtifactResize(event: ReactPointerEvent<HTMLDivElement>): void {
             streamingChatEntries={chat.streamingChatEntries}
             promptTurn={promptTurn}
             sessionId={chat.sessionId}
+            contextExperimentCompatibilityPassed={evaluationEntryCompatibilityPassed}
             scorableTurnIds={completedTurnIds}
+            scoreCompatibilityPassed={evaluationEntryCompatibilityPassed}
             onTurnAction={handleTurnAction}
             onLoadOlder={/** 处理「onLoadOlder」事件，校验归属后再推进状态且避免重复提交。 */
 () => void loadOlderHistory()}

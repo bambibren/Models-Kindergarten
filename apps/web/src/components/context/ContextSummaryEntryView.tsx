@@ -15,9 +15,6 @@ import type {
   ContextSummaryKind,
 } from "@kindergarten/contracts";
 import type { ContextSummaryEntry } from "../../chat/chat-types.js";
-import { useEffect, useState } from "react";
-import { controlApi } from "../../api/control-api.js";
-import { contextExperimentsEnabled } from "../../feature-flags.js";
 
 const icons: Record<ContextSummaryKind, LucideIcon> = {
   system_instruction: ShieldCheck,
@@ -32,17 +29,6 @@ const icons: Record<ContextSummaryKind, LucideIcon> = {
 /** 渲染「ContextSummaryEntryView」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function ContextSummaryEntryView({ entry }: { entry: ContextSummaryEntry }) {
   const { items, totalEstimatedTokens } = entry.summary;
-  const experimentsEnabled = contextExperimentsEnabled();
-  const [canExperiment, setCanExperiment] = useState(false);
-  useEffect(/** 只有已完成 Turn 才能导入实验，避免把仍在流式执行的上下文冻结为实验输入。 */
-() => {
-    if (!experimentsEnabled) return;
-    let disposed = false;
-    void controlApi.turn(entry.turnId).then(/** 读取完成状态后再开放入口，卸载后的响应不得回写组件。 */
-(turn) => { if (!disposed) setCanExperiment(turn.state.status === "completed"); }).catch(/** 入口读取失败不改变聊天主链。 */
-() => undefined);
-    return () => { disposed = true; };
-  }, [entry.turnId, experimentsEnabled]);
   if (items.length === 0) return null;
   return <Collapsible.Root className="context-summary">
     <Collapsible.Trigger className="context-summary-trigger">
@@ -55,7 +41,6 @@ export function ContextSummaryEntryView({ entry }: { entry: ContextSummaryEntry 
       <div className="context-summary-panel">
         {items.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
 (item) => <ContextSummaryRow key={item.id} item={item} />)}
-        {canExperiment && <a className="context-experiment-link" href={`/context-lab?turnId=${encodeURIComponent(entry.turnId)}`}>用本轮做上下文对照实验</a>}
       </div>
     </Collapsible.Content>
   </Collapsible.Root>;
