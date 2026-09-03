@@ -1,11 +1,20 @@
 import type { ArtifactPreviewResponse } from "@kindergarten/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { PublishedPreview } from "./PublishedArtifactPanel.js";
+import { PublishedArtifactPanel, PublishedPreview } from "./PublishedArtifactPanel.js";
 import { shouldUseStaticPptxPreview } from "../components/artifacts/PptxPreview.js";
 
 describe("PublishedPreview", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {
+  it("顶部工具栏提供当前 Artifact 的新页面入口", () => {
+    const html = renderToStaticMarkup(<PublishedArtifactPanel artifactId="artifact_share/测试" onClose={() => undefined} />);
+
+    expect(html).toContain('aria-label="在新页面打开 Artifact"');
+    expect(html).toContain('href="/artifacts/artifact_share%2F%E6%B5%8B%E8%AF%95"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+  });
+
   it("浏览器 PPTX 静态预览严格限制为 32 MiB", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     expect(shouldUseStaticPptxPreview(32 * 1024 * 1024)).toBe(true);

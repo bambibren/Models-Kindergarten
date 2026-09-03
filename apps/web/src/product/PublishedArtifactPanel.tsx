@@ -1,4 +1,4 @@
-import { Download, FileCode2, FileText, RefreshCw, X } from "lucide-react";
+import { Download, FileCode2, FileText, RefreshCw, Share2, X } from "lucide-react";
 import { useCallback } from "react";
 import { controlApi } from "../api/control-api.js";
 import { HtmlPreviewFrame } from "../components/artifacts/HtmlPreviewFrame.js";
@@ -17,6 +17,7 @@ export function PublishedArtifactPanel({ artifactId, onClose }: { artifactId: st
       <div className="artifact-title">{value?.artifact.kind === "html_bundle" ? <FileCode2 size={15} /> : <FileText size={15} />}<span><strong>{value?.artifact.displayName ?? "Artifact 预览"}</strong><small>{value ? `v${value.artifact.version ?? 1} · ` : ""}{value?.artifact.kind === "html_bundle" ? "HTML Bundle" : value?.artifact.primary.mimeType ?? "正在读取"} · {artifactId.slice(-10)}</small></span></div>
       <div className="artifact-actions">
         <a aria-label="下载 Artifact" href={controlApi.artifactContentUrl(artifactId)} title="下载 Artifact"><Download size={15} /></a>
+        <a aria-label="在新页面打开 Artifact" href={`/artifacts/${encodeURIComponent(artifactId)}`} rel="noopener noreferrer" target="_blank" title="在新页面打开 Artifact"><Share2 size={15} /></a>
         <button aria-label="刷新当前预览" disabled={state.phase === "loading"} title="刷新当前预览" type="button" onClick={retry}><RefreshCw size={15} /></button>
         <button aria-label="关闭产物预览" title="关闭产物预览" type="button" onClick={onClose}><X size={16} /></button>
       </div>
