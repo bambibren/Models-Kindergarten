@@ -42,12 +42,9 @@ export function ContentRenderer({ content, streaming = false, artifactNavigation
       }
       if (item.type === "resource_link") {
         const artifactId = parseArtifactUri(item.uri);
-        return <a href={artifactId && artifactNavigation ? artifactNavigation.href(artifactId) : item.uri} key={index} onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-(event) => {
-        if (!artifactId || artifactNavigation) return;
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("mk-open-artifact", { detail: artifactId }));
-        }} rel="noreferrer" target="_blank">{item.title ?? item.name}</a>;
+        if (artifactId && !artifactNavigation) return <button key={index} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+() => window.dispatchEvent(new CustomEvent("mk-open-artifact", { detail: artifactId }))}>{item.title ?? item.name}</button>;
+        return <a href={artifactId ? artifactNavigation?.href(artifactId) : item.uri} key={index} rel="noreferrer" target="_blank">{item.title ?? item.name}</a>;
       }
       return <details key={index}><summary>{item.resource.uri}</summary><pre>{"text" in item.resource ? item.resource.text : "二进制资源"}</pre></details>;
     })}

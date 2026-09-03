@@ -73,7 +73,7 @@ describe("ToolItem", /** 组织这一组相关测试，统一建立场景边界�
     expect(html.indexOf("预览 index.html")).toBeLessThan(html.indexOf("tool-detail"));
   });
 
-  it("由外层消息流环境把 Artifact 切换为新页面链接", () => {
+  it("外层消息流的新页面导航不改变工具卡片的本页预览入口", () => {
     const entry: ToolCallEntry = {
       id: "tool:publish-2",
       type: "tool_call",
@@ -94,15 +94,11 @@ describe("ToolItem", /** 组织这一组相关测试，统一建立场景边界�
       locations: [],
     };
 
-    const html = renderToStaticMarkup(<ToolItem
-      artifactNavigation={{ href: (artifactId) => `/artifacts/${artifactId}` }}
-      entry={entry}
-    />);
+    const html = renderToStaticMarkup(<ToolItem entry={entry} />);
 
-    expect(html).toContain("href=\"/artifacts/artifact_12345678\"");
-    expect(html).toContain("target=\"_blank\"");
-    expect(html).toContain("打开 页面");
-    expect(html).not.toContain("预览 页面");
+    expect(html).toContain("<button type=\"button\">预览 页面</button>");
+    expect(html).not.toContain("target=\"_blank\"");
+    expect(html).not.toContain("href=\"/artifacts/artifact_12345678\"");
   });
 });
 

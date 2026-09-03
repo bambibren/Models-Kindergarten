@@ -47,4 +47,15 @@ describe("ContentRenderer internal links", /** 组织这一组相关测试，统
     expect(html).toContain("target=\"_blank\"");
     expect(html).toContain("打开产物");
   });
+
+  it("没有外部导航时把 Artifact 资源打开到本页预览", () => {
+    const html = renderToStaticMarkup(<ContentRenderer content={[{
+      type: "resource_link",
+      name: "页面",
+      uri: "artifact://artifact_12345678",
+    }]} />);
+
+    expect(html).toContain("<button type=\"button\">页面</button>");
+    expect(html).not.toContain("target=\"_blank\"");
+  });
 });

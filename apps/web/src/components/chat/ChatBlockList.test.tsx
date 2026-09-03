@@ -26,7 +26,8 @@ describe("ChatBlockList", () => {
     expect(html).toContain("reasoning-item");
     expect(html).toContain("tool-item");
     expect(html).toContain("assistant-message");
-    expect(html.match(/href=\"\/artifacts\/artifact_12345678\"/g)).toHaveLength(2);
+    expect(html.match(/href=\"\/artifacts\/artifact_12345678\"/g)).toHaveLength(1);
+    expect(html).toContain("<button type=\"button\">预览 页面</button>");
   });
 
   it("只在每个 Turn 的最后一个可见区块后插入一次外部操作", () => {

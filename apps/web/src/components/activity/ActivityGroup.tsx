@@ -10,7 +10,7 @@ export function ActivityGroup({ itemIds, collection, artifactNavigation }: { ite
 (id) => {
       const entry = collection.byId[id];
       if (entry?.type === "thought") return <ReasoningItem artifactNavigation={artifactNavigation} entry={entry} key={id} />;
-      if (entry?.type === "tool_call") return <ToolItem artifactNavigation={artifactNavigation} entry={entry} key={id} />;
+      if (entry?.type === "tool_call") return <ToolItem entry={entry} key={id} />;
       return null;
     })}
   </section>;

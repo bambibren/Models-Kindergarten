@@ -3,11 +3,11 @@ import { Check, ChevronDown, CircleAlert, FilePenLine, FileSearch, LoaderCircle,
 import type { ToolCallContent } from "@agentclientprotocol/sdk";
 import type { ToolCallEntry } from "../../chat/chat-types.js";
 import { useAutoDisclosure, type ActivityPhase } from "../../hooks/use-auto-disclosure.js";
-import { ContentRenderer, type ArtifactNavigation } from "../chat/ContentRenderer.js";
+import { ContentRenderer } from "../chat/ContentRenderer.js";
 import { formatTokenCount } from "../tokens/token-format.js";
 
 /** 渲染「ToolItem」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-export function ToolItem({ entry, artifactNavigation }: { entry: ToolCallEntry; artifactNavigation?: ArtifactNavigation | undefined }) {
+export function ToolItem({ entry }: { entry: ToolCallEntry }) {
   const phase = toolPhase(entry.status);
   const disclosure = useAutoDisclosure(phase);
   const artifacts = entry.content.flatMap(/** 执行「artifacts」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
@@ -27,15 +27,13 @@ export function ToolItem({ entry, artifactNavigation }: { entry: ToolCallEntry; 
     </Collapsible.Trigger>
     {artifacts.length > 0 && <div className="tool-artifact-actions">
       {artifacts.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(artifact) => artifactNavigation
-        ? <a href={artifactNavigation.href(artifact.uri.slice("artifact://".length))} key={artifact.uri} rel="noreferrer" target="_blank">打开 {artifact.title ?? artifact.name}</a>
-        : <button key={artifact.uri} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
+(artifact) => <button key={artifact.uri} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
 () => openArtifact(artifact.uri)}>预览 {artifact.title ?? artifact.name}</button>)}
     </div>}
     <Collapsible.Content className="activity-content tool-detail">
       {entry.rawInput !== undefined && <Detail label="输入"><JsonValue value={entry.rawInput} /></Detail>}
       {entry.content.map(/** 将当前元素转换为目标投影，并保持集合顺序与一一对应关系。 */
-(item, index) => <ToolContent artifactNavigation={artifactNavigation} item={item} key={`${entry.toolCallId}:${index}`} />)}
+(item, index) => <ToolContent item={item} key={`${entry.toolCallId}:${index}`} />)}
       {entry.rawOutput !== undefined && <Detail label="输出"><JsonValue value={entry.rawOutput} /></Detail>}
     </Collapsible.Content>
   </Collapsible.Root>;
@@ -49,8 +47,8 @@ function openArtifact(uri: string): void {
 /** 渲染「Detail」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 function Detail({ label, children }: { label: string; children: React.ReactNode }) { return <section className="tool-section"><span>{label}</span>{children}</section>; }
 /** 渲染「ToolContent」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-function ToolContent({ item, artifactNavigation }: { item: ToolCallContent; artifactNavigation?: ArtifactNavigation | undefined }) {
-  if (item.type === "content") return <ContentRenderer artifactNavigation={artifactNavigation} content={[item.content]} />;
+function ToolContent({ item }: { item: ToolCallContent }) {
+  if (item.type === "content") return <ContentRenderer content={[item.content]} />;
   if (item.type === "diff") return <section className="tool-section"><span>文件变更 · {item.path}</span><pre className="diff-view">{item.newText}</pre></section>;
   return <p className="terminal-reference">终端：{item.terminalId}</p>;
 }
