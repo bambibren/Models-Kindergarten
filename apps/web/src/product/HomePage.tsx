@@ -181,8 +181,8 @@ export function HomeCapabilities({ onOpenExperiment, onSelectPptx, onSelectWebsi
   experimentsEnabled?: boolean;
 }) {
   return <div className="product-capability-cards">
-    <button type="button" onClick={onSelectWebsite}><Code2 size={17} /><span><strong>网站开发</strong><small>显式安装网页设计 Skills 后生成 HTML</small></span></button>
-    <button type="button" onClick={onSelectPptx}><Presentation size={17} /><span><strong>PPT 制作</strong><small>使用 PPTX Skill 生成可预览演示文稿</small></span></button>
+    <button type="button" onClick={onSelectWebsite}><Code2 size={17} /><span><strong>网站开发</strong><small>使用 网页设计 SKILL 生成 漂亮的网页</small></span></button>
+    <button type="button" onClick={onSelectPptx}><Presentation size={17} /><span><strong>PPT 制作</strong><small>使用 PPTX Skill 设计并生成 PPT演示文稿</small></span></button>
     {experimentsEnabled
       ? <a href="/context-lab" onClick={onOpenExperiment ? (event) => { event.preventDefault(); onOpenExperiment(); } : undefined}><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>比较 2–3 种真实配置</small></span></a>
       : <button aria-label="模型上下文实验（功能调研中）" disabled type="button"><FlaskConical size={17} /><span><strong>模型上下文实验</strong><small>功能调研中</small></span></button>}

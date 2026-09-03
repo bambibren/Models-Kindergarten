@@ -93,9 +93,9 @@ function submit(event: FormEvent) {
         <p>从一个具体任务开始，生成 HTML 或 PPTX 产物并继续复用。</p>
         <div className="mk-model-capabilities" aria-label="学习方向">
           <button className={websiteRequest ? "active" : ""} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-() => setPrompt(prompts.site)}><Code2 size={16} /><span><strong>网站开发</strong><small>显式安装网页设计 Skills 后生成 HTML</small></span></button>
+() => setPrompt(prompts.site)}><Code2 size={16} /><span><strong>网站开发</strong><small>使用 网页设计 SKILL 生成 漂亮的网页</small></span></button>
           <button type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */
-() => setPrompt(prompts.pptx)}><Presentation size={16} /><span><strong>PPT 制作</strong><small>使用 PPTX Skill 生成可预览演示文稿</small></span></button>
+() => setPrompt(prompts.pptx)}><Presentation size={16} /><span><strong>PPT 制作</strong><small>使用 PPTX Skill 设计并生成 PPT演示文稿</small></span></button>
           {/* 上下文实验保留实现；功能调研期间只展示状态，不开放入口。 */}
           <button aria-label="模型上下文实验（功能调研中）" disabled type="button"><FlaskConical size={16} /><span><strong>模型上下文实验</strong><small>功能调研中</small></span></button>
         </div>
