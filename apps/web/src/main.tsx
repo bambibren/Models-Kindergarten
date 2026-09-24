@@ -9,6 +9,7 @@ import { ContextLabPage } from "./product/ContextLabPage.js";
 import { McpPage } from "./product/McpPage.js";
 import { MePage } from "./product/MePage.js";
 import { ArtifactDetailPage } from "./product/ArtifactDetailPage.js";
+import { PublicArtifactPage } from "./product/PublicArtifactPage.js";
 import { ModelAdmissionPage } from "./product/ModelAdmissionPage.js";
 import { ModelDetailPage } from "./product/ModelDetailPage.js";
 import { ModelScoreGroupPage } from "./product/ModelScoreGroupPage.js";
@@ -50,6 +51,8 @@ const application = route();
 function route() {
   const path = normalize(location.pathname);
   if (path === "/login") return <LoginPage />;
+  const publicArtifact = path.match(/^\/artifacts\/([^/]+)$/)?.[1];
+  if (publicArtifact) return <PublicArtifactPage artifactId={decodeURIComponent(publicArtifact)} />;
   return <AuthGate>{productRoute(path)}</AuthGate>;
 }
 
@@ -64,7 +67,7 @@ function productRoute(path: string) {
   if (path === "/context-lab") return <ContextLabPage />;
   if (path === "/skill-market") return <SkillMarketPage />;
   if (path === "/me") return <MePage />;
-  const artifact = path.match(/^\/artifacts\/([^/]+)$/)?.[1];
+  const artifact = path.match(/^\/me\/artifacts\/([^/]+)$/)?.[1];
   if (artifact) return <ArtifactDetailPage artifactId={decodeURIComponent(artifact)} />;
   if (path === "/models/new") return <ModelAdmissionPage />;
   const modelScore = path.match(/^\/models\/([^/]+)\/scores\/([^/]+)$/);

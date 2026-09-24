@@ -5,6 +5,7 @@ import type { AgentApp } from "@agentclientprotocol/sdk";
 import { Duplex, Readable } from "node:stream";
 import type { ControlApi } from "./control-api.js";
 import { PRODUCT_CONFIG, type Principal } from "@kindergarten/contracts";
+import { isPublicArtifactReadRequest } from "./public-artifact-request.js";
 
 const MAX_ACP_INCOMING_PAYLOAD_BYTES = 1024 * 1024;
 
@@ -187,12 +188,14 @@ async close(): Promise<void> {
   }
 }
 
+/** 最外层只放行明确列举的认证端点、签名读取和公开 Artifact GET。 */
 function isPublicAuthenticationRequest(request: Request): boolean {
   const path = new URL(request.url).pathname;
   return path === "/api/control/v1/auth/login" ||
     path === "/api/control/v1/auth/session" ||
     path === "/api/control/v1/auth/logout" ||
-    /^\/api\/control\/v1\/onlyoffice\/artifacts\/[^/]+\/raw$/u.test(path);
+    /^\/api\/control\/v1\/onlyoffice\/artifacts\/[^/]+\/raw$/u.test(path) ||
+    isPublicArtifactReadRequest(request);
 }
 
 function authenticationRequiredResponse(): Response {

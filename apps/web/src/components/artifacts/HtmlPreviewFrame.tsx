@@ -2,6 +2,7 @@
 export function HtmlPreviewFrame({ html, csp, title }: { html: string; csp?: string; title: string }) {
   return <iframe
     referrerPolicy="no-referrer"
+    sandbox="allow-downloads allow-scripts"
     srcDoc={buildHtmlPreviewDocument(html, csp)}
     title={title}
   />;

@@ -4,6 +4,7 @@ import { ControlRouter } from "./control-router.js";
 import { localPrincipal } from "./local-principal.js";
 import { OriginPolicy } from "./origin-policy.js";
 import { PRODUCT_CONFIG, type Principal } from "@kindergarten/contracts";
+import { isPublicArtifactReadRequest } from "./public-artifact-request.js";
 
 /** 描述「ControlApiOptions」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface ControlApiOptions {
@@ -56,7 +57,7 @@ async fetch(request: Request): Promise<Response | undefined> {
         }
         return problemResponse(new ApiProblemError(404, "NOT_FOUND", "Control API 路由不存在", false), requestId, cors(origin));
       }
-      const principal = isPublicControlPath(path, this.options.publicPaths)
+      const principal = isPublicControlRequest(request, path, this.options.publicPaths)
         ? localPrincipal
         : this.options.resolvePrincipal
           ? await this.options.resolvePrincipal(request)
@@ -136,10 +137,11 @@ private preflight(path: string, request: Request, requestId: string): Response {
   }
 }
 
-/** 识别无需登录 Cookie、改由路由自身票据完成认证的 Control API 请求。 */
-function isPublicControlPath(path: string, exactPaths: string[] | undefined): boolean {
+/** 识别无需登录 Cookie 的认证端点、签名读取和 active Artifact 公开只读端点。 */
+function isPublicControlRequest(request: Request, path: string, exactPaths: string[] | undefined): boolean {
   return Boolean(exactPaths?.includes(path)) ||
-    /^\/onlyoffice\/artifacts\/[^/]+\/raw$/u.test(path);
+    /^\/onlyoffice\/artifacts\/[^/]+\/raw$/u.test(path) ||
+    isPublicArtifactReadRequest(request);
 }
 
 /** 读取「readJson」所需数据，并遵守作用域、分页与容量边界。 */

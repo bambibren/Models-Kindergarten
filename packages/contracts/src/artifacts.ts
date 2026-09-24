@@ -70,18 +70,39 @@ export interface ArtifactListResponse {
   items: ArtifactRecord[];
 }
 
+/** 描述「ArtifactPreviewContent」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
+export type ArtifactPreviewContent =
+  | { kind: "markdown"; markdown: string }
+  | { kind: "static_html"; html: string; csp: string }
+  | { kind: "text"; text: string }
+  | { kind: "image"; contentUrl: string }
+  | { kind: "pdf"; contentUrl: string }
+  | { kind: "pptx"; contentUrl: string }
+  | { kind: "unsupported"; contentUrl: string };
+
 /** 描述「ArtifactPreviewResponse」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export type ArtifactPreviewResponse = {
   artifact: ArtifactRecord;
-  content:
-    | { kind: "markdown"; markdown: string }
-    | { kind: "static_html"; html: string; csp: string }
-    | { kind: "text"; text: string }
-    | { kind: "image"; contentUrl: string }
-    | { kind: "pdf"; contentUrl: string }
-    | { kind: "pptx"; contentUrl: string }
-    | { kind: "unsupported"; contentUrl: string };
+  content: ArtifactPreviewContent;
 };
+
+/** 匿名预览只暴露渲染所需字段，不泄露 owner、Session、哈希和修订历史。 */
+export interface PublicArtifactView {
+  artifactId: string;
+  displayName: string;
+  kind: ArtifactKind;
+  version: number;
+  primary: {
+    byteLength: number;
+    mimeType: string;
+  };
+}
+
+/** 描述「PublicArtifactPreviewResponse」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
+export interface PublicArtifactPreviewResponse {
+  artifact: PublicArtifactView;
+  content: ArtifactPreviewContent;
+}
 
 /** 描述「PptxPlaybackResponse」跨模块数据合同，调用方应按字段语义而非实现细节使用。 */
 export interface PptxPlaybackResponse {

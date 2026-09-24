@@ -4,11 +4,13 @@ import type { Readable } from "node:stream";
 import type {
   ArtifactBlobRef,
   ArtifactMention,
+  ArtifactPreviewContent,
   ArtifactPreviewResponse,
   ArtifactRecord,
   ArtifactRevision,
   ArtifactState,
   HtmlBundleManifest,
+  PublicArtifactPreviewResponse,
 } from "@kindergarten/contracts";
 import { makeArtifactUri, PRODUCT_CONFIG } from "@kindergarten/contracts";
 import { ApiProblemError } from "../server/api-problem.js";
@@ -81,6 +83,15 @@ async get(id: string, ownerId: string): Promise<ArtifactRecord> {
     const artifact = await this.repository.get(id);
     if (!artifact || artifact.ownerId !== ownerId) {
       throw new ApiProblemError(404, "ARTIFACT_FORBIDDEN", "Artifact 不存在或无权访问", false);
+    }
+    return artifact;
+  }
+
+  /** 公开链接只读取 active Artifact；缺失与已归档统一返回 404，避免暴露资源状态。 */
+  async getPublic(id: string): Promise<ArtifactRecord> {
+    const artifact = await this.repository.get(id);
+    if (!artifact || artifact.state !== "active") {
+      throw new ApiProblemError(404, "ARTIFACT_FORBIDDEN", "Artifact 不存在或已归档", false);
     }
     return artifact;
   }
@@ -206,12 +217,22 @@ async content(id: string, ownerId: string): Promise<{ artifact: ArtifactRecord; 
   }
 
   /** HTTP 原始内容下载使用校验流，避免先分配完整 Blob Buffer。 */
-  async contentStream(id: string, ownerId: string): Promise<{
+async contentStream(id: string, ownerId: string): Promise<{
     artifact: ArtifactRecord;
     stream: Readable;
     byteLength: number;
   }> {
     const artifact = await this.get(id, ownerId);
+    return { artifact, stream: this.blobs.stream(artifact.primary), byteLength: artifact.primary.byteLength };
+  }
+
+  /** 匿名原始内容读取不接受 ownerId，只承认 active 状态和 opaque Artifact ID。 */
+  async publicContentStream(id: string): Promise<{
+    artifact: ArtifactRecord;
+    stream: Readable;
+    byteLength: number;
+  }> {
+    const artifact = await this.getPublic(id);
     return { artifact, stream: this.blobs.stream(artifact.primary), byteLength: artifact.primary.byteLength };
   }
 
@@ -238,6 +259,28 @@ async ([path, ref]) => ({ path, bytes: await this.blobs.read(ref) })));
     fileName: string;
   }> {
     const artifact = await this.get(id, ownerId);
+    return this.downloadArtifactStream(artifact);
+  }
+
+  /** 匿名下载仍复用相同 Blob/ZIP 完整性校验，但只允许 active Artifact。 */
+  async publicDownloadStream(id: string): Promise<{
+    artifact: ArtifactRecord;
+    stream: Readable;
+    byteLength: number;
+    mimeType: string;
+    fileName: string;
+  }> {
+    return this.downloadArtifactStream(await this.getPublic(id));
+  }
+
+  /** owner 与匿名入口在完成各自门禁后，共用同一下载流构造逻辑。 */
+  private downloadArtifactStream(artifact: ArtifactRecord): {
+    artifact: ArtifactRecord;
+    stream: Readable;
+    byteLength: number;
+    mimeType: string;
+    fileName: string;
+  } {
     if (artifact.kind === "file" || !artifact.manifest) {
       return {
         artifact,
@@ -282,30 +325,62 @@ async bundleContent(id: string, path: string, ownerId: string): Promise<{ artifa
     return { artifact, ref, stream: this.blobs.stream(ref) };
   }
 
+  /** 匿名 Bundle 子资源读取与入口文件共享 active 状态门禁。 */
+  async publicBundleContentStream(id: string, path: string): Promise<{
+    artifact: ArtifactRecord;
+    ref: ArtifactBlobRef;
+    stream: Readable;
+  }> {
+    const artifact = await this.getPublic(id);
+    const ref = bundleRef(artifact, path);
+    return { artifact, ref, stream: this.blobs.stream(ref) };
+  }
+
   /** 执行「preview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 async preview(id: string, ownerId: string, publicBase = "/api/control/v1"): Promise<ArtifactPreviewResponse> {
     const artifact = await this.get(id, ownerId);
+    return { artifact, content: await this.previewContent(artifact, publicBase) };
+  }
+
+  /** 匿名预览返回独立脱敏合同，避免内部 ArtifactRecord 漂到公开边界。 */
+  async publicPreview(id: string, publicBase = "/api/control/v1/public"): Promise<PublicArtifactPreviewResponse> {
+    const artifact = await this.getPublic(id);
+    return {
+      artifact: {
+        artifactId: artifact.artifactId,
+        displayName: artifact.displayName,
+        kind: artifact.kind,
+        version: artifact.version ?? 1,
+        primary: {
+          byteLength: artifact.primary.byteLength,
+          mimeType: artifact.primary.mimeType,
+        },
+      },
+      content: await this.previewContent(artifact, publicBase),
+    };
+  }
+
+  /** 预览渲染不做授权决策，只消费已经通过 owner 或公开状态门禁的记录。 */
+  private async previewContent(artifact: ArtifactRecord, publicBase: string): Promise<ArtifactPreviewContent> {
+    const id = artifact.artifactId;
     const contentUrl = `${publicBase}/artifacts/${encodeURIComponent(id)}/raw`;
     const kind = previewKind(artifact.displayName, artifact.primary.mimeType);
     // 二进制预览只返回 URL；浏览器是否读取由格式与大小策略决定。
-    if (kind === "image" || kind === "pdf" || kind === "pptx") return { artifact, content: { kind, contentUrl } };
-    if (kind === "unsupported") return { artifact, content: { kind, contentUrl } };
+    if (kind === "image" || kind === "pdf" || kind === "pptx") return { kind, contentUrl };
+    if (kind === "unsupported") return { kind, contentUrl };
     const bytes = await this.blobs.read(artifact.primary);
     if (artifact.kind === "html_bundle") {
       const base = `${publicBase}/artifacts/${encodeURIComponent(id)}/bundle/`;
       return {
-        artifact,
-        content: {
-          kind: "static_html",
-          html: injectBase(bytes.toString("utf8"), base),
-          csp: HTML_BUNDLE_CSP,
-        },
+        kind: "static_html",
+        html: injectBase(bytes.toString("utf8"), base),
+        csp: HTML_BUNDLE_CSP,
       };
     }
-    if (kind === "markdown") return { artifact, content: { kind, markdown: previewText(bytes) } };
-    if (kind === "text") return { artifact, content: { kind, text: previewText(bytes) } };
-    if (kind === "static_html") return { artifact, content: { kind, html: bytes.toString("utf8"), csp: HTML_BUNDLE_CSP } };
-    return { artifact, content: { kind: "unsupported", contentUrl } };
+    if (kind === "markdown") return { kind, markdown: previewText(bytes) };
+    if (kind === "text") return { kind, text: previewText(bytes) };
+    if (kind === "static_html") return { kind, html: bytes.toString("utf8"), csp: HTML_BUNDLE_CSP };
+    return { kind: "unsupported", contentUrl };
   }
 
   /** 更新「setState」对应状态，并保持写入顺序、原子性与容量约束。 */

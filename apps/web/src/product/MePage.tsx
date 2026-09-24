@@ -140,7 +140,7 @@ async function setState(id: string, action: "archive" | "restore") {
 ({ artifact: item, sessionTitle }) => {
     const label = artifactListLabel(item.displayName, item.sourceSessionId, sessionTitle, item.version ?? 1);
     return <div className="product-resource-row-wrap artifact-resource-row" key={item.artifactId}>
-    <a className="product-resource-row" href={`/artifacts/${encodeURIComponent(item.artifactId)}`}><FileBox size={15} /><span><strong title={label.fullTitle}>{label.title}</strong><small>{label.sessionRef} · {item.kind === "html_bundle" ? "HTML Bundle" : item.primary.mimeType} · {formatBytes(item.primary.byteLength)} · Artifact #{item.artifactId.slice(-8)}</small></span><em>{item.state === "active" ? "可用" : "已归档"}</em><ExternalLink size={13} /></a>
+    <a className="product-resource-row" href={`/me/artifacts/${encodeURIComponent(item.artifactId)}`}><FileBox size={15} /><span><strong title={label.fullTitle}>{label.title}</strong><small>{label.sessionRef} · {item.kind === "html_bundle" ? "HTML Bundle" : item.primary.mimeType} · {formatBytes(item.primary.byteLength)} · Artifact #{item.artifactId.slice(-8)}</small></span><em>{item.state === "active" ? "可用" : "已归档"}</em><ExternalLink size={13} /></a>
     <span className="artifact-resource-actions">
       <a aria-label={`下载 ${item.displayName}`} href={controlApi.artifactContentUrl(item.artifactId)} title="下载"><Download size={13} /></a>
       <button aria-label={`${item.state === "active" ? "归档" : "恢复"} ${item.displayName}`} title={item.state === "active" ? "归档" : "恢复"} type="button" onClick={/** 处理「onClick」事件，校验归属后再推进状态且避免重复提交。 */

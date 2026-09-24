@@ -218,6 +218,7 @@ async () => undefined,
       forwardedUrl = url.toString();
       return new Response("pptx-content");
     });
+    controlApi.router.register("GET", "/public/artifacts/:artifactId/preview", () => ({ public: true }));
     let serverAuthenticationCalls = 0;
     server = new RemoteServer(agent, {}, controlApi, undefined, { server: true }, {
       resolve: async () => {
@@ -237,9 +238,22 @@ async () => undefined,
     expect(serverAuthenticationCalls).toBe(0);
     expect(controlAuthenticationCalls).toBe(0);
 
+    const publicArtifact = await fetch(`${baseUrl}/api/control/v1/public/artifacts/artifact-a/preview`);
+    expect(publicArtifact.status).toBe(200);
+    expect(await publicArtifact.json()).toMatchObject({ data: { public: true } });
+    expect(serverAuthenticationCalls).toBe(0);
+    expect(controlAuthenticationCalls).toBe(0);
+
+    const publicWrite = await fetch(`${baseUrl}/api/control/v1/public/artifacts/artifact-a/preview`, {
+      method: "POST",
+    });
+    expect(publicWrite.status).toBe(401);
+    expect(serverAuthenticationCalls).toBe(1);
+    expect(controlAuthenticationCalls).toBe(0);
+
     const protectedArtifact = await fetch(`${baseUrl}/api/control/v1/artifacts/artifact-a/raw`);
     expect(protectedArtifact.status).toBe(401);
-    expect(serverAuthenticationCalls).toBe(1);
+    expect(serverAuthenticationCalls).toBe(2);
     expect(controlAuthenticationCalls).toBe(0);
   });
 

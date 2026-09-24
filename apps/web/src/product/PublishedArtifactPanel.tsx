@@ -5,6 +5,7 @@ import { HtmlPreviewFrame } from "../components/artifacts/HtmlPreviewFrame.js";
 import { PptxPreview } from "../components/artifacts/PptxPreview.js";
 import { ErrorState, LoadingState } from "./LoadState.js";
 import { useResource } from "./use-resource.js";
+import type { ArtifactPreviewResponse, PptxPlaybackResponse, PublicArtifactPreviewResponse } from "@kindergarten/contracts";
 
 /** 渲染「PublishedArtifactPanel」界面投影，所有业务事实仍由上层状态与服务端提供。 */
 export function PublishedArtifactPanel({ artifactId, onClose }: { artifactId: string; onClose: () => void }) {
@@ -27,7 +28,13 @@ export function PublishedArtifactPanel({ artifactId, onClose }: { artifactId: st
 }
 
 /** 渲染「PublishedPreview」界面投影，所有业务事实仍由上层状态与服务端提供。 */
-export function PublishedPreview({ value }: { value: Awaited<ReturnType<typeof controlApi.artifactPreview>> }) {
+export function PublishedPreview({
+  value,
+  loadPptxPlayback,
+}: {
+  value: ArtifactPreviewResponse | PublicArtifactPreviewResponse;
+  loadPptxPlayback?: (artifactId: string) => Promise<PptxPlaybackResponse>;
+}) {
   if (value.content.kind === "static_html") return <HtmlPreviewFrame csp={value.content.csp} html={value.content.html} title={value.artifact.displayName} />;
   if (value.content.kind === "markdown" || value.content.kind === "text") return <pre className="artifact-text">{value.content.kind === "markdown" ? value.content.markdown : value.content.text}</pre>;
   if (value.content.kind === "image") return <img alt={value.artifact.displayName} src={value.content.contentUrl} />;
@@ -37,7 +44,7 @@ export function PublishedPreview({ value }: { value: Awaited<ReturnType<typeof c
     contentUrl={value.content.contentUrl}
     title={value.artifact.displayName}
     loadPlayback={/** 读取「loadPlayback」所需数据，并遵守作用域、分页与容量边界。 */
-() => controlApi.artifactPptxPlayback(value.artifact.artifactId)}
+() => (loadPptxPlayback ?? controlApi.artifactPptxPlayback)(value.artifact.artifactId)}
   />;
   return <div className="product-state"><FileText size={20} /><strong>该格式仅支持下载</strong><a href={value.content.contentUrl}>下载 Artifact</a></div>;
 }

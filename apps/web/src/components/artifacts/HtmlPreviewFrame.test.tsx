@@ -4,7 +4,7 @@ import { buildHtmlPreviewDocument, HtmlPreviewFrame } from "./HtmlPreviewFrame.j
 
 describe("HtmlPreviewFrame", /** 组织这一组相关测试，统一建立场景边界并验证公开行为。 */
 () => {
-  it("使用普通 srcDoc 预览，不增加 sandbox 限制", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
+  it("允许交互脚本和下载，但不允许产物继承应用同源权限", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 () => {
     const html = renderToStaticMarkup(<HtmlPreviewFrame
       csp="script-src 'unsafe-inline'"
@@ -12,7 +12,8 @@ describe("HtmlPreviewFrame", /** 组织这一组相关测试，统一建立场�
       title="交互预览"
     />);
 
-    expect(html).not.toContain("sandbox=");
+    expect(html).toContain('sandbox="allow-downloads allow-scripts"');
+    expect(html).not.toContain("allow-same-origin");
     expect(html).toContain('referrerPolicy="no-referrer"');
     expect(html).toContain("document.body.dataset.executed");
   });

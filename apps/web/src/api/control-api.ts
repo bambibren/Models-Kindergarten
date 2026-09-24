@@ -21,6 +21,7 @@ import type {
   ConcreteReasoningProfile,
   ArtifactListResponse,
   ArtifactPreviewResponse,
+  PublicArtifactPreviewResponse,
   PptxPlaybackResponse,
   ArtifactRecord,
   ArtifactMention,
@@ -223,10 +224,16 @@ export const controlApi = {
 (id: string) => get<ArtifactRecord>(`/artifacts/${encodeURIComponent(id)}`),
   artifactPreview: /** 执行「artifactPreview」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (id: string) => get<ArtifactPreviewResponse>(`/artifacts/${encodeURIComponent(id)}/preview`),
+  publicArtifactPreview: /** 公开链接不携带登录身份，只读取 active Artifact 的脱敏预览。 */
+(id: string) => get<PublicArtifactPreviewResponse>(`/public/artifacts/${encodeURIComponent(id)}/preview`),
   artifactPptxPlayback: /** 执行「artifactPptxPlayback」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (id: string) => get<PptxPlaybackResponse>(`/artifacts/${encodeURIComponent(id)}/pptx-playback`),
+  publicArtifactPptxPlayback: /** 匿名 PPTX 播放仍由 Remote 签发短时只读票据。 */
+(id: string) => get<PptxPlaybackResponse>(`/public/artifacts/${encodeURIComponent(id)}/pptx-playback`),
   artifactContentUrl: /** 执行「artifactContentUrl」对应的业务步骤；只操作当前作用域持有的状态，并把失败交由调用链统一处理。 */
 (id: string) => `${CONTROL_URL}/artifacts/${encodeURIComponent(id)}/content`,
+  publicArtifactContentUrl: /** 构造任何持有链接者都可使用的 active Artifact 下载地址。 */
+(id: string) => `${CONTROL_URL}/public/artifacts/${encodeURIComponent(id)}/content`,
   setArtifactState: /** 更新「setArtifactState」对应状态，并保持写入顺序、原子性与容量约束。 */
 (id: string, action: "archive" | "restore") => request<ArtifactRecord>(`/artifacts/${encodeURIComponent(id)}/${action}`, "POST", {}),
 };

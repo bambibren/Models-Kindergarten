@@ -134,6 +134,34 @@ async () => {
       .rejects.toThrow();
   });
 
+  it("公开读取只接受 active Artifact，并返回脱敏预览合同", async () => {
+    const fixture = await setup();
+    const source = await workspace(fixture.workspaces, "session-public");
+    await source.writeText("public.md", "# public artifact");
+    const artifact = await fixture.service.publishFile(input("session-public", "turn-public", "op-public", "public.md"));
+
+    expect((await fixture.service.getPublic(artifact.artifactId)).ownerId).toBe("local-admin");
+    const preview = await fixture.service.publicPreview(artifact.artifactId);
+    expect(preview.artifact).toEqual({
+      artifactId: artifact.artifactId,
+      displayName: "public.md",
+      kind: "file",
+      version: 1,
+      primary: {
+        byteLength: artifact.primary.byteLength,
+        mimeType: "text/markdown",
+      },
+    });
+    expect(preview.artifact).not.toHaveProperty("ownerId");
+    expect(preview.artifact).not.toHaveProperty("sourceSessionId");
+    expect(preview.artifact.primary).not.toHaveProperty("sha256");
+
+    await fixture.service.setState(artifact.artifactId, "local-admin", "archived");
+    await expect(fixture.service.getPublic(artifact.artifactId))
+      .rejects.toMatchObject({ status: 404, code: "ARTIFACT_FORBIDDEN" });
+    expect((await fixture.service.get(artifact.artifactId, "local-admin")).state).toBe("archived");
+  });
+
   it("HTML Bundle 保留 JavaScript，并通过 base 地址解析相对资源", /** 执行当前测试场景并断言可观察结果，不依赖其它用例的执行顺序。 */
 async () => {
     const fixture = await setup();
