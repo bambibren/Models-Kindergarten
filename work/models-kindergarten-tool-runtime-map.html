@@ -1,0 +1,213 @@
+<div id="mk-tool-runtime-map" aria-label="模型幼儿园 Tool Runtime 三层调用图">
+  <style>
+    #mk-tool-runtime-map {
+      color: var(--foreground);
+      font-size: var(--font-size-base);
+      display: grid;
+      gap: 18px;
+    }
+    #mk-tool-runtime-map .mk-flow {
+      display: grid;
+      grid-template-columns: minmax(120px, .8fr) 28px minmax(180px, 1.15fr) 28px minmax(220px, 1.45fr);
+      align-items: stretch;
+      gap: 8px;
+    }
+    #mk-tool-runtime-map .mk-node {
+      background: color-mix(in srgb, var(--viz-series-1) 9%, transparent);
+      padding: 12px 14px;
+      min-width: 0;
+    }
+    #mk-tool-runtime-map .mk-node strong,
+    #mk-tool-runtime-map .mk-node code {
+      display: block;
+      font-weight: 500;
+      overflow-wrap: anywhere;
+    }
+    #mk-tool-runtime-map .mk-node span {
+      display: block;
+      color: var(--muted-foreground);
+      margin-top: 4px;
+    }
+    #mk-tool-runtime-map .mk-arrow {
+      display: grid;
+      place-items: center;
+      color: var(--muted-foreground);
+      font-size: 20px;
+    }
+    #mk-tool-runtime-map .mk-common {
+      grid-template-columns: minmax(120px, .75fr) 28px minmax(190px, 1fr) 28px minmax(220px, 1.2fr) 28px minmax(190px, 1fr);
+    }
+    #mk-tool-runtime-map .mk-common .mk-node {
+      background: color-mix(in srgb, var(--viz-series-2) 11%, transparent);
+    }
+    #mk-tool-runtime-map .mk-branches {
+      display: grid;
+      gap: 8px;
+    }
+    #mk-tool-runtime-map .mk-git-detail {
+      margin: 0 0 10px calc(20.5% + 36px);
+      padding: 12px 14px;
+      background: color-mix(in srgb, var(--viz-series-3) 8%, transparent);
+      display: grid;
+      gap: 10px;
+    }
+    #mk-tool-runtime-map .mk-git-group + .mk-git-group {
+      margin-top: 4px;
+    }
+    #mk-tool-runtime-map .mk-git-group > strong {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    #mk-tool-runtime-map .mk-git-caller {
+      color: var(--muted-foreground);
+      margin-bottom: 6px;
+    }
+    #mk-tool-runtime-map .mk-git-call {
+      display: grid;
+      grid-template-columns: minmax(150px, .8fr) 18px minmax(250px, 1.35fr) 18px minmax(145px, .75fr);
+      align-items: center;
+      gap: 6px;
+      padding: 6px 0;
+    }
+    #mk-tool-runtime-map .mk-git-call + .mk-git-call {
+      border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+    }
+    #mk-tool-runtime-map .mk-git-call code {
+      overflow-wrap: anywhere;
+    }
+    #mk-tool-runtime-map .mk-git-call .mk-arrow {
+      font-size: 15px;
+      min-height: 0;
+    }
+    #mk-tool-runtime-map .mk-git-footnote {
+      color: var(--muted-foreground);
+    }
+    #mk-tool-runtime-map .mk-note {
+      color: var(--muted-foreground);
+    }
+    @media (max-width: 620px) {
+      #mk-tool-runtime-map .mk-flow,
+      #mk-tool-runtime-map .mk-common {
+        grid-template-columns: 1fr;
+      }
+      #mk-tool-runtime-map .mk-arrow {
+        transform: rotate(90deg);
+        min-height: 20px;
+      }
+      #mk-tool-runtime-map .mk-git-detail {
+        margin-left: 0;
+      }
+      #mk-tool-runtime-map .mk-git-call {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+
+  <div class="mk-flow mk-common">
+    <div class="mk-node"><strong>模型 Tool Call</strong><span>名称 + 参数</span></div>
+    <div class="mk-arrow" aria-hidden="true">→</div>
+    <div class="mk-node"><code>ToolRuntime</code><span>权限、并发、状态、结果</span></div>
+    <div class="mk-arrow" aria-hidden="true">→</div>
+    <div class="mk-node"><code>RuntimeCapabilityCatalog</code><span>按 Tool 名称选择 Provider</span></div>
+    <div class="mk-arrow" aria-hidden="true">→</div>
+    <div class="mk-node"><strong>具体 Tool Provider</strong><span>执行对应 Handler</span></div>
+  </div>
+
+  <div class="mk-branches" aria-label="各类工具调用链">
+    <div class="mk-flow">
+      <div class="mk-node"><code>read/write/edit_file</code></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>ToolRegistry + FileSandbox</code><span>共享服务，不是每个 Tool 一个 Manager</span></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>node:fs/promises</code><span>文件系统能力</span></div>
+    </div>
+
+    <div class="mk-flow">
+      <div class="mk-node"><code>web_search / web_fetch</code></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>ToolRegistry + WebAccess</code><span>网络访问服务</span></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>fetch / HTTP</code><span>网络 I/O</span></div>
+    </div>
+
+    <div class="mk-flow">
+      <div class="mk-node"><code>MCP Tool</code></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>McpToolProvider → McpClientManager</code><span>确实存在连接管理器</span></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><strong>MCP Transport</strong><span>HTTP；或 stdio 子进程</span></div>
+    </div>
+
+    <div class="mk-flow">
+      <div class="mk-node"><code>activate_skill / read_skill_resource</code></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>SkillToolProvider → SkillRegistry</code><span>Skill 注册表</span></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>node:fs/promises</code><span>读取已安装 Skill</span></div>
+    </div>
+
+    <div class="mk-flow">
+      <div class="mk-node"><code>ensure_agent_skills</code></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>SkillInstallationService</code><span>维护安装 Job 状态</span></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><strong>GitRepository / fetch + fs</strong><span>GitHub 来源进入下方 Git 流程</span></div>
+    </div>
+
+    <div class="mk-git-detail" aria-label="Skill 安装中的 Git 子进程">
+      <div class="mk-git-group">
+        <strong>发现阶段</strong>
+        <div class="mk-git-caller"><code>SkillDiscovery.discoverGitHub()</code> 依次调用：</div>
+        <div class="mk-git-call">
+          <code>GitRepository.clone()</code><div class="mk-arrow" aria-hidden="true">→</div><code>runGitCommand(["clone", ...])</code><div class="mk-arrow" aria-hidden="true">→</div><code>spawn("git", args)</code>
+        </div>
+        <div class="mk-git-call">
+          <code>repository.resolveCommit()</code><div class="mk-arrow" aria-hidden="true">→</div><code>runGitCommand(["-C", root, "rev-parse", ...])</code><div class="mk-arrow" aria-hidden="true">→</div><code>spawn("git", args)</code>
+        </div>
+        <div class="mk-git-call">
+          <code>repository.listTreePaths()</code><div class="mk-arrow" aria-hidden="true">→</div><code>runGitCommand(["-C", root, "ls-tree", ...])</code><div class="mk-arrow" aria-hidden="true">→</div><code>spawn("git", args)</code>
+        </div>
+      </div>
+
+      <div class="mk-git-group">
+        <strong>安装阶段</strong>
+        <div class="mk-git-caller"><code>SkillInstaller.stageGit()</code> 依次调用：</div>
+        <div class="mk-git-call">
+          <code>GitRepository.clone()</code><div class="mk-arrow" aria-hidden="true">→</div><code>runGitCommand(["clone", ...])</code><div class="mk-arrow" aria-hidden="true">→</div><code>spawn("git", args)</code>
+        </div>
+        <div class="mk-git-call">
+          <code>repository.checkout()</code><div class="mk-arrow" aria-hidden="true">→</div><code>runGitCommand([..., "sparse-checkout", "init", ...])</code><div class="mk-arrow" aria-hidden="true">→</div><code>spawn("git", args)</code>
+        </div>
+        <div class="mk-git-call">
+          <code>repository.checkout()</code><div class="mk-arrow" aria-hidden="true">→</div><code>runGitCommand([..., "sparse-checkout", "set", ...])</code><div class="mk-arrow" aria-hidden="true">→</div><code>spawn("git", args)</code>
+        </div>
+        <div class="mk-git-call">
+          <code>repository.checkout()</code><div class="mk-arrow" aria-hidden="true">→</div><code>runGitCommand([..., "checkout", "--detach", ref])</code><div class="mk-arrow" aria-hidden="true">→</div><code>spawn("git", args)</code>
+        </div>
+        <div class="mk-git-call">
+          <code>repository.currentCommit()</code><div class="mk-arrow" aria-hidden="true">→</div><code>runGitCommand([..., "rev-parse", "HEAD"])</code><div class="mk-arrow" aria-hidden="true">→</div><code>spawn("git", args)</code>
+        </div>
+      </div>
+      <div class="mk-git-footnote"><code>runGitCommand()</code> 是统一的 JS 执行封装；真正启动子进程的是它内部的 <code>node:child_process.spawn("git", args)</code>。</div>
+    </div>
+
+    <div class="mk-flow">
+      <div class="mk-node"><code>publish/read_artifact</code></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>ArtifactToolProvider → ArtifactService</code><span>产物服务</span></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><strong>文件流 + Blob/JSON 存储</strong><span>fs 与 Node Stream</span></div>
+    </div>
+
+    <div class="mk-flow">
+      <div class="mk-node"><code>build_pptx</code></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><code>PptxToolProvider → PptxBuildService</code><span>重型构建服务</span></div>
+      <div class="mk-arrow" aria-hidden="true">→</div>
+      <div class="mk-node"><strong>受沙箱限制的 Node 子进程</strong><span>不是普通 Promise-only Tool</span></div>
+    </div>
+  </div>
+
+  <div class="mk-note">当前 <code>run_command</code> 实现仍保留，但没有暴露给模型；它会经 <code>ProcessSandbox</code> 启动受限子进程。</div>
+</div>
