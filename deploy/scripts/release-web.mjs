@@ -3,6 +3,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveContextExperiments } from "./release-features.mjs";
 import {
   assertManagedSkillBundle,
   assertManagedSkillNames,
@@ -18,7 +19,7 @@ const relevantPaths = [
   "apps/web", "packages/contracts", "packages/evaluation-contract", "packages/runtime-observation",
   "resource/export-static.mjs", "resource/managed-skills.mjs", "resource/server.mjs", "resource/package.json",
   "deploy/Caddyfile", "deploy/images/Dockerfile.web", "deploy/managed-web-skills.json",
-  "deploy/scripts/release-web.mjs",
+  "deploy/scripts/release-web.mjs", "deploy/scripts/release-features.mjs",
 ];
 
 await main();
@@ -53,7 +54,11 @@ async function main() {
     const tag = releaseTag(release);
     if (!tag.startsWith(shortCommit)) throw new Error(`release 必须以当前提交 ${shortCommit} 开头`);
     const image = `${imageRepository}:${tag}`;
-    const contextExperiments = booleanFlag(args, "enable-context-experiments");
+    const baseManifest = JSON.parse(await readFile(baseManifestFile, "utf8"));
+    const contextExperiments = resolveContextExperiments(baseManifest.features?.contextExperiments, {
+      enable: booleanFlag(args, "enable-context-experiments"),
+      disable: booleanFlag(args, "disable-context-experiments"),
+    });
     // 同时发布后端改动时，从同一已提交源码构建 Runtime，避免新 Web 配上旧 API。
     const runtimeImage = buildRuntime ? publishRuntime(source, tag, commit) : undefined;
 
@@ -67,7 +72,7 @@ async function main() {
     const digest = imageDigest(image);
     const pinnedImage = `${imageRepository}@${digest}`;
     await verifyPublishedImage(pinnedImage, expected);
-    const manifest = await makeManifest(baseManifestFile, release, commit, pinnedImage, runtimeImage);
+    const manifest = await makeManifest(baseManifestFile, release, commit, pinnedImage, runtimeImage, contextExperiments);
     const manifestFile = resolve(repoRoot, "deploy/releases", release, "release-manifest.json");
     await mkdir(dirname(manifestFile), { recursive: true });
     await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
@@ -154,7 +159,7 @@ function publishRuntime(source, tag, commit) {
   return pinnedImage;
 }
 
-async function makeManifest(file, release, commit, webImage, runtimeImage) {
+async function makeManifest(file, release, commit, webImage, runtimeImage, contextExperiments) {
   const base = JSON.parse(await readFile(file, "utf8"));
   if (!base || base.schemaVersion !== 1 || !base.images) throw new Error("基础 release manifest 结构无效");
   for (const key of ["runtime", "onlyoffice"]) {
@@ -167,6 +172,7 @@ async function makeManifest(file, release, commit, webImage, runtimeImage) {
     release,
     gitCommit: commit,
     dataCompatibilityVersion: base.dataCompatibilityVersion ?? 1,
+    features: { ...base.features, contextExperiments },
     images: { web: webImage, runtime: runtimeImage ?? base.images.runtime, onlyoffice: base.images.onlyoffice },
   };
 }
