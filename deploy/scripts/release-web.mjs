@@ -11,12 +11,14 @@ import {
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const imageRepository = "ghcr.io/bambibren/models-kindergarten/mk-web";
+const runtimeRepository = "ghcr.io/bambibren/models-kindergarten/mk-runtime";
 const configFile = resolve(repoRoot, "deploy/managed-web-skills.json");
 const relevantPaths = [
   ".dockerignore", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
   "apps/web", "packages/contracts", "packages/evaluation-contract", "packages/runtime-observation",
   "resource/export-static.mjs", "resource/managed-skills.mjs", "resource/server.mjs", "resource/package.json",
   "deploy/Caddyfile", "deploy/images/Dockerfile.web", "deploy/managed-web-skills.json",
+  "deploy/scripts/release-web.mjs",
 ];
 
 await main();
@@ -24,7 +26,8 @@ await main();
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const checkOnly = args.has("check");
-  if (!checkOnly) validateReleaseState();
+  const buildRuntime = booleanFlag(args, "build-runtime");
+  if (!checkOnly) validateReleaseState(buildRuntime);
 
   const expected = await readManagedSkillNames(configFile);
   await validateLocalSkills(expected);
@@ -51,17 +54,20 @@ async function main() {
     if (!tag.startsWith(shortCommit)) throw new Error(`release 必须以当前提交 ${shortCommit} 开头`);
     const image = `${imageRepository}:${tag}`;
     const contextExperiments = booleanFlag(args, "enable-context-experiments");
+    // 同时发布后端改动时，从同一已提交源码构建 Runtime，避免新 Web 配上旧 API。
+    const runtimeImage = buildRuntime ? publishRuntime(source, tag, commit) : undefined;
 
     run("docker", [
       "buildx", "build", "--platform", "linux/amd64",
       "--file", "deploy/images/Dockerfile.web",
       "--build-arg", `VITE_ENABLE_CONTEXT_EXPERIMENTS=${String(contextExperiments)}`,
+      "--label", `org.opencontainers.image.revision=${commit}`,
       "--tag", image, "--provenance=true", "--push", ".",
     ], source);
     const digest = imageDigest(image);
     const pinnedImage = `${imageRepository}@${digest}`;
     await verifyPublishedImage(pinnedImage, expected);
-    const manifest = await makeManifest(baseManifestFile, release, commit, pinnedImage);
+    const manifest = await makeManifest(baseManifestFile, release, commit, pinnedImage, runtimeImage);
     const manifestFile = resolve(repoRoot, "deploy/releases", release, "release-manifest.json");
     await mkdir(dirname(manifestFile), { recursive: true });
     await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
@@ -74,10 +80,13 @@ async function main() {
   }
 }
 
-function validateReleaseState() {
+function validateReleaseState(buildRuntime) {
   const branch = capture("git", ["branch", "--show-current"], repoRoot).trim();
   if (branch !== "main") throw new Error("正式 Web 发布只允许从 main 分支执行");
-  const dirty = capture("git", ["status", "--porcelain", "--untracked-files=no", "--", ...relevantPaths], repoRoot).trim();
+  const paths = buildRuntime
+    ? [...relevantPaths, "apps/remote", "skills/builtin", "deploy/images/Dockerfile.runtime"]
+    : relevantPaths;
+  const dirty = capture("git", ["status", "--porcelain", "--untracked-files=no", "--", ...paths], repoRoot).trim();
   if (dirty) throw new Error(`Web 发布相关文件尚未提交：\n${dirty}`);
   const head = capture("git", ["rev-parse", "HEAD"], repoRoot).trim();
   const remoteMain = capture("git", ["ls-remote", "--exit-code", "origin", "refs/heads/main"], repoRoot).trim().split(/\s+/u)[0];
@@ -123,11 +132,29 @@ async function verifyPublishedImage(image, expected) {
 function imageDigest(image) {
   const output = capture("docker", ["buildx", "imagetools", "inspect", image], repoRoot);
   const digest = output.match(/^Digest:\s+(sha256:[a-f0-9]{64})$/mu)?.[1];
-  if (!digest) throw new Error("无法读取推送后的 Web 镜像摘要");
+  if (!digest) throw new Error(`无法读取推送后的镜像摘要：${image}`);
   return digest;
 }
 
-async function makeManifest(file, release, commit, webImage) {
+/** Runtime 与 Web 共用暂存提交和发布标签，镜像验证失败时不生成 manifest。 */
+function publishRuntime(source, tag, commit) {
+  const image = `${runtimeRepository}:${tag}`;
+  run("docker", [
+    "buildx", "build", "--platform", "linux/amd64",
+    "--file", "deploy/images/Dockerfile.runtime",
+    "--label", `org.opencontainers.image.revision=${commit}`,
+    "--tag", image, "--provenance=true", "--push", ".",
+  ], source);
+  const pinnedImage = `${runtimeRepository}@${imageDigest(image)}`;
+  run("docker", [
+    "run", "--rm", "--pull=always", "--platform", "linux/amd64", "--entrypoint", "node",
+    pinnedImage, "--check", "apps/remote/dist/index.js",
+  ], repoRoot);
+  console.log(`Runtime 镜像发布并验收通过：${pinnedImage}`);
+  return pinnedImage;
+}
+
+async function makeManifest(file, release, commit, webImage, runtimeImage) {
   const base = JSON.parse(await readFile(file, "utf8"));
   if (!base || base.schemaVersion !== 1 || !base.images) throw new Error("基础 release manifest 结构无效");
   for (const key of ["runtime", "onlyoffice"]) {
@@ -140,7 +167,7 @@ async function makeManifest(file, release, commit, webImage) {
     release,
     gitCommit: commit,
     dataCompatibilityVersion: base.dataCompatibilityVersion ?? 1,
-    images: { web: webImage, runtime: base.images.runtime, onlyoffice: base.images.onlyoffice },
+    images: { web: webImage, runtime: runtimeImage ?? base.images.runtime, onlyoffice: base.images.onlyoffice },
   };
 }
 
